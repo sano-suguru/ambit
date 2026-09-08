@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    ignore:
+      # Intentional pin: comparison backend behind
+      # src/checker/backend/legacy-ts.ts (docs/DESIGN.md §3.1, Appendix A.1).
+      # A weekly PR would force a re-justification every week.
+      - dependency-name: typescript
+      # Major tracks the supported Active LTS major (currently 24.x),
+      # not npm's latest tag -- see AGENTS.md Toolchain and
+      # docs/DESIGN.md §12. Minor/patch within 24.x still update
+      # normally.
+      - dependency-name: "@types/node"
+        update-types:
+          - "version-update:semver-major"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
