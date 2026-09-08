@@ -171,10 +171,11 @@ Representative cases where analysis is narrower than the model suggests:
 - **`new X(...)` is invisible.** Constructor calls are not recorded, not even
   as `unknown`, so a `pure` function that does `new PrismaClient()` or
   `new WebSocket(...)` passes today.
-- **Small bundled effect tables.** 25 entries (`fetch` plus Node.js builtins)
-  producing only `network`, `fs_read`, `fs_write`, and `process`. Nothing
-  bundled produces `db_read`, `db_write`, `llm`, or `env` — a `pure` function
-  calling a database driver reports `unknown`, not a violation.
+- **Small bundled effect tables.** 26 entries (`fetch`, `undici`'s `fetch`,
+  and Node.js builtins) producing only `network`, `fs_read`, `fs_write`, and
+  `process`. Nothing bundled produces `db_read`, `db_write`, `llm`, or `env`
+  — a `pure` function calling a database driver reports `unknown`, not a
+  violation.
 - **Import-shape sensitive matching.** `import * as fs from "node:fs"`,
   `import fs from "node:fs"`, and `import { writeFileSync } from "node:fs"`
   are all recognized; a destructured or re-exported binding several hops
