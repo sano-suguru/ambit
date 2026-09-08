@@ -10,6 +10,7 @@ import type {
 } from "../core/index.ts";
 import { effectSetOf, emptyEffectSet, isKnownEffect } from "../core/index.ts";
 import { lookupStubEffect } from "../stubs/node-builtins.ts";
+import { isKnownPureBuiltin } from "../stubs/pure-builtins.ts";
 
 /**
  * Turn a backend's raw extraction into Ambit's own analysis representation
@@ -80,6 +81,20 @@ function toCall(site: CallSite): Call {
       location: site.location,
       reason: site.unresolvedReason ?? "unresolved-symbol",
       qualifiedName: site.calleeQualifiedName,
+    };
+  }
+  if (site.pureBuiltinName) {
+    // A callback passed by reference is never walked, so it can't be
+    // trusted as pure even when the method name itself is allowlisted
+    // (CallSite.callbackByReference's doc comment).
+    if (isKnownPureBuiltin(site.pureBuiltinName) && !site.callbackByReference) {
+      return { kind: "known-pure", location: site.location, qualifiedName: site.pureBuiltinName };
+    }
+    return {
+      kind: "unresolved",
+      location: site.location,
+      reason: site.unresolvedReason ?? "unresolved-symbol",
+      qualifiedName: site.pureBuiltinName,
     };
   }
   return {

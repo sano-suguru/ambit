@@ -34,6 +34,7 @@ export interface CoverageReport {
   readonly callSitesTotal: number;
   readonly callSitesResolved: number;
   readonly callSitesStub: number;
+  readonly callSitesPure: number;
   readonly callSitesUnresolved: number;
   readonly unresolvedByReason: ReadonlyMap<UnresolvedReason, number>;
   readonly topUnresolvedNames: readonly { readonly name: string; readonly count: number }[];
@@ -53,6 +54,7 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
 
   let callSitesResolved = 0;
   let callSitesStub = 0;
+  let callSitesPure = 0;
   let callSitesUnresolved = 0;
   const unresolvedByReason = new Map<UnresolvedReason, number>();
   const nameFrequency = new Map<string, number>();
@@ -63,6 +65,8 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
         callSitesResolved++;
       } else if (call.kind === "stub") {
         callSitesStub++;
+      } else if (call.kind === "known-pure") {
+        callSitesPure++;
       } else {
         callSitesUnresolved++;
         unresolvedByReason.set(call.reason, (unresolvedByReason.get(call.reason) ?? 0) + 1);
@@ -87,9 +91,10 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
     functionsSkipped,
     skippedByKind: skippedFunctions,
     functionUnknownRate,
-    callSitesTotal: callSitesResolved + callSitesStub + callSitesUnresolved,
+    callSitesTotal: callSitesResolved + callSitesStub + callSitesPure + callSitesUnresolved,
     callSitesResolved,
     callSitesStub,
+    callSitesPure,
     callSitesUnresolved,
     unresolvedByReason,
     topUnresolvedNames,

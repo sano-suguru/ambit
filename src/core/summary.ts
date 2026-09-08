@@ -19,6 +19,19 @@ export interface StubCall {
 }
 
 /**
+ * A call matched against the pure-builtins allowlist (`src/stubs/
+ * pure-builtins.ts`) — a default-lib method (e.g. `Set.has`, `Array.map`)
+ * known to have no effect. `qualifiedName` is in that allowlist's own
+ * namespace (`checker.getFullyQualifiedName()` form), a different space from
+ * `StubCall.qualifiedName`'s module-specifier form — never compare the two.
+ */
+export interface KnownPureCall {
+  readonly kind: "known-pure";
+  readonly location: SourceLocation;
+  readonly qualifiedName: string;
+}
+
+/**
  * A call whose target or effects could not be determined (DESIGN.md §4.2
  * rule 6). `qualifiedName` is carried through from a stub-lookup miss (see
  * `summarize.ts`'s `toCall`) so `src/checker/coverage.ts` can report which
@@ -31,7 +44,7 @@ export interface UnresolvedCall {
   readonly qualifiedName?: string;
 }
 
-export type Call = ResolvedCall | StubCall | UnresolvedCall;
+export type Call = ResolvedCall | StubCall | KnownPureCall | UnresolvedCall;
 
 /**
  * Whether a function declared `@effects`, and what.

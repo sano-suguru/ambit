@@ -55,18 +55,33 @@ export type SkippedFunctionKind =
  *
  * `resolvedCallee` is set only for a project-local call. `calleeQualifiedName`
  * is a best-effort textual name (e.g. `"fetch"`, `"fs.readFileSync"`) used by
- * `src/stubs/` to recognize known standard-library/library calls; it carries
- * no meaning on its own and is never treated as a resolved call target.
- * `unresolvedReason` may accompany `calleeQualifiedName` as the reason to
- * fall back to if no stub matches that name (`src/checker/summarize.ts`'s
+ * `src/stubs/node-builtins.ts` to recognize known standard-library/library
+ * calls; it carries no meaning on its own and is never treated as a resolved
+ * call target. `pureBuiltinName` is a separate, checker-derived name
+ * (`checker.getFullyQualifiedName()` form, e.g. `"Set.has"`) set only when
+ * `calleeQualifiedName` could not be produced (a builtin method reached
+ * through a local value, e.g. `set.has(...)`) — it is checked against
+ * `src/stubs/pure-builtins.ts`'s allowlist, a different namespace from
+ * `calleeQualifiedName`'s module-specifier keys; the two must never be
+ * merged or compared. `unresolvedReason` may accompany either name as the
+ * reason to fall back to if no match is found (`src/checker/summarize.ts`'s
  * `toCall`) — the connector layer already knows, from the callee's own
- * declaration, whether a stub miss would mean "unresolved-symbol" or
- * something more specific (e.g. `builtin-method`).
+ * declaration, whether a miss would mean "unresolved-symbol" or something
+ * more specific (e.g. `builtin-method`). `callbackByReference` is set when
+ * one of the call's arguments is a callable passed by reference rather than
+ * written inline (`arr.forEach(handler)`, not `arr.forEach(x => ...)`): an
+ * inline callback's body is walked by `collectCalls` and its effects
+ * attributed to the enclosing function, but a callback passed by reference
+ * is never visited, so `pureBuiltinName` must not be trusted as pure when
+ * this is set (DESIGN.md §4.2 rule 4) — regardless of what
+ * `src/stubs/pure-builtins.ts` says about the method name itself.
  */
 export interface CallSite {
   readonly location: SourceLocation;
   readonly resolvedCallee?: SymbolId;
   readonly calleeQualifiedName?: string;
+  readonly pureBuiltinName?: string;
+  readonly callbackByReference?: true;
   readonly unresolvedReason?: UnresolvedReason;
 }
 

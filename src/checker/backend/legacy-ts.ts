@@ -457,11 +457,44 @@ function classifyCall(
     return { location, calleeQualifiedName: qualifiedName, unresolvedReason: ambientReason };
   }
 
+  // qualifiedNameOf only names a bare identifier or a property access on an
+  // import binding — a builtin method reached through a local value
+  // (`set.has(...)`) has neither, so it falls through to here with no
+  // textual name. The checker can still name the symbol directly; that name
+  // is checked against src/stubs/pure-builtins.ts's allowlist (a separate
+  // namespace — see CallSite.pureBuiltinName), not against calleeQualifiedName.
+  if (ambientReason === "builtin-method" && symbol) {
+    const pureBuiltinName = checker.getFullyQualifiedName(symbol);
+    if (pureBuiltinName) {
+      return {
+        location,
+        pureBuiltinName,
+        unresolvedReason: ambientReason,
+        callbackByReference: hasOpaqueCallableArgument(node, checker) || undefined,
+      };
+    }
+  }
+
   if (isAnyTyped) {
     return { location, unresolvedReason: "any-typed" };
   }
 
   return { location, unresolvedReason: ambientReason ?? "unresolved-symbol" };
+}
+
+/**
+ * True if any argument is a callable passed by reference (an identifier,
+ * property access, or other expression with call signatures) rather than
+ * written inline as `x => ...` / `function (...) {...}`. `collectCalls`
+ * only walks into an inline callback's body; a callback passed by reference
+ * is invisible to it, so a method taking one (`forEach`, `map`, `some`, ...)
+ * cannot be trusted as pure even if its own name is allowlisted.
+ */
+function hasOpaqueCallableArgument(node: ts.CallExpression, checker: ts.TypeChecker): boolean {
+  return node.arguments.some((arg) => {
+    if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) return false;
+    return checker.getTypeAtLocation(arg).getCallSignatures().length > 0;
+  });
 }
 
 function ambientUnresolvedReason(
