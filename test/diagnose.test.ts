@@ -150,6 +150,37 @@ describe("diagnose (end-to-end: backend -> summarize -> propagate -> diagnose)",
   });
 });
 
+describe("diagnose (cross-module alias resolution)", () => {
+  const CROSS_MODULE_ROOT = path.join(import.meta.dirname, "fixtures", "cross-module");
+
+  async function diagnoseCrossModule(): Promise<readonly Diagnostic[]> {
+    const { files } = await legacyTsBackend.extractProject(CROSS_MODULE_ROOT);
+    const summaries = summarizeExtractedFiles(files);
+    const state = propagate(summaries);
+    return diagnose(state, { name: legacyTsBackend.name, version: legacyTsBackend.version });
+  }
+
+  it("flags a pure function that calls a directly-imported network function, with via pointing across files", async () => {
+    const diagnostics = await diagnoseCrossModule();
+    const diag = diagnostics.find((d) => d.message.startsWith("pureCallsImportedNetwork "));
+    expect(diag).toMatchObject({
+      id: "AMB-E001",
+      contract: { declared: ["pure"], observed: ["network"] },
+    });
+    expect(diag?.contract?.via.map((v) => v.symbol)).toEqual(["callee.ts#fetchRate"]);
+  });
+
+  it("flags a pure function that calls a network function imported through a barrel re-export", async () => {
+    const diagnostics = await diagnoseCrossModule();
+    const diag = diagnostics.find((d) => d.message.startsWith("pureCallsBarrelImportedNetwork "));
+    expect(diag).toMatchObject({
+      id: "AMB-E001",
+      contract: { declared: ["pure"], observed: ["network"] },
+    });
+    expect(diag?.contract?.via.map((v) => v.symbol)).toEqual(["callee.ts#fetchRate"]);
+  });
+});
+
 /** Reproduces GitHub's Markdown heading-to-anchor slug algorithm. */
 function githubSlug(heading: string): string {
   return heading

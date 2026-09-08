@@ -93,6 +93,12 @@ such ancestor exists. `ambit check --coverage` reports these nodes as
 residual `other`) — not because their effects go unseen, but because none of
 them can declare a contract of their own.
 
+`new X(...)` is not recorded as a call at all, and not even as `unknown` —
+`new PrismaClient()` or `new WebSocket(...)` disappears from analysis
+entirely (`new Function(...)` is the sole exception, reported as an
+`eval`-like unresolved call). A `pure` function that constructs a database
+client or socket passes today.
+
 The design is documented in [docs/DESIGN.md](docs/DESIGN.md) (a Draft — the
 RFC process for spec changes starts at the first public release, so this
 file is edited directly for now) and [docs/diagnostics/](docs/diagnostics/README.md)

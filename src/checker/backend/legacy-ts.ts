@@ -396,24 +396,35 @@ function classifyCall(
   }
 
   const symbol = checker.getSymbolAtLocation(callee);
-  const declaration = symbol?.declarations?.[0];
+  // A call to an imported identifier (`import { helper } from "./b.ts";
+  // helper()`) resolves via getSymbolAtLocation to the `ImportSpecifier`/
+  // `ImportClause` itself, not the declaration behind it — that binding is
+  // an alias (`SymbolFlags.Alias`), and getAliasedSymbol() follows it
+  // (through an entire re-export chain, e.g. a barrel `index.ts`) to the
+  // real declaration, whether that's a project function or an ambient one
+  // (e.g. `node:fs`'s `readFileSync` in `@types/node`). Calling
+  // getAliasedSymbol() on a non-alias symbol asserts, so it's guarded.
+  const isAlias = symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0;
+  const resolvedSymbol = isAlias ? checker.getAliasedSymbol(symbol) : symbol;
+  const declaration = resolvedSymbol?.declarations?.[0];
 
-  // Resolves to a project-local function/method we indexed in pass 1.
+  // Resolves to a project-local function/method we indexed in pass 1
+  // (directly, or via the alias resolution above).
   if (declaration) {
     const resolvedId = declaredNodeToId.get(declaration);
     if (resolvedId) return { location, resolvedCallee: resolvedId };
   }
 
-  // A bare call to an imported identifier (`import { effectSetOf } from
-  // "..."; effectSetOf(...)`) resolves its symbol to the `ImportSpecifier`/
-  // `ImportClause`, not the declaration behind it — `getSymbolAtLocation`
-  // never follows the alias (that needs `checker.getAliasedSymbol()`, which
-  // this connector layer does not call yet). Reported as its own reason
-  // rather than falling through to a generic "unresolved-symbol", so
-  // `--coverage` can show this specific, closeable gap.
-  if (declaration && (ts.isImportSpecifier(declaration) || ts.isImportClause(declaration))) {
-    return { location, unresolvedReason: "import-binding" };
-  }
+  // An import binding whose alias couldn't be followed to any declaration at
+  // all (e.g. the module specifier doesn't resolve, or the named export
+  // doesn't exist) — `getAliasedSymbol()` returns TypeScript's `unknownSymbol`
+  // in that case, whose `declarations` is `undefined`. Recorded as a
+  // fallback reason rather than an early return, so a stub match is still
+  // attempted below (an unresolvable `import { fetch } from "undici"` should
+  // still be recognized as `network` via `qualifiedNameOf`, not silently
+  // downgraded to a warning because the module didn't resolve).
+  const importBindingReason: UnresolvedReason | undefined =
+    isAlias && !declaration ? "import-binding" : undefined;
 
   // Ambient declarations (globals and stdlib types from .d.ts files, e.g.
   // `declare function fetch(...)`) are never project overloads or callback
@@ -449,12 +460,17 @@ function classifyCall(
       ? ambientUnresolvedReason(declaration.getSourceFile(), program)
       : undefined;
 
+  // `importBindingReason` and `ambientReason` are mutually exclusive (the
+  // former only applies when `declaration` is undefined, the latter only
+  // when it is defined), so combining them loses nothing.
+  const fallbackReason = importBindingReason ?? ambientReason;
+
   const calleeType = checker.getTypeAtLocation(callee);
   const isAnyTyped = (calleeType.flags & ts.TypeFlags.Any) !== 0;
 
   const qualifiedName = qualifiedNameOf(checker, callee);
   if (qualifiedName) {
-    return { location, calleeQualifiedName: qualifiedName, unresolvedReason: ambientReason };
+    return { location, calleeQualifiedName: qualifiedName, unresolvedReason: fallbackReason };
   }
 
   // qualifiedNameOf only names a bare identifier or a property access on an
@@ -463,8 +479,8 @@ function classifyCall(
   // textual name. The checker can still name the symbol directly; that name
   // is checked against src/stubs/pure-builtins.ts's allowlist (a separate
   // namespace — see CallSite.pureBuiltinName), not against calleeQualifiedName.
-  if (ambientReason === "builtin-method" && symbol) {
-    const pureBuiltinName = checker.getFullyQualifiedName(symbol);
+  if (ambientReason === "builtin-method" && resolvedSymbol) {
+    const pureBuiltinName = checker.getFullyQualifiedName(resolvedSymbol);
     if (pureBuiltinName) {
       return {
         location,
@@ -479,7 +495,7 @@ function classifyCall(
     return { location, unresolvedReason: "any-typed" };
   }
 
-  return { location, unresolvedReason: ambientReason ?? "unresolved-symbol" };
+  return { location, unresolvedReason: fallbackReason ?? "unresolved-symbol" };
 }
 
 /**
