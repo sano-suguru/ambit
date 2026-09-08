@@ -178,8 +178,9 @@ type FunctionLikeDeclaration =
   | (ts.PropertyAssignment & { readonly initializer: ts.FunctionExpression | ts.ArrowFunction });
 
 /**
- * Walk a source file collecting function declarations, methods, and
- * variable-declared function/arrow expressions, each paired with its
+ * Walk a source file collecting function declarations, class methods,
+ * variable-declared function/arrow expressions, and the identifier-named
+ * members of a module-scope `const` object literal — each paired with its
  * "."-joined declaration path (DESIGN.md §5.3's "ファイル・宣言経路など
  * との対応"). Anonymous functions and functions nested inside another
  * function's body are out of scope for this slice (plan: "最初の垂直
@@ -429,7 +430,11 @@ function classifySkipped(node: ts.FunctionLikeDeclaration): SkippedFunctionKind 
  * directly) and `{ foo: () => 1 }` (an arrow/function expression assigned via
  * a PropertyAssignment, whose parent is the assignment, not the object
  * literal itself) are both object-literal methods in spirit; both must be
- * recognized so this kind isn't a narrower category than its name promises.
+ * recognized so the two forms are never classified differently.
+ *
+ * This runs only on members `collectFunctionLikeDeclarations` did not index,
+ * so the kind it feeds is deliberately narrower than its name: what reaches it
+ * are the members `indexableObjectLiteral` rules out.
  */
 function isObjectLiteralMethod(node: ts.Node): boolean {
   if (node.parent && ts.isObjectLiteralExpression(node.parent)) return true;

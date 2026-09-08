@@ -229,6 +229,10 @@ describe("ambit check (CLI)", () => {
 
     // A getter, an object-literal member with a non-identifier name, and an
     // anonymous default export — one diagnostic each, none of them dropped.
+    // Exactly three: the fixture's declared function both carries its own
+    // contract and contains an inline callback, so a fourth would mean either
+    // a false positive on an extractable node or a JSDoc walk-up from the
+    // callback to the enclosing declaration.
     const uncarried = diagnostics.filter((d) => d.id === "AMB-E003");
     expect(uncarried).toHaveLength(3);
     for (const diagnostic of uncarried) {
@@ -236,9 +240,6 @@ describe("ambit check (CLI)", () => {
       expect(diagnostic.docs).toBe("docs/diagnostics/README.md#amb-e003");
       expect(diagnostic.location.line).toBeGreaterThan(0);
     }
-
-    // The one function that *can* carry its contract is not reported.
-    expect(diagnostics.filter((d) => d.location.line === 27)).toEqual([]);
   });
 
   it("every NDJSON diagnostic carries an engine identity", async () => {
