@@ -24,8 +24,12 @@ import type { SymbolId } from "./symbol-id.ts";
  * - `external-module`: same shape, but the ambient declaration lives in a
  *   third-party package's `.d.ts` (e.g. an ORM client) rather than the
  *   default lib.
- * `unresolved-symbol` remains the residual case: no declaration could be
- * found at all.
+ * `unresolved-symbol` remains the residual case: either no declaration could
+ * be found at all, or one was found but is not a function the backend
+ * extracts — an object-literal property or method, an interface/type-alias
+ * member signature, or a nested function declaration. In the latter shape the
+ * call target is fully known to the compiler and may even carry its own
+ * `@effects`; it simply has no `SymbolId` to propagate from.
  */
 export type UnresolvedReason =
   | "dynamic-import"

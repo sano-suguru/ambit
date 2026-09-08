@@ -146,6 +146,31 @@ describe("legacyTsBackend.extractProject", () => {
     expect(call?.callbackByReference).toBeUndefined();
   });
 
+  it("leaves a call through an object-literal member unresolved, with no name to key a stub on", async () => {
+    const { files } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
+    for (const caller of [
+      "call-resolution.ts#callsLiteralWithNamedFunction",
+      "call-resolution.ts#callsLiteralWithShorthandMethod",
+      "call-resolution.ts#callsLiteralTypedByInterface",
+    ]) {
+      const fn = findFn(files, caller);
+      expect(fn?.calls).toContainEqual(
+        expect.objectContaining({ unresolvedReason: "unresolved-symbol" }),
+      );
+      // No `calleeQualifiedName` either, so `--coverage` can count the call
+      // but never names it in `top-unresolved-names`.
+      expect(fn?.calls.every((c) => c.calleeQualifiedName === undefined)).toBe(true);
+    }
+  });
+
+  it("resolves a call to a class instance method, unlike the object-literal forms", async () => {
+    const { files } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
+    const fn = findFn(files, "call-resolution.ts#callsClassInstanceMethod");
+    expect(fn?.calls).toContainEqual(
+      expect.objectContaining({ resolvedCallee: "call-resolution.ts#IndexedClass.method" }),
+    );
+  });
+
   it("does not count an indexed (extracted) function as skipped", async () => {
     const { skippedFunctions } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
     const totalSkipped = [...skippedFunctions.values()].reduce((a, b) => a + b, 0);

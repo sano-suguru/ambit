@@ -66,6 +66,37 @@ It is deliberately narrow:
   a callback Ambit never sees, so the call stays `unknown` even though
   `Array.map` itself is allowlisted.
 
+### Call resolution
+
+A call is followed to its target only when the callee's declaration is one the
+backend extracts: a named function declaration, a method of a named class, or a
+variable-bound function or arrow expression. TypeScript may resolve the callee
+perfectly well and the call still not be followed, because the declaration it
+lands on is not in that set:
+
+- an object-literal property or method — `handlers.read()` where `handlers` is
+  an object literal, whether the property holds a named function
+  (`{ read: readIt }`) or is written as a method (`{ read() { … } }`), and
+  whether or not the literal carries a type annotation
+- an interface or type-alias member signature — the same call through a value
+  whose static type declares the member
+- a nested function declaration — one declared inside another function's body
+
+A call to a class instance method (`client.read()`) *is* resolved; the receiver
+being a property access is not what breaks resolution.
+
+The cost is that a contract on the target does not reach the caller. Ambit's
+own `legacyTsBackend.extractProject` is a declared `@effects fs_read` function
+reached through an object literal, so its declaration does not propagate to
+`main` — the call contributes `unknown` there instead.
+
+This does not weaken the "unknown stays unknown" property: such a call is
+reported as unresolved, becomes `unknown` in the enclosing function, and raises
+`AMB-W001` if that function declares a contract. All of these are counted under
+`unresolved-symbol` in `--coverage`. The two property-access forms are counted
+without a name, because a name is only built for a bare identifier or a
+property access on an import binding — see Reading `--coverage` below.
+
 ### Higher-order functions
 
 Inferring a callback's effects from the argument passed at the call site is
@@ -104,19 +135,29 @@ kind: `getter-setter`, `object-literal-method`, `anonymous-default-export`,
 means the node cannot declare a contract of its own — not that its effects go
 unseen.
 
+Not carrying a contract and not being reachable as a call target are two
+separate limits. They coincide for `object-literal-method` and
+`nested-function`, which are also unresolvable as callees (see Call resolution
+above), but neither list contains the other: an interface member signature
+blocks resolution without being a skipped node at all.
+
 ## Reading `--coverage`
 
-Ambit run against its own `src/` (2026-09, no `@effects` declared in this
-repo yet):
+Ambit run against its own `src/` (2026-09, four functions declaring
+`@effects`):
 
 ```console
 $ node src/cli/main.ts check src --coverage
-files=10 functions=66 declared=0
-unknown-rate=63.6% (42/66 functions)
+warning: extractProject declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:36)
+warning: loadProjectConfig declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:104)
+warning: collectTsFiles declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:151)
+warning: main declares fs_read but calls something that could not be resolved (cli/main.ts:23)
+files=10 functions=67 declared=4
+unknown-rate=64.2% (43/67 functions)
 skipped=29 (callback-argument=26, nested-function=3)
-call-sites: total=306 resolved=83 stub=0 pure=84 unresolved=139
-unresolved-by-reason: builtin-method=33, external-module=102, unresolved-symbol=4
-top-unresolved-names: Array.push=17, Map.set=9, Set.add=3, visitTop=3, ...
+call-sites: total=311 resolved=84 stub=2 pure=84 unresolved=141
+unresolved-by-reason: builtin-method=33, external-module=104, unresolved-symbol=4
+top-unresolved-names: Array.push=17, Map.set=9, typescript.forEachChild=6, ...
 ```
 
 - `unknown-rate` — the share of extracted functions whose effects could not be
@@ -126,6 +167,13 @@ top-unresolved-names: Array.push=17, Map.set=9, Set.add=3, visitTop=3, ...
 - `unresolved-by-reason` and `top-unresolved-names` are the signal for what to
   stub next. `Array.push` and `Map.set` dominating the list here reflects the
   mutating-method exclusion described above.
+- `top-unresolved-names` lists only calls a textual name could be built for,
+  and only the ten most frequent. An unresolved call with no name — the
+  property-access forms under Call resolution above — raises the
+  `unresolved-symbol` count and appears nowhere else, so this list is not a
+  complete picture of what is unresolved. The four counted here are three calls
+  to a nested function (named `visitTop`, below the top ten) plus one through
+  an object literal (unnamed).
 
 The summary line (`files= functions= declared=`) is printed on every run, with
 or without `--coverage`, so a check that analyzed nothing is never
