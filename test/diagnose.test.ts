@@ -12,7 +12,7 @@ const PROJECT_ROOT = path.resolve(import.meta.dirname, "..");
 const DIAGNOSTICS_DOC_PATH = "docs/diagnostics/README.md";
 
 async function diagnoseFixtures(): Promise<readonly Diagnostic[]> {
-  const files = await legacyTsBackend.extractProject(FIXTURE_ROOT);
+  const { files } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
   const summaries = summarizeExtractedFiles(files);
   const state = propagate(summaries);
   return diagnose(state, { name: legacyTsBackend.name, version: legacyTsBackend.version });

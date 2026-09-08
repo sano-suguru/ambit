@@ -44,11 +44,16 @@ consumed by an agent directly:
 Today `ambit check` enforces `@effects`. `@capabilities`, `@budget`, and
 `@entrypoint` are part of the contract model and documented in the design
 spec, but are not implemented yet. `ambit init`, `ambit run`, `ambit agent`,
-`ambit stubs`, and `ambit sbom` are planned, not built; `ambit check`'s own
-`--coverage` and `--strict` flags are also not built yet, and passing them
-is rejected (exit 2) rather than silently ignored. Runtime enforcement has
-not been started — everything Ambit checks today is static. `ambit` is not
-published yet; run it from a clone as `node src/cli/main.ts check <dir>`.
+`ambit stubs`, and `ambit sbom` are planned, not built. `ambit check` always
+reports how many files and functions it analyzed, so a check that saw
+nothing is never silently indistinguishable from a check that found no
+violations; `--coverage` additionally reports the function-level `unknown`
+rate, why individual calls could not be resolved, and the most frequent
+unresolved call names — the signal for what to stub next. `ambit check`'s
+`--strict` flag is not built yet, and passing it is rejected (exit 2) rather
+than silently ignored. Runtime enforcement has not been started — everything
+Ambit checks today is static. `ambit` is not published yet; run it from a
+clone as `node src/cli/main.ts check <dir>`.
 
 Effects are inferred from a bundled table of 23 entries (`fetch` plus Node.js
 builtins), which produces only `network`, `fs_read`, `fs_write`, and
@@ -62,10 +67,19 @@ from "node:fs"` is not, and falls back to `unknown`.
 Higher-order functions (a callback's effects inferred from the argument
 passed at the call site) are not implemented; a call through a callback
 parameter falls back to `unknown` rather than being inferred. Function
-extraction covers named function declarations, class methods, and
-variable-bound function/arrow expressions — getters/setters, object-literal
-methods, and anonymous `export default` functions are not analyzed at all
-(not even as `unknown`).
+extraction — the set of function-like nodes that can carry their own
+`@effects` contract — covers named function declarations, class methods, and
+variable-bound function/arrow expressions. A call inside any other
+function-like node (a getter/setter, an object-literal method, an anonymous
+`export default` function, a nested function declaration, an inline callback
+argument, or anything else with no extracted ancestor — e.g. a class
+constructor) is still walked and its effects attributed to the nearest
+enclosing *extracted* function, if there is one; it is only invisible when no
+such ancestor exists. `ambit check --coverage` reports these nodes as
+"skipped" by kind (`getter-setter`, `object-literal-method`,
+`anonymous-default-export`, `callback-argument`, `nested-function`, and a
+residual `other`) — not because their effects go unseen, but because none of
+them can declare a contract of their own.
 
 The design is documented in [docs/DESIGN.md](docs/DESIGN.md) (a Draft — the
 RFC process for spec changes starts at the first public release, so this

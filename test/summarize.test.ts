@@ -75,7 +75,43 @@ describe("summarizeExtractedFiles", () => {
     ];
     const [summary] = summarizeExtractedFiles(files);
     expect(summary?.calls).toEqual([
-      { kind: "unresolved", location: LOC, reason: "unresolved-symbol" },
+      {
+        kind: "unresolved",
+        location: LOC,
+        reason: "unresolved-symbol",
+        qualifiedName: "someThirdPartyLib.doThing",
+      },
+    ]);
+  });
+
+  it("uses the connector layer's own reason over the generic fallback, when a stub-miss call already carries one", () => {
+    const files: ExtractedFile[] = [
+      {
+        filePath: "f.ts",
+        functions: [
+          {
+            id: "f.ts#fn" as never,
+            location: LOC,
+            jsDoc: undefined,
+            calls: [
+              {
+                location: LOC,
+                calleeQualifiedName: "node:path.resolve",
+                unresolvedReason: "external-module",
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const [summary] = summarizeExtractedFiles(files);
+    expect(summary?.calls).toEqual([
+      {
+        kind: "unresolved",
+        location: LOC,
+        reason: "external-module",
+        qualifiedName: "node:path.resolve",
+      },
     ]);
   });
 

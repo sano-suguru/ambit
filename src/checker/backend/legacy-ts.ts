@@ -5,7 +5,9 @@ import type {
   CallSite,
   ExtractedFile,
   ExtractedFunction,
+  ExtractedProject,
   RawJsDoc,
+  SkippedFunctionKind,
   SourceLocation,
   SymbolId,
   TsBackend,
@@ -30,7 +32,7 @@ export const legacyTsBackend: TsBackend = {
   extractProject,
 };
 
-async function extractProject(rootDir: string): Promise<readonly ExtractedFile[]> {
+async function extractProject(rootDir: string): Promise<ExtractedProject> {
   const absoluteRoot = path.resolve(rootDir);
 
   // A missing/non-directory target must fail loudly, not silently produce
@@ -61,8 +63,10 @@ async function extractProject(rootDir: string): Promise<readonly ExtractedFile[]
   }
 
   // Pass 2: extract each function's JSDoc and calls, resolving callees
-  // against the map built in pass 1.
+  // against the map built in pass 1; and tally every function-like node this
+  // slice saw but did not extract (`skippedFunctions` — DESIGN.md §4.3).
   const files: ExtractedFile[] = [];
+  const skippedFunctions = new Map<SkippedFunctionKind, number>();
   for (const sourceFile of sourceFiles) {
     const functions: ExtractedFunction[] = [];
     for (const [node, declPath] of collectFunctionLikeDeclarations(sourceFile)) {
@@ -71,14 +75,17 @@ async function extractProject(rootDir: string): Promise<readonly ExtractedFile[]
         id,
         location: locationOf(absoluteRoot, sourceFile, nameOrNode(node)),
         jsDoc: extractJsDoc(node),
-        calls: collectCalls(node, sourceFile, checker, declaredNodeToId, absoluteRoot),
+        calls: collectCalls(node, sourceFile, program, checker, declaredNodeToId, absoluteRoot),
       });
     }
     if (functions.length > 0) {
       files.push({ filePath: relativePath(absoluteRoot, sourceFile), functions });
     }
+    for (const kind of collectSkippedFunctionKinds(sourceFile, declaredNodeToId)) {
+      skippedFunctions.set(kind, (skippedFunctions.get(kind) ?? 0) + 1);
+    }
   }
-  return files;
+  return { files, skippedFunctions };
 }
 
 // ---- project loading --------------------------------------------------
@@ -193,6 +200,100 @@ function collectFunctionLikeDeclarations(
   return results;
 }
 
+/**
+ * `ts.isFunctionLikeDeclaration` (a real function-like node with a body, as
+ * opposed to a signature-only form like `MethodSignature` or
+ * `FunctionTypeNode`, which `ts.isFunctionLike` also matches) exists at
+ * runtime but is not declared in the public `typescript` .d.ts, so it's
+ * redefined locally against `ts.FunctionLikeDeclaration`'s public union.
+ */
+function isFunctionLikeNode(node: ts.Node): node is ts.FunctionLikeDeclaration {
+  return (
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isGetAccessor(node) ||
+    ts.isSetAccessor(node) ||
+    ts.isConstructorDeclaration(node)
+  );
+}
+
+/**
+ * Every function-like node in `sourceFile` that `collectFunctionLikeDeclarations`
+ * did not index, classified by kind (`SkippedFunctionKind`). This is what
+ * turns "silent skip" into a visible count (`ambit check --coverage`) — see
+ * DESIGN.md §4.3 and the plan's note on measuring extraction coverage before
+ * trusting it.
+ */
+function collectSkippedFunctionKinds(
+  sourceFile: ts.SourceFile,
+  indexed: ReadonlyMap<ts.Node, SymbolId>,
+): readonly SkippedFunctionKind[] {
+  const kinds: SkippedFunctionKind[] = [];
+
+  function visit(node: ts.Node): void {
+    if (isFunctionLikeNode(node) && !indexed.has(node)) {
+      kinds.push(classifySkipped(node));
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  ts.forEachChild(sourceFile, visit);
+  return kinds;
+}
+
+function classifySkipped(node: ts.FunctionLikeDeclaration): SkippedFunctionKind {
+  if (ts.isGetAccessor(node) || ts.isSetAccessor(node)) return "getter-setter";
+  if (isObjectLiteralMethod(node)) return "object-literal-method";
+  if (isDefaultExport(node)) return "anonymous-default-export";
+  if (isCallbackArgument(node)) return "callback-argument";
+  if (isNestedInAnotherFunction(node)) return "nested-function";
+  return "other";
+}
+
+/**
+ * `{ foo() {} }` (a MethodDeclaration whose parent is the object literal
+ * directly) and `{ foo: () => 1 }` (an arrow/function expression assigned via
+ * a PropertyAssignment, whose parent is the assignment, not the object
+ * literal itself) are both object-literal methods in spirit; both must be
+ * recognized so this kind isn't a narrower category than its name promises.
+ */
+function isObjectLiteralMethod(node: ts.Node): boolean {
+  if (node.parent && ts.isObjectLiteralExpression(node.parent)) return true;
+  const parent = node.parent;
+  return (
+    parent !== undefined &&
+    ts.isPropertyAssignment(parent) &&
+    parent.initializer === node &&
+    ts.isObjectLiteralExpression(parent.parent)
+  );
+}
+
+function isDefaultExport(node: ts.Node): boolean {
+  if (ts.isExportAssignment(node.parent) && !node.parent.isExportEquals) return true;
+  if (ts.canHaveModifiers(node)) {
+    return (ts.getModifiers(node) ?? []).some((m) => m.kind === ts.SyntaxKind.DefaultKeyword);
+  }
+  return false;
+}
+
+function isCallbackArgument(node: ts.Node): boolean {
+  const parent = node.parent;
+  if (!parent || !(ts.isCallExpression(parent) || ts.isNewExpression(parent))) return false;
+  return (parent.arguments as readonly ts.Node[] | undefined)?.includes(node) ?? false;
+}
+
+/** Walks up from `node` to the source file, stopping at the first enclosing function-like ancestor. */
+function isNestedInAnotherFunction(node: ts.Node): boolean {
+  let current = node.parent;
+  while (current && !ts.isSourceFile(current)) {
+    if (isFunctionLikeNode(current)) return true;
+    current = current.parent;
+  }
+  return false;
+}
+
 function nameOrNode(decl: FunctionLikeDeclaration): ts.Node {
   if (ts.isVariableDeclaration(decl)) return decl.name;
   return decl.name ?? decl;
@@ -234,6 +335,7 @@ function jsDocTagText(tag: ts.JSDocTag): string {
 function collectCalls(
   decl: FunctionLikeDeclaration,
   sourceFile: ts.SourceFile,
+  program: ts.Program,
   checker: ts.TypeChecker,
   declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
   absoluteRoot: string,
@@ -245,7 +347,7 @@ function collectCalls(
 
   function visit(node: ts.Node): void {
     if (ts.isCallExpression(node)) {
-      calls.push(classifyCall(node, sourceFile, checker, declaredNodeToId, absoluteRoot));
+      calls.push(classifyCall(node, sourceFile, program, checker, declaredNodeToId, absoluteRoot));
     } else if (ts.isNewExpression(node)) {
       const site = classifyNewExpression(node, sourceFile, absoluteRoot);
       if (site) calls.push(site);
@@ -274,6 +376,7 @@ function classifyNewExpression(
 function classifyCall(
   node: ts.CallExpression,
   sourceFile: ts.SourceFile,
+  program: ts.Program,
   checker: ts.TypeChecker,
   declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
   absoluteRoot: string,
@@ -301,6 +404,17 @@ function classifyCall(
     if (resolvedId) return { location, resolvedCallee: resolvedId };
   }
 
+  // A bare call to an imported identifier (`import { effectSetOf } from
+  // "..."; effectSetOf(...)`) resolves its symbol to the `ImportSpecifier`/
+  // `ImportClause`, not the declaration behind it — `getSymbolAtLocation`
+  // never follows the alias (that needs `checker.getAliasedSymbol()`, which
+  // this connector layer does not call yet). Reported as its own reason
+  // rather than falling through to a generic "unresolved-symbol", so
+  // `--coverage` can show this specific, closeable gap.
+  if (declaration && (ts.isImportSpecifier(declaration) || ts.isImportClause(declaration))) {
+    return { location, unresolvedReason: "import-binding" };
+  }
+
   // Ambient declarations (globals and stdlib types from .d.ts files, e.g.
   // `declare function fetch(...)`) are never project overloads or callback
   // parameters — they just describe how a builtin's type looks. Only real
@@ -324,19 +438,39 @@ function classifyCall(
     }
   }
 
+  // If this call ends up unresolved (no calleeQualifiedName, or one that
+  // doesn't match a stub — decided later by `summarize.ts`), a more specific
+  // reason than "unresolved-symbol" is already knowable from the ambient
+  // declaration's own source file: TypeScript's default lib (a builtin
+  // method reached through a value the connector layer can't name, e.g.
+  // `set.has(...)`) vs. a third-party package's `.d.ts` (DESIGN.md §12).
+  const ambientReason =
+    isAmbientDeclaration && declaration
+      ? ambientUnresolvedReason(declaration.getSourceFile(), program)
+      : undefined;
+
   const calleeType = checker.getTypeAtLocation(callee);
   const isAnyTyped = (calleeType.flags & ts.TypeFlags.Any) !== 0;
 
   const qualifiedName = qualifiedNameOf(checker, callee);
   if (qualifiedName) {
-    return { location, calleeQualifiedName: qualifiedName };
+    return { location, calleeQualifiedName: qualifiedName, unresolvedReason: ambientReason };
   }
 
   if (isAnyTyped) {
     return { location, unresolvedReason: "any-typed" };
   }
 
-  return { location, unresolvedReason: "unresolved-symbol" };
+  return { location, unresolvedReason: ambientReason ?? "unresolved-symbol" };
+}
+
+function ambientUnresolvedReason(
+  declarationSourceFile: ts.SourceFile,
+  program: ts.Program,
+): UnresolvedReason | undefined {
+  if (program.isSourceFileDefaultLibrary(declarationSourceFile)) return "builtin-method";
+  if (program.isSourceFileFromExternalLibrary(declarationSourceFile)) return "external-module";
+  return undefined;
 }
 
 /**

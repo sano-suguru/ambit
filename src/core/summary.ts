@@ -18,11 +18,17 @@ export interface StubCall {
   readonly qualifiedName: string;
 }
 
-/** A call whose target or effects could not be determined (DESIGN.md §4.2 rule 6). */
+/**
+ * A call whose target or effects could not be determined (DESIGN.md §4.2
+ * rule 6). `qualifiedName` is carried through from a stub-lookup miss (see
+ * `summarize.ts`'s `toCall`) so `src/checker/coverage.ts` can report which
+ * unresolved names recur most — the signal for "what to stub next".
+ */
 export interface UnresolvedCall {
   readonly kind: "unresolved";
   readonly location: SourceLocation;
   readonly reason: UnresolvedReason;
+  readonly qualifiedName?: string;
 }
 
 export type Call = ResolvedCall | StubCall | UnresolvedCall;
