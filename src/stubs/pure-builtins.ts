@@ -22,7 +22,9 @@
  * — the connector layer marks that call `callbackByReference` and
  * `summarize.ts`'s `toCall` refuses to treat it as pure even if the method
  * name is listed here, because an opaque callback might do anything
- * (DESIGN.md §4.2 rule 4, "呼び出し元が渡す引数由来のコールバック").
+ * (DESIGN.md §4.2 rule 4: a higher-order call's callback effects must be
+ * inferred from the actual argument, never treated as complete from the
+ * type signature alone).
  *
  * Populated from what `ambit check --coverage`'s `top-unresolved-names`
  * actually surfaces on real code, not written ahead of evidence. When
