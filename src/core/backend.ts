@@ -112,16 +112,38 @@ export interface ExtractedFile {
 }
 
 /**
- * Everything `extractProject` produces for one run: the extracted files, plus
- * how many function-like nodes it saw but did not extract, by kind
- * (`SkippedFunctionKind`). The count exists so "no violations" and "nothing
- * was analyzed" stay distinguishable (DESIGN.md §3.4) — a file made entirely
- * of, say, object-literal methods would otherwise vanish from `files` with no
- * trace.
+ * A contract written on a function-like node the backend did not extract, and
+ * which therefore cannot carry one. Reported as `AMB-E003` rather than
+ * dropped: a declaration that silently does nothing is the opposite of what
+ * Ambit is for (DESIGN.md §3.4 — 解析失敗を「違反なし」に変換しない).
+ *
+ * `kind` is the same classification `skippedFunctions` counts, so the message
+ * can say *why* the node cannot carry the contract.
+ */
+export interface UncarriedContract {
+  readonly location: SourceLocation;
+  readonly kind: SkippedFunctionKind;
+  readonly tag: string;
+  readonly raw: string;
+}
+
+/**
+ * Everything `extractProject` produces for one run: the extracted files, how
+ * many function-like nodes it saw but did not extract (by kind), and any
+ * contract written on one of those nodes.
+ *
+ * The count exists so "no violations" and "nothing was analyzed" stay
+ * distinguishable (DESIGN.md §3.4) — a file made entirely of, say, callback
+ * arguments would otherwise vanish from `files` with no trace.
+ *
+ * Both fields are required, not optional: a backend that omitted them would
+ * silently under-report what it could not analyze, which is the failure mode
+ * they exist to prevent.
  */
 export interface ExtractedProject {
   readonly files: readonly ExtractedFile[];
   readonly skippedFunctions: ReadonlyMap<SkippedFunctionKind, number>;
+  readonly uncarriedContracts: readonly UncarriedContract[];
 }
 
 /**

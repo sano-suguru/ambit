@@ -4,6 +4,7 @@ import type { CoverageReport } from "../checker/coverage.ts";
 import {
   computeCoverage,
   diagnose,
+  diagnoseUncarriedContracts,
   legacyTsBackend,
   propagate,
   summarizeExtractedFiles,
@@ -49,10 +50,11 @@ export async function main(argv: readonly string[]): Promise<number> {
     }
     const summaries = summarizeExtractedFiles(project.files);
     const state = propagate(summaries);
-    diagnostics = diagnose(state, {
-      name: legacyTsBackend.name,
-      version: legacyTsBackend.version,
-    });
+    const engine = { name: legacyTsBackend.name, version: legacyTsBackend.version };
+    diagnostics = [
+      ...diagnose(state, engine),
+      ...diagnoseUncarriedContracts(project.uncarriedContracts, engine),
+    ];
     coverage = computeCoverage({
       filesAnalyzed: project.files.length,
       skippedFunctions: project.skippedFunctions,

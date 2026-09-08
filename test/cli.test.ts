@@ -13,6 +13,11 @@ const ZERO_FUNCTIONS_FIXTURES = path.join(import.meta.dirname, "fixtures", "zero
 const NO_TS_FILES_FIXTURES = path.join(import.meta.dirname, "fixtures", "no-ts-files");
 const BROKEN_TSCONFIG_FIXTURES = path.join(import.meta.dirname, "fixtures", "broken-tsconfig");
 const INVALID_EFFECTS_FIXTURES = path.join(import.meta.dirname, "fixtures", "invalid-effects");
+const UNCARRIED_CONTRACT_FIXTURES = path.join(
+  import.meta.dirname,
+  "fixtures",
+  "uncarried-contract",
+);
 
 async function runCli(
   args: readonly string[],
@@ -205,6 +210,35 @@ describe("ambit check (CLI)", () => {
 
     const forValidFn = diagnostics.filter((d) => d.message.startsWith("declaresValidEffect "));
     expect(forValidFn).toEqual([]);
+  });
+
+  it("reports AMB-E003 for a contract written on a node that cannot carry one", async () => {
+    const { stdout, exitCode } = await runCli([
+      "check",
+      UNCARRIED_CONTRACT_FIXTURES,
+      "--format",
+      "json",
+    ]);
+    expect(exitCode).toBe(1);
+    const diagnostics = stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((r) => !("kind" in r));
+
+    // A getter, an object-literal member with a non-identifier name, and an
+    // anonymous default export — one diagnostic each, none of them dropped.
+    const uncarried = diagnostics.filter((d) => d.id === "AMB-E003");
+    expect(uncarried).toHaveLength(3);
+    for (const diagnostic of uncarried) {
+      expect(diagnostic.severity).toBe("error");
+      expect(diagnostic.docs).toBe("docs/diagnostics/README.md#amb-e003");
+      expect(diagnostic.location.line).toBeGreaterThan(0);
+    }
+
+    // The one function that *can* carry its contract is not reported.
+    expect(diagnostics.filter((d) => d.location.line === 27)).toEqual([]);
   });
 
   it("every NDJSON diagnostic carries an engine identity", async () => {

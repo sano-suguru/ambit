@@ -11,6 +11,7 @@ import type {
   SourceLocation,
   SymbolId,
   TsBackend,
+  UncarriedContract,
   UnresolvedReason,
 } from "../../core/index.ts";
 import { symbolId } from "../../core/index.ts";
@@ -77,6 +78,7 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
   // Reuses pass 1's declarationsByFile instead of re-walking each file.
   const files: ExtractedFile[] = [];
   const skippedFunctions = new Map<SkippedFunctionKind, number>();
+  const uncarriedContracts: UncarriedContract[] = [];
   for (const [sourceFile, declarations] of declarationsByFile) {
     const functions: ExtractedFunction[] = [];
     for (const [node, declPath] of declarations) {
@@ -91,11 +93,13 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
     if (functions.length > 0) {
       files.push({ filePath: relativePath(absoluteRoot, sourceFile), functions });
     }
-    for (const kind of collectSkippedFunctionKinds(sourceFile, declaredNodeToId)) {
+    const skipped = collectSkippedFunctions(sourceFile, declaredNodeToId, absoluteRoot);
+    for (const kind of skipped.kinds) {
       skippedFunctions.set(kind, (skippedFunctions.get(kind) ?? 0) + 1);
     }
+    uncarriedContracts.push(...skipped.uncarried);
   }
-  return { files, skippedFunctions };
+  return { files, skippedFunctions, uncarriedContracts };
 }
 
 // ---- project loading --------------------------------------------------
@@ -347,27 +351,52 @@ function isFunctionLikeNode(node: ts.Node): node is ts.FunctionLikeDeclaration {
 
 /**
  * Every function-like node in `sourceFile` that `collectFunctionLikeDeclarations`
- * did not index, classified by kind (`SkippedFunctionKind`). This is what
- * turns "silent skip" into a visible count (`ambit check --coverage`) — see
- * DESIGN.md §4.3 and the plan's note on measuring extraction coverage before
- * trusting it.
+ * did not index, classified by kind (`SkippedFunctionKind`), plus any contract
+ * written on one of them. The count turns "silent skip" into a visible number
+ * (`ambit check --coverage`, DESIGN.md §4.3); the contracts turn a silently
+ * dropped declaration into `AMB-E003`.
  */
-function collectSkippedFunctionKinds(
+function collectSkippedFunctions(
   sourceFile: ts.SourceFile,
   indexed: ReadonlyMap<ts.Node, SymbolId>,
-): readonly SkippedFunctionKind[] {
+  absoluteRoot: string,
+): { readonly kinds: readonly SkippedFunctionKind[]; readonly uncarried: UncarriedContract[] } {
   const kinds: SkippedFunctionKind[] = [];
+  const uncarried: UncarriedContract[] = [];
 
   function visit(node: ts.Node): void {
     if (isFunctionLikeNode(node) && !indexed.has(node) && !isIndexedInitializer(node, indexed)) {
-      kinds.push(classifySkipped(node));
+      const kind = classifySkipped(node);
+      kinds.push(kind);
+      // `isFunctionLikeNode` has already narrowed to a real function-like
+      // node; the local alias only widens it to the shape the JSDoc and
+      // location helpers take.
+      const decl = node as FunctionLikeDeclaration;
+      const jsDoc = extractJsDoc(decl);
+      for (const tag of CONTRACT_TAGS) {
+        const raw = jsDoc?.tags.get(tag);
+        if (raw === undefined) continue;
+        uncarried.push({
+          location: locationOf(absoluteRoot, sourceFile, nameOrNode(decl)),
+          kind,
+          tag,
+          raw,
+        });
+      }
     }
     ts.forEachChild(node, visit);
   }
 
   ts.forEachChild(sourceFile, visit);
-  return kinds;
+  return { kinds, uncarried };
 }
+
+/**
+ * The JSDoc tags that declare a contract (DESIGN.md §4.1). Only `@effects` is
+ * enforced today, but a contract tag on a node that cannot carry one is dead
+ * whichever tag it is, so all four are reported.
+ */
+const CONTRACT_TAGS = ["effects", "capabilities", "budget", "entrypoint"] as const;
 
 /**
  * True if `node` is the function expression that *is* an indexed declaration's
