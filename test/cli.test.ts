@@ -8,6 +8,7 @@ const CLI_PATH = path.join(import.meta.dirname, "..", "src", "cli", "main.ts");
 const PROPAGATION_FIXTURES = path.join(import.meta.dirname, "fixtures", "propagation");
 const WARNINGS_ONLY_FIXTURES = path.join(import.meta.dirname, "fixtures", "warnings-only");
 const PAREN_LESS_NEW_FIXTURES = path.join(import.meta.dirname, "fixtures", "paren-less-new");
+const BACKEND_SMOKE_FIXTURES = path.join(import.meta.dirname, "fixtures", "backend-smoke");
 
 async function runCli(
   args: readonly string[],
@@ -137,6 +138,13 @@ describe("ambit check (CLI)", () => {
       .filter(Boolean)
       .map((l) => JSON.parse(l));
     expect(records.some((r) => r.kind === "coverage")).toBe(false);
+  });
+
+  it("--coverage counts a known-pure builtin call as pure, not unresolved", async () => {
+    const { stdout } = await runCli(["check", BACKEND_SMOKE_FIXTURES, "--coverage"]);
+    expect(stdout).toMatch(
+      /call-sites: total=\d+ resolved=\d+ stub=\d+ pure=[1-9]\d* unresolved=\d+/,
+    );
   });
 
   it("exits 2 and writes to stderr for an invalid --format value", async () => {
