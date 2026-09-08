@@ -4,12 +4,12 @@
   "private": true,
   "description": "A contract layer on top of TypeScript for AI-generated code",
   "type": "module",
-  "packageManager": "pnpm@11.22.0",
+  "packageManager": "pnpm@12.3.4",
   "engines": {
     "node": ">=24"
   },
   "volta": {
-    "node": "24.19.0"
+    "node": "24.20.0"
   },
   "scripts": {
     "check": "node src/cli/main.ts",
