@@ -1,0 +1,99 @@
+import { describe, expect, it } from "vitest";
+import { parseEffectsTag, summarizeExtractedFiles } from "../src/checker/summarize.ts";
+import type { ExtractedFile, SourceLocation } from "../src/core/index.ts";
+
+const LOC: SourceLocation = { file: "f.ts", line: 1, col: 1, endLine: 1, endCol: 1 };
+
+describe("parseEffectsTag", () => {
+  it('parses "pure" as the empty effect set', () => {
+    const set = parseEffectsTag("pure");
+    expect(set.effects.size).toBe(0);
+    expect(set.unknown).toBe(false);
+  });
+
+  it("parses a comma-separated list of known effects", () => {
+    const set = parseEffectsTag("network, db_read");
+    expect([...set.effects].sort()).toEqual(["db_read", "network"]);
+  });
+
+  it("drops unrecognized tokens rather than throwing", () => {
+    const set = parseEffectsTag("network, not_a_real_effect");
+    expect([...set.effects]).toEqual(["network"]);
+  });
+
+  it("expands llm to include the implied network effect", () => {
+    const set = parseEffectsTag("llm");
+    expect([...set.effects].sort()).toEqual(["llm", "network"]);
+  });
+});
+
+describe("summarizeExtractedFiles", () => {
+  it("treats a missing @effects tag as undeclared, not as declared-pure", () => {
+    const files: ExtractedFile[] = [
+      {
+        filePath: "f.ts",
+        functions: [{ id: "f.ts#undeclared" as never, location: LOC, jsDoc: undefined, calls: [] }],
+      },
+    ];
+    const [summary] = summarizeExtractedFiles(files);
+    expect(summary?.declared).toEqual({ kind: "none" });
+  });
+
+  it("resolves a stub-matched call to a Call with kind 'stub'", () => {
+    const files: ExtractedFile[] = [
+      {
+        filePath: "f.ts",
+        functions: [
+          {
+            id: "f.ts#fn" as never,
+            location: LOC,
+            jsDoc: undefined,
+            calls: [{ location: LOC, calleeQualifiedName: "fetch" }],
+          },
+        ],
+      },
+    ];
+    const [summary] = summarizeExtractedFiles(files);
+    expect(summary?.calls).toEqual([
+      { kind: "stub", location: LOC, effect: "network", qualifiedName: "fetch" },
+    ]);
+  });
+
+  it("treats a named call with no stub match as unresolved, not as no-effect", () => {
+    const files: ExtractedFile[] = [
+      {
+        filePath: "f.ts",
+        functions: [
+          {
+            id: "f.ts#fn" as never,
+            location: LOC,
+            jsDoc: undefined,
+            calls: [{ location: LOC, calleeQualifiedName: "someThirdPartyLib.doThing" }],
+          },
+        ],
+      },
+    ];
+    const [summary] = summarizeExtractedFiles(files);
+    expect(summary?.calls).toEqual([
+      { kind: "unresolved", location: LOC, reason: "unresolved-symbol" },
+    ]);
+  });
+
+  it("passes through a resolved call unchanged", () => {
+    const files: ExtractedFile[] = [
+      {
+        filePath: "f.ts",
+        functions: [
+          {
+            id: "f.ts#fn" as never,
+            location: LOC,
+            jsDoc: undefined,
+            calls: [{ location: LOC, resolvedCallee: "f.ts#other" as never }],
+          },
+        ],
+      },
+    ];
+    const [summary] = summarizeExtractedFiles(files);
+    expect(summary?.calls).toEqual([{ kind: "resolved", location: LOC, callee: "f.ts#other" }]);
+  });
+});
