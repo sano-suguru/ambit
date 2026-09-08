@@ -129,6 +129,13 @@ describe("legacyTsBackend.extractProject", () => {
     expect(call?.callbackByReference).toBe(true);
   });
 
+  it("marks a call as callbackByReference for an any-typed callback argument (getCallSignatures() is empty for any/unknown)", async () => {
+    const { files } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
+    const fn = findFn(files, "sample.ts#callsPureBuiltinByReferenceAnyTyped");
+    const call = fn?.calls.find((c) => c.pureBuiltinName === "Array.map");
+    expect(call?.callbackByReference).toBe(true);
+  });
+
   it("does not count an indexed (extracted) function as skipped", async () => {
     const { skippedFunctions } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
     const totalSkipped = [...skippedFunctions.values()].reduce((a, b) => a + b, 0);

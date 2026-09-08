@@ -489,11 +489,19 @@ function classifyCall(
  * only walks into an inline callback's body; a callback passed by reference
  * is invisible to it, so a method taking one (`forEach`, `map`, `some`, ...)
  * cannot be trusted as pure even if its own name is allowlisted.
+ *
+ * An `any`/`unknown`-typed argument has no call signatures of its own
+ * (`getCallSignatures()` returns `[]`), so it must be treated as opaque
+ * rather than as "not callable" — otherwise `arr.map(fnFromAnyRecord)`
+ * would slip past this guard the same way `classifyCall`'s own
+ * `any-typed` callee case treats `any` as unresolved, not as safe.
  */
 function hasOpaqueCallableArgument(node: ts.CallExpression, checker: ts.TypeChecker): boolean {
   return node.arguments.some((arg) => {
     if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) return false;
-    return checker.getTypeAtLocation(arg).getCallSignatures().length > 0;
+    const type = checker.getTypeAtLocation(arg);
+    if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) return true;
+    return type.getCallSignatures().length > 0;
   });
 }
 
