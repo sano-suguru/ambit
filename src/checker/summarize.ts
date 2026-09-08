@@ -36,23 +36,28 @@ export function summarizeExtractedFiles(
 function parseDeclaredEffects(jsDoc: RawJsDoc | undefined): DeclaredEffects {
   const tagText = jsDoc?.tags.get("effects");
   if (tagText === undefined) return { kind: "none" };
-  return { kind: "declared", effects: parseEffectsTag(tagText) };
+  const effects = parseEffectsTag(tagText);
+  if (effects === undefined) return { kind: "invalid", raw: tagText };
+  return { kind: "declared", effects };
 }
 
 /**
  * `pure` is the literal spelling for the empty set (DESIGN.md §4.2 rule 2).
- * Unrecognized tokens are silently dropped in this slice — validating
- * `@effects` tag text against typos is a coverage/lint concern, not part of
- * propagation, and is out of scope here.
+ * Returns `undefined` when a token is neither `pure` nor a known effect (a
+ * typo, e.g. `@effects netwrok`) — such a declaration must not silently
+ * collapse to an empty (`pure`) contract. The caller reports this as
+ * `AMB-E002` (`diagnose.ts`) instead of the tag's real, but broken, contract.
  */
-export function parseEffectsTag(text: string): EffectSet {
+export function parseEffectsTag(text: string): EffectSet | undefined {
   const trimmed = text.trim();
   if (trimmed === "pure") return emptyEffectSet();
 
-  const effects: KnownEffect[] = trimmed
-    .split(",")
-    .map((token) => token.trim())
-    .filter((token): token is KnownEffect => isKnownEffect(token));
+  const tokens = trimmed.split(",").map((token) => token.trim());
+  const effects: KnownEffect[] = [];
+  for (const token of tokens) {
+    if (!isKnownEffect(token)) return undefined;
+    effects.push(token);
+  }
   return effectSetOf(...effects);
 }
 

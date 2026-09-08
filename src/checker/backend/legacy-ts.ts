@@ -97,11 +97,28 @@ function loadProjectConfig(absoluteRoot: string): {
   const configPath = ts.findConfigFile(absoluteRoot, ts.sys.fileExists, "tsconfig.json");
   if (configPath) {
     const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
+    // A malformed tsconfig.json (unparseable JSON) must fail loudly, not
+    // silently fall back to an empty `config` object — that would produce
+    // 0 root files and read as "checked, no violations" (DESIGN.md §3.4).
+    if (configFile.error) {
+      throw new Error(
+        `failed to read ${configPath}: ${ts.flattenDiagnosticMessageText(configFile.error.messageText, "\n")}`,
+      );
+    }
+
     const parsed = ts.parseJsonConfigFileContent(
       configFile.config,
       ts.sys,
       path.dirname(configPath),
     );
+    const errors = parsed.errors.filter((d) => d.category === ts.DiagnosticCategory.Error);
+    if (errors.length > 0) {
+      throw new Error(
+        `invalid ${configPath}: ${errors
+          .map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))
+          .join("; ")}`,
+      );
+    }
     return { rootNames: parsed.fileNames, options: parsed.options };
   }
 

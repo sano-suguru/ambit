@@ -150,6 +150,45 @@ describe("diagnose (end-to-end: backend -> summarize -> propagate -> diagnose)",
   });
 });
 
+describe("diagnose (invalid @effects declaration)", () => {
+  const INVALID_EFFECTS_ROOT = path.join(import.meta.dirname, "fixtures", "invalid-effects");
+
+  async function diagnoseInvalidEffects(): Promise<readonly Diagnostic[]> {
+    const { files } = await legacyTsBackend.extractProject(INVALID_EFFECTS_ROOT);
+    const summaries = summarizeExtractedFiles(files);
+    const state = propagate(summaries);
+    return diagnose(state, { name: legacyTsBackend.name, version: legacyTsBackend.version });
+  }
+
+  it("AMB-E002: a typo'd @effects tag is reported once, and does not also trip AMB-E001", async () => {
+    const diagnostics = await diagnoseInvalidEffects();
+    const diag = byFunction(diagnostics, "declaresTypoedEffect");
+    expect(diag?.id).toBe("AMB-E002");
+    expect(diagnostics.filter((d) => d.message.startsWith("declaresTypoedEffect "))).toHaveLength(
+      1,
+    );
+    expect(diag?.docs).toBe("docs/diagnostics/README.md#amb-e002");
+  });
+
+  it("does not diagnose a correctly declared function in the same file", async () => {
+    const diagnostics = await diagnoseInvalidEffects();
+    expect(byFunction(diagnostics, "declaresValidEffect")).toBeUndefined();
+  });
+
+  it("AMB-E002's docs field resolves to a heading that actually exists in docs/diagnostics/README.md", async () => {
+    const diagnostics = await diagnoseInvalidEffects();
+    const readmeContent = await readFile(path.join(PROJECT_ROOT, DIAGNOSTICS_DOC_PATH), "utf8");
+    const anchors = new Set(
+      [...readmeContent.matchAll(/^##\s+(.+)$/gm)].map((match) => githubSlug(match[1] ?? "")),
+    );
+
+    const diag = byFunction(diagnostics, "declaresTypoedEffect");
+    const [docPath, anchor] = (diag?.docs ?? "").split("#");
+    expect(docPath).toBe(DIAGNOSTICS_DOC_PATH);
+    expect(anchors.has(anchor ?? "")).toBe(true);
+  });
+});
+
 describe("diagnose (cross-module alias resolution)", () => {
   const CROSS_MODULE_ROOT = path.join(import.meta.dirname, "fixtures", "cross-module");
 

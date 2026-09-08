@@ -9,6 +9,10 @@ const PROPAGATION_FIXTURES = path.join(import.meta.dirname, "fixtures", "propaga
 const WARNINGS_ONLY_FIXTURES = path.join(import.meta.dirname, "fixtures", "warnings-only");
 const PAREN_LESS_NEW_FIXTURES = path.join(import.meta.dirname, "fixtures", "paren-less-new");
 const BACKEND_SMOKE_FIXTURES = path.join(import.meta.dirname, "fixtures", "backend-smoke");
+const ZERO_FUNCTIONS_FIXTURES = path.join(import.meta.dirname, "fixtures", "zero-functions");
+const NO_TS_FILES_FIXTURES = path.join(import.meta.dirname, "fixtures", "no-ts-files");
+const BROKEN_TSCONFIG_FIXTURES = path.join(import.meta.dirname, "fixtures", "broken-tsconfig");
+const INVALID_EFFECTS_FIXTURES = path.join(import.meta.dirname, "fixtures", "invalid-effects");
 
 async function runCli(
   args: readonly string[],
@@ -18,7 +22,11 @@ async function runCli(
     return { stdout, stderr, exitCode: 0 };
   } catch (error) {
     const e = error as { stdout?: string; stderr?: string; code?: number };
-    return { stdout: e.stdout ?? "", stderr: e.stderr ?? "", exitCode: e.code ?? 1 };
+    return {
+      stdout: e.stdout ?? "",
+      stderr: e.stderr ?? "",
+      exitCode: e.code ?? 1,
+    };
   }
 }
 
@@ -157,6 +165,46 @@ describe("ambit check (CLI)", () => {
     const { exitCode, stderr } = await runCli(["check", PROPAGATION_FIXTURES, "--bogus"]);
     expect(exitCode).toBe(2);
     expect(stderr).toContain("--bogus");
+  });
+
+  it("exits 2 for a project with zero extracted functions (files present, nothing analyzable)", async () => {
+    const { exitCode, stderr } = await runCli(["check", ZERO_FUNCTIONS_FIXTURES]);
+    expect(exitCode).toBe(2);
+    expect(stderr).toContain("no analyzable functions");
+  });
+
+  it("exits 2 for a project with zero .ts files", async () => {
+    const { exitCode, stderr } = await runCli(["check", NO_TS_FILES_FIXTURES]);
+    expect(exitCode).toBe(2);
+    expect(stderr).toContain("no analyzable functions");
+  });
+
+  it("exits 2 for a malformed tsconfig.json instead of silently analyzing zero files", async () => {
+    const { exitCode, stderr } = await runCli(["check", BROKEN_TSCONFIG_FIXTURES]);
+    expect(exitCode).toBe(2);
+    expect(stderr).toContain("analysis failed");
+  });
+
+  it("AMB-E002: a typo'd @effects tag is rejected, not silently narrowed to pure", async () => {
+    const { stdout, exitCode } = await runCli([
+      "check",
+      INVALID_EFFECTS_FIXTURES,
+      "--format",
+      "json",
+    ]);
+    expect(exitCode).toBe(1);
+    const diagnostics = stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((r) => !("kind" in r));
+
+    const forTypoedFn = diagnostics.filter((d) => d.message.startsWith("declaresTypoedEffect "));
+    expect(forTypoedFn.map((d) => d.id)).toEqual(["AMB-E002"]);
+
+    const forValidFn = diagnostics.filter((d) => d.message.startsWith("declaresValidEffect "));
+    expect(forValidFn).toEqual([]);
   });
 
   it("every NDJSON diagnostic carries an engine identity", async () => {

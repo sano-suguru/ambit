@@ -7,23 +7,23 @@ const LOC: SourceLocation = { file: "f.ts", line: 1, col: 1, endLine: 1, endCol:
 describe("parseEffectsTag", () => {
   it('parses "pure" as the empty effect set', () => {
     const set = parseEffectsTag("pure");
-    expect(set.effects.size).toBe(0);
-    expect(set.unknown).toBe(false);
+    expect(set).toBeDefined();
+    expect(set?.effects.size).toBe(0);
+    expect(set?.unknown).toBe(false);
   });
 
   it("parses a comma-separated list of known effects", () => {
     const set = parseEffectsTag("network, db_read");
-    expect([...set.effects].sort()).toEqual(["db_read", "network"]);
+    expect([...(set?.effects ?? [])].sort()).toEqual(["db_read", "network"]);
   });
 
-  it("drops unrecognized tokens rather than throwing", () => {
-    const set = parseEffectsTag("network, not_a_real_effect");
-    expect([...set.effects]).toEqual(["network"]);
+  it("returns undefined for a tag containing an unrecognized token (rejected, not silently narrowed)", () => {
+    expect(parseEffectsTag("network, not_a_real_effect")).toBeUndefined();
   });
 
   it("expands llm to include the implied network effect", () => {
     const set = parseEffectsTag("llm");
-    expect([...set.effects].sort()).toEqual(["llm", "network"]);
+    expect([...(set?.effects ?? [])].sort()).toEqual(["llm", "network"]);
   });
 });
 
@@ -37,6 +37,24 @@ describe("summarizeExtractedFiles", () => {
     ];
     const [summary] = summarizeExtractedFiles(files);
     expect(summary?.declared).toEqual({ kind: "none" });
+  });
+
+  it("treats a typo'd @effects tag as invalid, not as declared-pure", () => {
+    const files: ExtractedFile[] = [
+      {
+        filePath: "f.ts",
+        functions: [
+          {
+            id: "f.ts#typoed" as never,
+            location: LOC,
+            jsDoc: { tags: new Map([["effects", "netwrok"]]) },
+            calls: [],
+          },
+        ],
+      },
+    ];
+    const [summary] = summarizeExtractedFiles(files);
+    expect(summary?.declared).toEqual({ kind: "invalid", raw: "netwrok" });
   });
 
   it("resolves a stub-matched call to a Call with kind 'stub'", () => {

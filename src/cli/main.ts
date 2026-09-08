@@ -38,6 +38,14 @@ export async function main(argv: readonly string[]): Promise<number> {
   let coverage: CoverageReport;
   try {
     const project = await legacyTsBackend.extractProject(args.dir);
+    // A backend only ever pushes a file that had at least one extracted
+    // function, so an empty `files` array means "nothing analyzable was
+    // found" (zero .ts files, or every function-like node was skipped) —
+    // that must not read the same as "checked, no violations" (DESIGN.md
+    // §3.4).
+    if (project.files.length === 0) {
+      throw new Error(`no analyzable functions found under ${args.dir}`);
+    }
     const summaries = summarizeExtractedFiles(project.files);
     const state = propagate(summaries);
     diagnostics = diagnose(state, {
