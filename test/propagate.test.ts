@@ -23,6 +23,21 @@ describe("propagate", () => {
     expect([...state.get(id("f.ts#pureCallsFetch"))!.observed.effects]).toEqual(["network"]);
   });
 
+  it("a known-pure builtin call contributes no effect and does not set unknown", () => {
+    const summaries: FunctionSummary[] = [
+      {
+        id: id("f.ts#usesSetHas"),
+        location: LOC,
+        declared: { kind: "declared", effects: emptyEffectSet() },
+        calls: [{ kind: "known-pure", location: LOC, qualifiedName: "Set.has" }],
+      },
+    ];
+    const state = propagate(summaries);
+    const observed = state.get(id("f.ts#usesSetHas"))!.observed;
+    expect(observed.effects.size).toBe(0);
+    expect(observed.unknown).toBe(false);
+  });
+
   it("rule 1: propagates a declared callee's DECLARED effects, not its own body (trust boundary)", () => {
     const summaries: FunctionSummary[] = [
       {

@@ -114,6 +114,28 @@ describe("legacyTsBackend.extractProject", () => {
     expect(skippedFunctions.get("object-literal-method")).toBeGreaterThanOrEqual(2);
   });
 
+  it("names an allowlisted builtin method called inline via checker.getFullyQualifiedName", async () => {
+    const { files } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
+    const fn = findFn(files, "sample.ts#callsPureBuiltinInline");
+    const call = fn?.calls.find((c) => c.pureBuiltinName === "Array.map");
+    expect(call).toBeDefined();
+    expect(call?.callbackByReference).toBeUndefined();
+  });
+
+  it("marks a call as callbackByReference when its callback is passed by reference, not written inline", async () => {
+    const { files } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
+    const fn = findFn(files, "sample.ts#callsPureBuiltinByReference");
+    const call = fn?.calls.find((c) => c.pureBuiltinName === "Array.map");
+    expect(call?.callbackByReference).toBe(true);
+  });
+
+  it("marks a call as callbackByReference for an any-typed callback argument (getCallSignatures() is empty for any/unknown)", async () => {
+    const { files } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
+    const fn = findFn(files, "sample.ts#callsPureBuiltinByReferenceAnyTyped");
+    const call = fn?.calls.find((c) => c.pureBuiltinName === "Array.map");
+    expect(call?.callbackByReference).toBe(true);
+  });
+
   it("does not count an indexed (extracted) function as skipped", async () => {
     const { skippedFunctions } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
     const totalSkipped = [...skippedFunctions.values()].reduce((a, b) => a + b, 0);

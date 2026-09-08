@@ -61,3 +61,31 @@ export function callsBuiltinMethod(): boolean {
 export function callsExternalModule(): string {
   return path.resolve(".");
 }
+
+// A builtin method allowlisted in src/stubs/pure-builtins.ts, called with an
+// inline callback: collectCalls walks the callback body itself, so the
+// method can be trusted as pure.
+export function callsPureBuiltinInline(): number[] {
+  return [1, 2, 3].map((n) => n * 2);
+}
+
+function double(n: number): number {
+  return n * 2;
+}
+
+// Same allowlisted method ("Array.map"), but the callback is passed by
+// reference: collectCalls never walks into `double`'s body, so this call
+// must stay unresolved even though the method name itself is allowlisted.
+export function callsPureBuiltinByReference(): number[] {
+  return [1, 2, 3].map(double);
+}
+
+// biome-ignore lint/suspicious/noExplicitAny: fixture data for the any-typed-argument fail-open guard
+const anyTypedHandler: any = double;
+
+// An any-typed callback passed by reference has no call signatures of its
+// own (getCallSignatures() returns []), so it must still be treated as
+// opaque — not mistaken for "not callable" and let through as pure.
+export function callsPureBuiltinByReferenceAnyTyped(): number[] {
+  return [1, 2, 3].map(anyTypedHandler);
+}

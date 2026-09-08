@@ -115,6 +115,75 @@ describe("summarizeExtractedFiles", () => {
     ]);
   });
 
+  it("resolves an allowlisted builtin method to a Call with kind 'known-pure'", () => {
+    const files: ExtractedFile[] = [
+      {
+        filePath: "f.ts",
+        functions: [
+          {
+            id: "f.ts#fn" as never,
+            location: LOC,
+            jsDoc: undefined,
+            calls: [{ location: LOC, pureBuiltinName: "Set.has" }],
+          },
+        ],
+      },
+    ];
+    const [summary] = summarizeExtractedFiles(files);
+    expect(summary?.calls).toEqual([
+      { kind: "known-pure", location: LOC, qualifiedName: "Set.has" },
+    ]);
+  });
+
+  it("refuses known-pure for an allowlisted method whose callback is passed by reference", () => {
+    const files: ExtractedFile[] = [
+      {
+        filePath: "f.ts",
+        functions: [
+          {
+            id: "f.ts#fn" as never,
+            location: LOC,
+            jsDoc: undefined,
+            calls: [
+              {
+                location: LOC,
+                pureBuiltinName: "Array.map",
+                callbackByReference: true,
+                unresolvedReason: "builtin-method",
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const [summary] = summarizeExtractedFiles(files);
+    expect(summary?.calls).toEqual([
+      { kind: "unresolved", location: LOC, reason: "builtin-method", qualifiedName: "Array.map" },
+    ]);
+  });
+
+  it("treats an unlisted builtin method name as unresolved, not as pure", () => {
+    const files: ExtractedFile[] = [
+      {
+        filePath: "f.ts",
+        functions: [
+          {
+            id: "f.ts#fn" as never,
+            location: LOC,
+            jsDoc: undefined,
+            calls: [
+              { location: LOC, pureBuiltinName: "Array.push", unresolvedReason: "builtin-method" },
+            ],
+          },
+        ],
+      },
+    ];
+    const [summary] = summarizeExtractedFiles(files);
+    expect(summary?.calls).toEqual([
+      { kind: "unresolved", location: LOC, reason: "builtin-method", qualifiedName: "Array.push" },
+    ]);
+  });
+
   it("passes through a resolved call unchanged", () => {
     const files: ExtractedFile[] = [
       {

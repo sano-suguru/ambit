@@ -55,14 +55,26 @@ than silently ignored. Runtime enforcement has not been started — everything
 Ambit checks today is static. `ambit` is not published yet; run it from a
 clone as `node src/cli/main.ts check <dir>`.
 
-Effects are inferred from a bundled table of 23 entries (`fetch` plus Node.js
-builtins), which produces only `network`, `fs_read`, `fs_write`, and
+Effects are inferred from two bundled tables. The first, 23 entries (`fetch`
+plus Node.js builtins), produces only `network`, `fs_read`, `fs_write`, and
 `process`. No bundled stub produces `db_read`, `db_write`, `llm`, or `env` —
 those enter the analysis only when something declares them explicitly. A
 `pure` function calling a database driver reports `unknown`, not a
 violation. Stub matching is also import-shape sensitive:
 `import * as fs from "node:fs"` is recognized, `import { writeFileSync }
 from "node:fs"` is not, and falls back to `unknown`.
+
+A separate, smaller table (`src/stubs/pure-builtins.ts`) allowlists default-lib
+methods reached through a local value (`set.has(...)`, `arr.map(...)`) that
+have no import binding for the stub table above to key on — `checker.
+getFullyQualifiedName()` names them instead (`"Set.has"`, `"Array.map"`), in
+a namespace kept separate from the module-specifier one. It is deliberately
+narrow: it excludes anything that mutates (`Array.push`, `Array.sort`,
+`Map.set`, `Set.add`), and a method that can take a callback (`map`,
+`filter`, `reduce`, ...) is trusted only when that callback is written inline
+— `arr.map(x => ...)` is walked and attributed to the enclosing function,
+but `arr.map(namedFn)` passes a callback Ambit never sees, so it stays
+`unknown` even though `Array.map` itself is allowlisted.
 
 Higher-order functions (a callback's effects inferred from the argument
 passed at the call site) are not implemented; a call through a callback
