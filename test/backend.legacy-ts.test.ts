@@ -76,10 +76,12 @@ describe("legacyTsBackend.extractProject", () => {
     expect(fn?.location.col).toBeGreaterThan(0);
   });
 
-  it("marks a bare call to a named import as import-binding (today's alias-resolution gap)", async () => {
+  it("resolves a bare call to a named import via checker.getAliasedSymbol()", async () => {
     const { files } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
     const fn = findFn(files, "sample.ts#callsImportedFunction");
-    expect(fn?.calls.some((c) => c.unresolvedReason === "import-binding")).toBe(true);
+    expect(fn?.calls).toContainEqual(
+      expect.objectContaining({ resolvedCallee: "helper.ts#helperPureFn" }),
+    );
   });
 
   it("marks a builtin method reached through a local value as builtin-method", async () => {
@@ -142,5 +144,57 @@ describe("legacyTsBackend.extractProject", () => {
     // Every skip in the fixtures is deliberate (skipped.ts); if extracted
     // top-level functions leaked into this count, it would be much larger.
     expect(totalSkipped).toBeLessThan(20);
+  });
+});
+
+describe("legacyTsBackend.extractProject (cross-module alias resolution)", () => {
+  const CROSS_MODULE_ROOT = path.join(import.meta.dirname, "fixtures", "cross-module");
+
+  function findFn(
+    files: Awaited<ReturnType<typeof legacyTsBackend.extractProject>>["files"],
+    id: string,
+  ) {
+    for (const file of files) {
+      const fn = file.functions.find((f) => f.id === id);
+      if (fn) return fn;
+    }
+    return undefined;
+  }
+
+  it("resolves a call to a directly-imported project function, not just a same-file one", async () => {
+    const { files } = await legacyTsBackend.extractProject(CROSS_MODULE_ROOT);
+    const fn = findFn(files, "direct-import.ts#pureCallsImportedNetwork");
+    expect(fn?.calls).toContainEqual(
+      expect.objectContaining({ resolvedCallee: "callee.ts#fetchRate" }),
+    );
+  });
+
+  it("resolves a call imported through a barrel (index.ts) re-export to the original declaration", async () => {
+    const { files } = await legacyTsBackend.extractProject(CROSS_MODULE_ROOT);
+    const fn = findFn(files, "barrel-import.ts#pureCallsBarrelImportedNetwork");
+    expect(fn?.calls).toContainEqual(
+      expect.objectContaining({ resolvedCallee: "callee.ts#fetchRate" }),
+    );
+  });
+
+  it("classifies a named import of a builtin as external-module, not import-binding", async () => {
+    const { files } = await legacyTsBackend.extractProject(CROSS_MODULE_ROOT);
+    const fn = findFn(files, "builtin-named-import.ts#callsBuiltinNamedImport");
+    const call = fn?.calls.find((c) => !c.resolvedCallee);
+    expect(call?.unresolvedReason).toBe("external-module");
+  });
+
+  it("classifies a named import from a nonexistent module as import-binding", async () => {
+    const { files } = await legacyTsBackend.extractProject(CROSS_MODULE_ROOT);
+    const fn = findFn(files, "missing-module-import.ts#callsMissingModuleImport");
+    const call = fn?.calls.find((c) => !c.resolvedCallee);
+    expect(call?.unresolvedReason).toBe("import-binding");
+  });
+
+  it("still names a call through an unresolvable import binding for stub matching (import-binding is a fallback reason, not an early return)", async () => {
+    const { files } = await legacyTsBackend.extractProject(CROSS_MODULE_ROOT);
+    const fn = findFn(files, "missing-module-import.ts#callsMissingModuleImport");
+    const call = fn?.calls.find((c) => !c.resolvedCallee);
+    expect(call?.calleeQualifiedName).toBe("doesNotExist");
   });
 });

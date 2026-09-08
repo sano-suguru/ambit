@@ -39,10 +39,8 @@ export function callsUnknownCallback(cb: () => void): void {
   cb();
 }
 
-// Bare call to a named import: today's known cross-module resolution gap
-// (`getSymbolAtLocation` resolves to the `ImportSpecifier`, not the
-// declaration behind it — see `classifyCall`'s "import-binding" comment).
-// Fixed by following `checker.getAliasedSymbol()`.
+// Bare call to a named import, resolved cross-module via
+// `checker.getAliasedSymbol()` (see `classifyCall`).
 export function callsImportedFunction(): number {
   return helperPureFn();
 }

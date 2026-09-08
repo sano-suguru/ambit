@@ -9,10 +9,14 @@ import type { SymbolId } from "./symbol-id.ts";
  * what was previously reported as a bare `unresolved-symbol`, so `ambit
  * check --coverage` can show *why* a call is unresolved instead of a single
  * undifferentiated count:
- * - `import-binding`: the callee resolved to an `ImportSpecifier`/
- *   `ImportClause` rather than the declaration behind it — today's known
- *   cross-module resolution gap (the connector layer does not yet follow
- *   `checker.getAliasedSymbol()`). Should trend toward 0 as that gap closes.
+ * - `import-binding`: the callee is a call to an imported identifier whose
+ *   alias could not be followed to any declaration at all — the module
+ *   specifier doesn't resolve, or the named export doesn't exist
+ *   (`checker.getAliasedSymbol()` returns TypeScript's `unknownSymbol`).
+ *   Distinct from `unresolved-symbol` in that the shape is known (an import
+ *   binding) even though the target is not; unlike `unresolved-symbol`, a
+ *   stub match may still apply if the qualified name happens to be
+ *   recognized (see `classifyCall`).
  * - `builtin-method`: the callee resolved to an ambient declaration from
  *   TypeScript's default lib (e.g. `Array.prototype.map`, `Set.prototype.has`)
  *   whose call site (a method on a local value) `qualifiedNameOf` cannot
