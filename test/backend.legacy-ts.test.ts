@@ -110,10 +110,14 @@ describe("legacyTsBackend.extractProject", () => {
     expect(skippedFunctions.get("nested-function")).toBeGreaterThanOrEqual(1);
   });
 
-  it("classifies a PropertyAssignment-form object-literal method (`{ foo: () => 1 }`) the same as shorthand (`{ foo() {} }`)", async () => {
-    const { skippedFunctions } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
-    // withMethod.method (shorthand) + withPropertyArrow.method (PropertyAssignment arrow)
-    expect(skippedFunctions.get("object-literal-method")).toBeGreaterThanOrEqual(2);
+  it("keeps counting object-literal members it cannot give a stable declaration path", async () => {
+    const { files, skippedFunctions } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
+    // unindexable-literals.ts: computed, string and numeric keys have no
+    // spelling that survives symbolId's "."-join; a nested literal and one
+    // declared inside a function body have no declaration path at all.
+    expect(skippedFunctions.get("object-literal-method")).toBeGreaterThanOrEqual(5);
+    expect(findFn(files, "unindexable-literals.ts#computedKey.computed")).toBeUndefined();
+    expect(findFn(files, "unindexable-literals.ts#nestedLiteral.inner")).toBeUndefined();
   });
 
   it("names an allowlisted builtin method called inline via checker.getFullyQualifiedName", async () => {
@@ -146,29 +150,96 @@ describe("legacyTsBackend.extractProject", () => {
     expect(call?.callbackByReference).toBeUndefined();
   });
 
-  it("leaves a call through an object-literal member unresolved, with no name to key a stub on", async () => {
+  it("resolves a call through an object-literal member whose body lives in the literal", async () => {
+    const { files } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
+    for (const [caller, callee] of [
+      ["callsLiteralWithShorthandMethod", "literalWithShorthandMethod.run"],
+      ["callsLiteralWithArrow", "literalWithArrow.run"],
+      ["callsLiteralSatisfies", "literalSatisfies.run"],
+    ] as const) {
+      const fn = findFn(files, `call-resolution.ts#${caller}`);
+      expect(fn?.calls).toContainEqual(
+        expect.objectContaining({ resolvedCallee: `call-resolution.ts#${callee}` }),
+      );
+    }
+  });
+
+  it("resolves a call through an object-literal member that names an already-indexed function", async () => {
     const { files } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
     for (const caller of [
-      "call-resolution.ts#callsLiteralWithNamedFunction",
-      "call-resolution.ts#callsLiteralWithShorthandMethod",
-      "call-resolution.ts#callsLiteralTypedByInterface",
+      "callsLiteralWithNamedFunction",
+      "callsLiteralWithShorthand",
+      "callsLiteralTypedByInterface",
     ]) {
-      const fn = findFn(files, caller);
+      const fn = findFn(files, `call-resolution.ts#${caller}`);
+      // The property is an alias, not a declaration of its own: the call
+      // resolves to the named function's existing id, and no second id is
+      // minted for the same body.
+      expect(fn?.calls).toContainEqual(
+        expect.objectContaining({ resolvedCallee: "call-resolution.ts#indexedTarget" }),
+      );
+    }
+  });
+
+  it("resolves through the receiver's value, so a type annotation on the literal changes nothing", async () => {
+    const { files } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
+    // `literalTypedByInterface: Dispatcher` makes the checker resolve `.run`
+    // to Dispatcher's member signature. Following the value reaches the
+    // literal anyway — this is the shape Ambit's own `legacyTsBackend` uses.
+    const annotated = findFn(files, "call-resolution.ts#callsLiteralTypedByInterface");
+    const bare = findFn(files, "call-resolution.ts#callsLiteralWithNamedFunction");
+    expect(annotated?.calls.map((c) => c.resolvedCallee)).toEqual(
+      bare?.calls.map((c) => c.resolvedCallee),
+    );
+  });
+
+  it("leaves a call unresolved when no single object literal stands behind the receiver", async () => {
+    const { files } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
+    for (const caller of [
+      // The receiver is a parameter: any object satisfying the type could
+      // arrive at runtime.
+      "callsInterfaceParam",
+      "callsTypeAliasParam",
+      // `let` may hold a different object by the time the call runs.
+      "callsMutableLiteral",
+      // A spread can override the member with something this walk cannot see.
+      "callsSpreadLiteral",
+    ]) {
+      const fn = findFn(files, `call-resolution.ts#${caller}`);
       expect(fn?.calls).toContainEqual(
         expect.objectContaining({ unresolvedReason: "unresolved-symbol" }),
       );
-      // No `calleeQualifiedName` either, so `--coverage` can count the call
-      // but never names it in `top-unresolved-names`.
       expect(fn?.calls.every((c) => c.calleeQualifiedName === undefined)).toBe(true);
     }
   });
 
-  it("resolves a call to a class instance method, unlike the object-literal forms", async () => {
+  it("lets an object-literal member carry its own @effects contract", async () => {
+    const { files } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
+    const member = findFn(files, "call-resolution.ts#literalWithDeclaredMethod.read");
+    expect(member?.jsDoc?.tags.get("effects")).toBe("fs_read");
+
+    const caller = findFn(files, "call-resolution.ts#callsLiteralDeclaredMethod");
+    expect(caller?.calls).toContainEqual(
+      expect.objectContaining({
+        resolvedCallee: "call-resolution.ts#literalWithDeclaredMethod.read",
+      }),
+    );
+  });
+
+  it("resolves a call to a class instance method", async () => {
     const { files } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
     const fn = findFn(files, "call-resolution.ts#callsClassInstanceMethod");
     expect(fn?.calls).toContainEqual(
       expect.objectContaining({ resolvedCallee: "call-resolution.ts#IndexedClass.method" }),
     );
+  });
+
+  it("counts a module-scope variable-bound arrow as extracted only, never also as skipped", async () => {
+    const { files, skippedFunctions } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
+    // The map is keyed on the VariableDeclaration while the skip walk sees the
+    // ArrowFunction, so this shape used to land in both tallies.
+    expect(findFn(files, "call-resolution.ts#boundArrow")).toBeDefined();
+    expect(skippedFunctions.get("other") ?? 0).toBe(0);
   });
 
   it("does not count an indexed (extracted) function as skipped", async () => {
@@ -177,6 +248,26 @@ describe("legacyTsBackend.extractProject", () => {
     // Every skip in the fixtures is deliberate (skipped.ts); if extracted
     // top-level functions leaked into this count, it would be much larger.
     expect(totalSkipped).toBeLessThan(20);
+  });
+});
+
+describe("legacyTsBackend.extractProject (self-hosting)", () => {
+  const SRC_ROOT = path.join(import.meta.dirname, "..", "src");
+
+  it("resolves Ambit's own legacyTsBackend.extractProject call from main", async () => {
+    // `legacyTsBackend: TsBackend = { extractProject }` makes the checker
+    // resolve this callee to TsBackend's member signature in core/backend.ts,
+    // so only following the receiver's value reaches the declared function.
+    // Nothing smaller than a self-hosting assertion catches that.
+    const { files } = await legacyTsBackend.extractProject(SRC_ROOT);
+    const main = files
+      .find((f) => f.filePath === "cli/main.ts")
+      ?.functions.find((fn) => fn.id === "cli/main.ts#main");
+    expect(main?.calls).toContainEqual(
+      expect.objectContaining({
+        resolvedCallee: "checker/backend/legacy-ts.ts#extractProject",
+      }),
+    );
   });
 });
 
