@@ -72,8 +72,15 @@ function toCall(site: CallSite): Call {
     // A named call that didn't resolve to a project function and doesn't
     // match a known stub (e.g. a third-party library call): unresolved, not
     // "no effect" (DESIGN.md §3.4 — never turn an unanalyzed call into
-    // "violation-free").
-    return { kind: "unresolved", location: site.location, reason: "unresolved-symbol" };
+    // "violation-free"). The connector layer may already know a more
+    // specific reason than the residual "unresolved-symbol" (see
+    // `CallSite.unresolvedReason`'s doc comment).
+    return {
+      kind: "unresolved",
+      location: site.location,
+      reason: site.unresolvedReason ?? "unresolved-symbol",
+      qualifiedName: site.calleeQualifiedName,
+    };
   }
   return {
     kind: "unresolved",
