@@ -145,6 +145,12 @@ describe("ambit check (CLI)", () => {
     expect(stderr).toContain("--format");
   });
 
+  it("exits 2 and writes to stderr for an unrecognized flag, instead of silently ignoring it", async () => {
+    const { exitCode, stderr } = await runCli(["check", PROPAGATION_FIXTURES, "--bogus"]);
+    expect(exitCode).toBe(2);
+    expect(stderr).toContain("--bogus");
+  });
+
   it("every NDJSON diagnostic carries an engine identity", async () => {
     const { stdout } = await runCli(["check", PROPAGATION_FIXTURES, "--format", "json"]);
     const lines = stdout.trim().split("\n").filter(Boolean);

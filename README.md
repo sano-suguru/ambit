@@ -67,12 +67,19 @@ from "node:fs"` is not, and falls back to `unknown`.
 Higher-order functions (a callback's effects inferred from the argument
 passed at the call site) are not implemented; a call through a callback
 parameter falls back to `unknown` rather than being inferred. Function
-extraction covers named function declarations, class methods, and
-variable-bound function/arrow expressions — getters/setters, object-literal
-methods, anonymous `export default` functions, nested functions, and
-callback arguments are not analyzed for effects at all (not even as
-`unknown`). `ambit check --coverage` counts them by kind, so the gap is
-visible even though it isn't closed yet.
+extraction — the set of function-like nodes that can carry their own
+`@effects` contract — covers named function declarations, class methods, and
+variable-bound function/arrow expressions. A call inside any other
+function-like node (a getter/setter, an object-literal method, an anonymous
+`export default` function, a nested function declaration, an inline callback
+argument, or anything else with no extracted ancestor — e.g. a class
+constructor) is still walked and its effects attributed to the nearest
+enclosing *extracted* function, if there is one; it is only invisible when no
+such ancestor exists. `ambit check --coverage` reports these nodes as
+"skipped" by kind (`getter-setter`, `object-literal-method`,
+`anonymous-default-export`, `callback-argument`, `nested-function`, and a
+residual `other`) — not because their effects go unseen, but because none of
+them can declare a contract of their own.
 
 The design is documented in [docs/DESIGN.md](docs/DESIGN.md) (a Draft — the
 RFC process for spec changes starts at the first public release, so this
