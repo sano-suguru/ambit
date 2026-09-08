@@ -34,7 +34,7 @@ With `--format json`, the same violation comes out as NDJSON, meant to be
 consumed by an agent directly:
 
 ```json
-{"id":"AMB-E001","severity":"error","category":"effects","message":"calculateTax declares pure but performs [network] directly","location":{"file":"tax.ts","line":2,"col":17,"endLine":2,"endCol":29},"contract":{"declared":["pure"],"observed":["network"],"via":[]},"fixes":[],"docs":"docs/diagnostics/README.md#amb-e001"}
+{"id":"AMB-E001","severity":"error","category":"effects","message":"calculateTax declares pure but performs [network] directly","location":{"file":"tax.ts","line":2,"col":17,"endLine":2,"endCol":29},"contract":{"declared":["pure"],"observed":["network"],"via":[]},"fixes":[],"docs":"docs/diagnostics/README.md#amb-e001","engine":{"name":"typescript-legacy","version":"5.9.3"}}
 ```
 
 ## Status
@@ -43,10 +43,12 @@ consumed by an agent directly:
 
 Today `ambit check` enforces `@effects`. `@capabilities`, `@budget`, and
 `@entrypoint` are part of the contract model and documented in the design
-spec, but are not implemented yet. `ambit init` is planned, not built.
-Runtime enforcement has not been started — everything Ambit checks today is
-static. `ambit` is not published yet; run it from a clone as
-`node src/cli/main.ts check <dir>`.
+spec, but are not implemented yet. `ambit init`, `ambit run`, `ambit agent`,
+`ambit stubs`, and `ambit sbom` are planned, not built; `ambit check`'s own
+`--coverage` and `--strict` flags are also not built yet, and passing them
+is rejected (exit 2) rather than silently ignored. Runtime enforcement has
+not been started — everything Ambit checks today is static. `ambit` is not
+published yet; run it from a clone as `node src/cli/main.ts check <dir>`.
 
 Effects are inferred from a bundled table of 23 entries (`fetch` plus Node.js
 builtins), which produces only `network`, `fs_read`, `fs_write`, and
@@ -56,6 +58,14 @@ those enter the analysis only when something declares them explicitly. A
 violation. Stub matching is also import-shape sensitive:
 `import * as fs from "node:fs"` is recognized, `import { writeFileSync }
 from "node:fs"` is not, and falls back to `unknown`.
+
+Higher-order functions (a callback's effects inferred from the argument
+passed at the call site) are not implemented; a call through a callback
+parameter falls back to `unknown` rather than being inferred. Function
+extraction covers named function declarations, class methods, and
+variable-bound function/arrow expressions — getters/setters, object-literal
+methods, and anonymous `export default` functions are not analyzed at all
+(not even as `unknown`).
 
 The design is documented in [docs/DESIGN.md](docs/DESIGN.md) (a Draft — the
 RFC process for spec changes starts at the first public release, so this

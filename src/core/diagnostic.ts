@@ -56,6 +56,17 @@ export interface DiagnosticFix {
 }
 
 /**
+ * The analysis backend that produced a diagnostic (DESIGN.md §3.4: "診断・
+ * coverage・性能記録に解析エンジンとそのバージョンを識別できる情報を持たせる").
+ * Only the engine identity is captured here; the schema version and Ambit's
+ * own version that §5.2 groups alongside it are not yet defined.
+ */
+export interface DiagnosticEngine {
+  readonly name: string;
+  readonly version: string;
+}
+
+/**
  * One diagnostic, matching the shape in DESIGN.md §5.1. `ambit check
  * --format json` emits one of these per line (NDJSON).
  */
@@ -69,4 +80,5 @@ export interface Diagnostic {
   /** Empty when no concrete, applicable patch could be generated (§5.3). */
   readonly fixes: readonly DiagnosticFix[];
   readonly docs?: string;
+  readonly engine: DiagnosticEngine;
 }

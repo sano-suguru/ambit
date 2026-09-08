@@ -14,6 +14,10 @@ const EXIT_ANALYSIS_FAILED = 2;
 
 export async function main(argv: readonly string[]): Promise<number> {
   const args = parseArgs(argv);
+  if (args.error) {
+    process.stderr.write(`ambit check: ${args.error}\nUsage: ambit check <dir> [--format json]\n`);
+    return EXIT_ANALYSIS_FAILED;
+  }
   if (args.command !== "check") {
     process.stderr.write(
       `Unknown command: ${args.command}\nUsage: ambit check <dir> [--format json]\n`,
@@ -26,7 +30,10 @@ export async function main(argv: readonly string[]): Promise<number> {
     const files = await legacyTsBackend.extractProject(args.dir);
     const summaries = summarizeExtractedFiles(files);
     const state = propagate(summaries);
-    diagnostics = diagnose(state);
+    diagnostics = diagnose(state, {
+      name: legacyTsBackend.name,
+      version: legacyTsBackend.version,
+    });
   } catch (error) {
     process.stderr.write(`ambit check: analysis failed: ${errorMessage(error)}\n`);
     return EXIT_ANALYSIS_FAILED;
@@ -44,7 +51,11 @@ interface Args {
   readonly command: string;
   readonly dir: string;
   readonly format: "json" | "text";
+  /** Set when argv could not be parsed; `main` reports it and exits 2 rather than running with a silently-ignored option (DESIGN.md §3.4). */
+  readonly error?: string;
 }
+
+const KNOWN_FLAGS = new Set(["--format"]);
 
 function parseArgs(argv: readonly string[]): Args {
   const [command = "check", ...rest] = argv;
@@ -55,9 +66,21 @@ function parseArgs(argv: readonly string[]): Args {
     const arg = rest[i];
     if (arg === "--format") {
       const value = rest[i + 1];
-      if (value === "json" || value === "text") format = value;
+      if (value !== "json" && value !== "text") {
+        return {
+          command,
+          dir,
+          format,
+          error: `--format expects "json" or "text", got ${value === undefined ? "nothing" : JSON.stringify(value)}`,
+        };
+      }
+      format = value;
       i++;
-    } else if (arg && !arg.startsWith("--")) {
+    } else if (arg?.startsWith("--")) {
+      if (!KNOWN_FLAGS.has(arg)) {
+        return { command, dir, format, error: `unknown option: ${arg}` };
+      }
+    } else if (arg) {
       dir = arg;
     }
   }

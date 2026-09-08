@@ -29,13 +29,17 @@ performs a `fetch`.
 
 ## AMB-W001
 
-Pure reaches unknown.
+Declared effects reach unknown.
 
 **Severity:** warning
 **Category:** effects
 
-A function declared `@effects pure` calls a function whose effects could not
-be resolved (DESIGN.md §4.2, rule 3). This does not by itself mean a
-violation occurred — `unknown` may resolve to `pure` once the callee is
-annotated or a stub is added — but the declaration is not yet backed by a
-verified guarantee.
+A function with a declared `@effects` set (including `pure`) calls a
+function whose effects could not be resolved (DESIGN.md §4.2, rule 3). This
+does not by itself mean a violation occurred — `unknown` may resolve to a
+set already covered by the declaration once the callee is annotated or a
+stub is added — but the declaration is not yet backed by a verified
+guarantee.
+
+Example: a function declared `@effects pure` or `@effects network` calls
+`eval(...)` or a function with an unresolved call graph.

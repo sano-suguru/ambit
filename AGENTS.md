@@ -21,7 +21,14 @@ a fact.
 When code and `docs/DESIGN.md` disagree, do not silently pick one. The
 disagreement is a finding: surface it, and record the resolution in
 `docs/DESIGN.md` (before the first publish, edit it directly — see
-Documents below).
+Documents below) — but only if the resolution is a design decision. Test
+it against: would this sentence still be true if all the code were
+discarded? If yes, it belongs in `docs/DESIGN.md`. If no, it's
+implementation status, and belongs in `README.md` or `test/`, not in
+`docs/DESIGN.md` — see Documents below. Where the spec requires something
+the code does not yet do, fix the code or file it under `docs/DESIGN.md`
+§12 (未解決の問題); don't paper over the gap with a note that the code is
+still catching up.
 
 `docs/DESIGN.md` §2 sets the project's design-principle priority order
 (P1→P5); follow it when principles conflict.

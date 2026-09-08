@@ -1,4 +1,10 @@
-import type { ContractViaEntry, Diagnostic, KnownEffect, SymbolId } from "../core/index.ts";
+import type {
+  ContractViaEntry,
+  Diagnostic,
+  DiagnosticEngine,
+  KnownEffect,
+  SymbolId,
+} from "../core/index.ts";
 import { excessEffects, KNOWN_EFFECTS } from "../core/index.ts";
 import type { PropagatedFunction } from "./propagate.ts";
 import { unknownWitnessChain, witnessChain } from "./propagate.ts";
@@ -8,8 +14,14 @@ import { unknownWitnessChain, witnessChain } from "./propagate.ts";
  * produce diagnostics (DESIGN.md §5.1). Undeclared functions
  * (`declared.kind === "none"`) are not diagnosed here — see the plan's note
  * on §4.2/§4.3: undeclared is a coverage concern, not a propagation input.
+ *
+ * `engine` identifies the backend that produced `state` (DESIGN.md §3.4) and
+ * is attached to every diagnostic emitted.
  */
-export function diagnose(state: ReadonlyMap<SymbolId, PropagatedFunction>): readonly Diagnostic[] {
+export function diagnose(
+  state: ReadonlyMap<SymbolId, PropagatedFunction>,
+  engine: DiagnosticEngine,
+): readonly Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
 
   for (const propagated of state.values()) {
@@ -20,12 +32,13 @@ export function diagnose(state: ReadonlyMap<SymbolId, PropagatedFunction>): read
     const excess = excessEffects(declaredEffects, propagated.observed);
 
     if (excess.size > 0) {
-      diagnostics.push(buildExcessDiagnostic(propagated, declaredEffects.effects, excess, state));
+      diagnostics.push(
+        buildExcessDiagnostic(propagated, declaredEffects.effects, excess, state, engine),
+      );
     }
 
-    const isDeclaredPure = declaredEffects.effects.size === 0 && !declaredEffects.unknown;
-    if (isDeclaredPure && propagated.observed.unknown) {
-      diagnostics.push(buildUnknownDiagnostic(propagated, state));
+    if (propagated.observed.unknown) {
+      diagnostics.push(buildUnknownDiagnostic(propagated, declaredEffects.effects, state, engine));
     }
   }
 
@@ -37,6 +50,7 @@ function buildExcessDiagnostic(
   declared: ReadonlySet<KnownEffect>,
   excess: ReadonlySet<KnownEffect>,
   state: ReadonlyMap<SymbolId, PropagatedFunction>,
+  engine: DiagnosticEngine,
 ): Diagnostic {
   const { summary } = propagated;
 
@@ -68,22 +82,26 @@ function buildExcessDiagnostic(
     },
     fixes: [],
     docs: "docs/diagnostics/README.md#amb-e001",
+    engine,
   };
 }
 
 function buildUnknownDiagnostic(
   propagated: PropagatedFunction,
+  declared: ReadonlySet<KnownEffect>,
   state: ReadonlyMap<SymbolId, PropagatedFunction>,
+  engine: DiagnosticEngine,
 ): Diagnostic {
   const { summary } = propagated;
   const chain = unknownWitnessChain(summary.id, state);
   const via = chainToVia(chain, state);
   const fnName = displayName(summary.id);
+  const declaredList = declaredContractList(declared).join(", ");
 
   const message =
     via.length > 0
-      ? `${fnName} declares pure but calls ${displayName(via[via.length - 1]?.symbol ?? summary.id)} which could not be resolved`
-      : `${fnName} declares pure but calls something that could not be resolved`;
+      ? `${fnName} declares ${declaredList} but calls ${displayName(via[via.length - 1]?.symbol ?? summary.id)} which could not be resolved`
+      : `${fnName} declares ${declaredList} but calls something that could not be resolved`;
 
   return {
     id: "AMB-W001",
@@ -92,14 +110,13 @@ function buildUnknownDiagnostic(
     message,
     location: summary.location,
     contract: {
-      // buildUnknownDiagnostic only fires when the function declares pure
-      // (see diagnose()'s isDeclaredPure guard).
-      declared: ["pure"],
+      declared: declaredContractList(declared),
       observed: [...propagated.observed.effects],
       via,
     },
     fixes: [],
     docs: "docs/diagnostics/README.md#amb-w001",
+    engine,
   };
 }
 

@@ -15,7 +15,7 @@ async function diagnoseFixtures(): Promise<readonly Diagnostic[]> {
   const files = await legacyTsBackend.extractProject(FIXTURE_ROOT);
   const summaries = summarizeExtractedFiles(files);
   const state = propagate(summaries);
-  return diagnose(state);
+  return diagnose(state, { name: legacyTsBackend.name, version: legacyTsBackend.version });
 }
 
 /**
@@ -108,6 +108,24 @@ describe("diagnose (end-to-end: backend -> summarize -> propagate -> diagnose)",
       expect(diag.location.line).toBeGreaterThan(0);
       expect(diag.location.col).toBeGreaterThan(0);
     }
+  });
+
+  it("every diagnostic carries the backend's engine identity (§3.4)", async () => {
+    const diagnostics = await diagnoseFixtures();
+    expect(diagnostics.length).toBeGreaterThan(0);
+    for (const diag of diagnostics) {
+      expect(diag.engine).toEqual({
+        name: legacyTsBackend.name,
+        version: legacyTsBackend.version,
+      });
+    }
+  });
+
+  it("rule 3 generalized: a non-pure declaration reaching unknown also warns via AMB-W001", async () => {
+    const diagnostics = await diagnoseFixtures();
+    const diag = byFunction(diagnostics, "networkReachesUnknown");
+    expect(diag?.id).toBe("AMB-W001");
+    expect(diag?.contract?.declared).toEqual(["network"]);
   });
 
   it("every diagnostic's docs field resolves to a heading that actually exists in docs/diagnostics/README.md", async () => {

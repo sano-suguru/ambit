@@ -71,4 +71,26 @@ describe("ambit check (CLI)", () => {
     expect(firstLine).toMatch(/^(error|warning): /);
     expect(() => JSON.parse(firstLine ?? "")).toThrow();
   });
+
+  it("exits 2 and writes to stderr for an unimplemented flag, instead of silently ignoring it", async () => {
+    const { exitCode, stderr } = await runCli(["check", PROPAGATION_FIXTURES, "--coverage"]);
+    expect(exitCode).toBe(2);
+    expect(stderr).toContain("--coverage");
+  });
+
+  it("exits 2 and writes to stderr for an invalid --format value", async () => {
+    const { exitCode, stderr } = await runCli(["check", PROPAGATION_FIXTURES, "--format", "xml"]);
+    expect(exitCode).toBe(2);
+    expect(stderr).toContain("--format");
+  });
+
+  it("every NDJSON diagnostic carries an engine identity", async () => {
+    const { stdout } = await runCli(["check", PROPAGATION_FIXTURES, "--format", "json"]);
+    const lines = stdout.trim().split("\n").filter(Boolean);
+    for (const line of lines) {
+      const diagnostic = JSON.parse(line);
+      expect(diagnostic.engine).toHaveProperty("name");
+      expect(diagnostic.engine).toHaveProperty("version");
+    }
+  });
 });
