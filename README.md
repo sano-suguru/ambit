@@ -1,35 +1,35 @@
 # Ambit
 
-TypeScript の上に乗る**契約層**と、AIコーディングエージェントと一体になった**ツールチェーン**。
+A **contract layer** on top of TypeScript, paired with a toolchain built for AI coding agents.
 
-Ambit は新しい言語ではない。文法を変えず、「副作用・権限・予算」の契約を既存コードに宣言として足し、AIが書いたコードの契約違反を機械的に止める。名前は *ambit*（権限や活動の及ぶ範囲）から。宣言した範囲の内側だけを保証し、外側は保証しないことを隠さない。
+Ambit is not a new language. It doesn't change the grammar — it adds declarations for "effects, capabilities, and budget" to existing code, and mechanically stops contract violations in AI-written code. The name comes from *ambit*: the range of one's authority or activity. Ambit guarantees only what's inside the declared range, and doesn't hide what's outside it.
 
-## なぜ新言語ではないのか
+## Why not a new language
 
-- AIは学習データが多い言語ほど正確に書けることが期待できる。新言語の学習を前提にしない。
-- 既存資産（npm / tsc / CI / エディタ）を活用する。
-- 契約宣言は既存の TypeScript に追加する。撤退時の変更を小さく保ち、撤退手順を自動テストする。
+- AI is expected to write more accurate code in languages it has seen more of in training. We don't assume the model will learn a new language.
+- We build on existing assets (npm / tsc / CI / editors).
+- Contract declarations are added to existing TypeScript. This keeps the diff small on the way out, and the exit path is tested automatically.
 
-TypeScript が JavaScript にやったことの、次の段階を狙う。
+We're aiming for the next step after what TypeScript did to JavaScript.
 
-## なぜ TypeScript なのか
+## Why TypeScript
 
-契約の静的検査には、型・シンボル・呼び出しシグネチャの情報が役立つ。TypeScript のコンパイラからそれらを取得し、Ambit は契約の推論・伝播・検査を担う。
+Static checking of contracts benefits from type, symbol, and call-signature information. Ambit gets that information from the TypeScript compiler, and takes on the inference, propagation, and checking of contracts itself.
 
-ただし、呼び出しシグネチャが取得できても、実行時の呼び出し先が一意に確定するとは限らない。コールバック、動的ディスパッチ、解析不能な呼び出しは、Ambit 側で可能な呼び出し先や `unknown` を扱う。
+But a resolved call signature doesn't always mean the runtime call target is uniquely determined. For callbacks, dynamic dispatch, and calls that can't be statically resolved, Ambit works with the set of possible call targets, or with `unknown`.
 
-## Ambit 自体は何で作るのか
+## What Ambit itself is built with
 
-**TypeScript で契約解析・CLI・ランタイムを実装し、型解析は Go 製のネイティブ TypeScript に公式 API 経由で任せる構成を、最優先の検証候補とする。** 実装言語と型解析エンジンの実行言語を区別する。
+**The leading candidate is to implement contract analysis, the CLI, and the runtime in TypeScript, and delegate type analysis to the Go-based native TypeScript compiler via its official API.** We distinguish the implementation language from the language the type-analysis engine runs in.
 
-- ネイティブ API は確認した配布版（7.0.2）では `unstable`。クライアントとエンジンのバージョンを固定し、適合性・性能・更新への追従負担を確認してから製品の既定に採択する。
-- 旧 TypeScript Compiler API は、仕様検証と TS 5.x 互換性比較の基準に使う。製品で二つのエンジンを恒久保守することは未決定。
-- Go の内部コンパイラへの直接依存や Rust の追加は、公式 API の機能不足や通信負荷など、具体的な問題が判明した場合に比較する。
-- ランタイムにコンパイラを持ち込まない。CLI とエディタは共通の契約チェッカーを使う。
+- The native API is `unstable` as of the distributed version we checked (7.0.2). We'll fix the client and engine versions, verify conformance, performance, and the maintenance burden of tracking API updates, before adopting it as the product default.
+- The legacy TypeScript Compiler API is our baseline for spec verification and TS 5.x compatibility comparison. Whether the product permanently maintains two engines is undecided.
+- Depending directly on Go's internal compiler, or adding Rust, is something we'll compare only if a concrete problem shows up — missing functionality in the official API, or communication overhead, for example.
+- The runtime doesn't bundle a compiler. The CLI and the editor integration share one contract checker.
 
-ネイティブ版の高速性は Ambit 上で未実証。検証結果と採択条件は [設計仕様](docs/DESIGN.md) に記載する。
+The native backend's speed advantage is unproven on Ambit itself. Verification results and the adoption criteria are recorded in the [design spec](docs/DESIGN.md).
 
-## 何をするか
+## What it does
 
 ```ts
 /** @effects pure */
@@ -49,32 +49,33 @@ export async function getUser(id: UserId): Promise<User | null> { /* ... */ }
 export async function GET(req: Request): Promise<Response> { /* ... */ }
 ```
 
-- 宣言は JSDoc。既存の関数本体もシグネチャも変えない。未知のタグは通常の TypeScript の実行時挙動を変えない。
-- `calculateTax` の中で `fetch` を呼ぶコードをAIが書けば、`ambit check` が止める。
-- 宣言のないコードは禁止しない。`unknown` として扱い、解析できない範囲を可視化する。
-- `ambit init` が既存コードのエフェクトを推論し、JSDoc を修正候補として提案する。導入は「宣言を書く作業」ではなく「提案を承認する作業」にする。
-- 診断は最初から機械可読。修正候補と影響範囲を含め、エージェントがそのまま消費する。
-- 静的検査は関数単位、ランタイム強制はエントリポイント単位。動的な権限・予算の検査は、対応するランタイムアダプタで行う。
-- エージェントの反復検査では、コンパイラの状態と契約解析の結果を保持し、変更の影響範囲を再検査する。コメントだけの契約変更も更新対象にする。
+- Declarations are JSDoc. They don't change the function body or its signature. Unrecognized tags don't change normal TypeScript runtime behavior.
+- If an AI writes code that calls `fetch` inside `calculateTax`, `ambit check` stops it.
+- Undeclared code isn't forbidden. It's treated as `unknown`, making the unanalyzed range visible instead of hiding it.
+- `ambit init` infers effects for existing code and proposes JSDoc as fix candidates. Adoption becomes "approve a suggestion" instead of "write declarations by hand."
+- Diagnostics are machine-readable from the start. Fix candidates and impact analysis are included, ready for an agent to consume directly.
+- Static checking is per-function; runtime enforcement is per-entrypoint. Dynamic capability and budget checks run through the corresponding runtime adapter.
+- For an agent's iterative checking, Ambit keeps compiler state and contract-analysis results, and re-checks only what a change could affect. Comment-only contract edits are included in what gets re-checked.
 
-## 何をしないか
+## What it doesn't do
 
-- 文法の変更、独自トランスパイル、独自ランタイム、独自パッケージレジストリ
-- Python など他言語への対応（Phase 1 の出口条件を満たすまで非目標）
-- ブラウザ・フロントエンド、OS・組み込み
-- 「次のモデルなら間違えない」という前提に依存した設計
-- 計測なしでの性能保証、未対応の API や実行環境を含むランタイム強制の保証
+- Change the grammar, build a custom transpiler, build a custom runtime, or build a custom package registry
+- Support other languages such as Python (out of scope until Phase 1's exit criteria are met)
+- Target browsers, frontend code, operating systems, or embedded systems
+- Design around the assumption that "the next model won't make this mistake"
+- Guarantee performance without measurement, or guarantee runtime enforcement for unsupported APIs or execution environments
 
-## 最初の対象
+## Initial target
 
-AIエージェントが大量にコードを書く **Node.js のクラウドバックエンド**（SaaS の API、ワークフロー、LLM エージェント、データ処理）。初期の基準環境は Node.js 24 LTS とする。
+**Node.js cloud backends** — the kind of code AI agents write in bulk today: SaaS APIs, workflows, LLM agents, data processing. The initial baseline environment is Node.js 24 LTS.
 
-対象コードの TypeScript 互換性と、Ambit 本体が使う解析エンジンのバージョンは別に管理する。対応範囲は検証済みの組み合わせとして公開する。
+Target-code TypeScript compatibility and the version of the analysis engine Ambit itself uses are managed separately. Supported combinations are published as they're verified.
 
-## ドキュメント
+## Documentation
 
-- [docs/DESIGN.md](docs/DESIGN.md) — 設計仕様、解析バックエンド、契約モデル、診断、ツールチェーン、検証結果、マイルストーン
+- [docs/DESIGN.md](docs/DESIGN.md) — design spec: analysis backend, contract model, diagnostics, toolchain, verification results, milestones
+- [docs/diagnostics/](docs/diagnostics/README.md) — diagnostic code ledger
 
-## ステータス
+## Status
 
-設計・技術検証段階。仕様は RFC で変更する。本仕様は Draft であり、ネイティブ解析バックエンドの製品採択を確定するものではない。
+Design and technical verification are underway alongside initial implementation. The spec changes through RFCs. This spec is a Draft, and does not finalize the native analysis backend as a product decision.
