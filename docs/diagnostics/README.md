@@ -43,3 +43,19 @@ guarantee.
 
 Example: a function declared `@effects pure` or `@effects network` calls
 `eval(...)` or a function with an unresolved call graph.
+
+## AMB-E002
+
+Unknown effect name in `@effects`.
+
+**Severity:** error
+**Category:** effects
+
+An `@effects` tag contains a token that is neither `pure` nor one of the
+known effects (`network`, `db_read`, `db_write`, `fs_read`, `fs_write`,
+`llm`, `env`, `process`) — most often a typo. The declaration is rejected
+rather than silently narrowed to whatever tokens did parse: the function is
+treated as undeclared (not as `pure`) for propagation, so it never also
+produces `AMB-E001` for the same tag.
+
+Example: `@effects netwrok` (missing an `r`) instead of `@effects network`.

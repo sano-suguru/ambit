@@ -31,3 +31,10 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      # Not a gate: records Ambit's own coverage numbers on every PR without
+      # failing the build on them (DESIGN.md §4.3's coverage KPI is still
+      # being brought down, not yet enforced).
+      - name: Coverage report on Ambit's own source (non-gating)
+        run: node src/cli/main.ts check src --coverage
+        continue-on-error: true

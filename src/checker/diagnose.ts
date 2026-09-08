@@ -26,6 +26,11 @@ export function diagnose(
 
   for (const propagated of state.values()) {
     const { summary } = propagated;
+
+    if (summary.declared.kind === "invalid") {
+      diagnostics.push(buildInvalidEffectsDiagnostic(propagated, summary.declared.raw, engine));
+      continue;
+    }
     if (summary.declared.kind !== "declared") continue;
 
     const declaredEffects = summary.declared.effects;
@@ -116,6 +121,34 @@ function buildUnknownDiagnostic(
     },
     fixes: [],
     docs: "docs/diagnostics/README.md#amb-w001",
+    engine,
+  };
+}
+
+/**
+ * A `@effects` tag that failed to parse (`summarize.ts`'s `parseEffectsTag`
+ * returned `undefined` — a token that is neither `pure` nor a known effect).
+ * Reported instead of the excess/unknown diagnostics above, never alongside
+ * them: `summarizeExtractedFiles` already treats this function as
+ * undeclared for propagation, so it cannot also carry an observed-vs-declared
+ * mismatch.
+ */
+function buildInvalidEffectsDiagnostic(
+  propagated: PropagatedFunction,
+  raw: string,
+  engine: DiagnosticEngine,
+): Diagnostic {
+  const { summary } = propagated;
+  const fnName = displayName(summary.id);
+
+  return {
+    id: "AMB-E002",
+    severity: "error",
+    category: "effects",
+    message: `${fnName} declares @effects "${raw}", which is not "pure" or a known effect name`,
+    location: summary.location,
+    fixes: [],
+    docs: "docs/diagnostics/README.md#amb-e002",
     engine,
   };
 }

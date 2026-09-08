@@ -53,9 +53,16 @@ export type Call = ResolvedCall | StubCall | KnownPureCall | UnresolvedCall;
  * was present at all (undeclared), which this slice treats as a coverage
  * concern rather than as `unknown` in propagation — see the plan's note on
  * DESIGN.md §4.2/§4.3.
+ *
+ * `{ kind: "invalid" }` means a tag was present but contained a token that is
+ * neither `pure` nor a known effect (a typo, e.g. `@effects netwrok`) — see
+ * `AMB-E002` in `diagnose.ts`. Treated the same as `"none"` everywhere except
+ * diagnosis: a broken declaration must not silently collapse to `pure` (an
+ * empty set), and its caller must not trust it as a boundary either.
  */
 export type DeclaredEffects =
   | { readonly kind: "none" }
+  | { readonly kind: "invalid"; readonly raw: string }
   | { readonly kind: "declared"; readonly effects: EffectSet };
 
 /** Ambit's own representation of one function, independent of any backend. */

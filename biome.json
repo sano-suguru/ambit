@@ -7,7 +7,13 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["src/**", "test/**", "*.json", "*.md"]
+    "includes": [
+      "src/**",
+      "test/**",
+      "*.json",
+      "*.md",
+      "!test/fixtures/broken-tsconfig/tsconfig.json"
+    ]
   },
   "formatter": {
     "enabled": true,
