@@ -55,8 +55,8 @@ than silently ignored. Runtime enforcement has not been started — everything
 Ambit checks today is static. `ambit` is not published yet; run it from a
 clone as `node src/cli/main.ts check <dir>`.
 
-Effects are inferred from a bundled table of 23 entries (`fetch` plus Node.js
-builtins), which produces only `network`, `fs_read`, `fs_write`, and
+Effects are inferred from two bundled tables. The first, 23 entries (`fetch`
+plus Node.js builtins), produces only `network`, `fs_read`, `fs_write`, and
 `process`. No bundled stub produces `db_read`, `db_write`, `llm`, or `env` —
 those enter the analysis only when something declares them explicitly. A
 `pure` function calling a database driver reports `unknown`, not a
