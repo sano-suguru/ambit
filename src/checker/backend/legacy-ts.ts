@@ -32,6 +32,7 @@ export const legacyTsBackend: TsBackend = {
   extractProject,
 };
 
+/** @effects fs_read */
 async function extractProject(rootDir: string): Promise<ExtractedProject> {
   const absoluteRoot = path.resolve(rootDir);
 
@@ -99,6 +100,7 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
 
 // ---- project loading --------------------------------------------------
 
+/** @effects fs_read */
 function loadProjectConfig(absoluteRoot: string): {
   rootNames: readonly string[];
   options: ts.CompilerOptions;
@@ -145,6 +147,7 @@ function loadProjectConfig(absoluteRoot: string): {
   return { rootNames, options };
 }
 
+/** @effects fs_read */
 function collectTsFiles(dir: string): readonly string[] {
   const results: string[] = [];
   for (const entry of ts.sys.readDirectory(dir, [".ts", ".tsx"], ["node_modules"])) {
@@ -494,7 +497,7 @@ function classifyCall(
   const calleeType = checker.getTypeAtLocation(callee);
   const isAnyTyped = (calleeType.flags & ts.TypeFlags.Any) !== 0;
 
-  const qualifiedName = qualifiedNameOf(checker, callee);
+  const qualifiedName = qualifiedNameOf(checker, callee, importBindingReason === undefined);
   if (qualifiedName) {
     return { location, calleeQualifiedName: qualifiedName, unresolvedReason: fallbackReason };
   }
@@ -606,19 +609,39 @@ function ambientUnresolvedReason(
 
 /**
  * Best-effort textual name for a call target, for stub matching
- * (`src/stubs/`). A bare identifier yields its own text (`"fetch"`); a
- * property access on an identifier bound to a namespace import yields
- * `"<module specifier>.<property>"` (e.g. `"node:fs".readFileSync` for
- * `import * as fs from "node:fs"; fs.readFileSync(...)`, reported as
- * `"node:fs.readFileSync"`). This does not resolve destructured or
- * re-exported bindings — see the limitation noted in
- * `src/stubs/node-builtins.ts`.
+ * (`src/stubs/`). A property access on an identifier bound to a namespace
+ * or default import yields `"<module specifier>.<property>"` (e.g.
+ * `"node:fs".readFileSync` for `import * as fs from "node:fs";
+ * fs.readFileSync(...)`, reported as `"node:fs.readFileSync"`; likewise for
+ * `import fs from "node:fs"; fs.readFileSync(...)`).
+ *
+ * A bare identifier normally yields its own text (`"fetch"`) — the best
+ * available name for stub matching regardless of whether it resolves to a
+ * lib.dom.d.ts symbol. But when it's bound by a *resolved* named import
+ * (`aliasResolved` — the alias was followed to a real declaration, see
+ * `classifyCall`'s `importBindingReason`), the module specifier is known, so
+ * the name is qualified the same way as a property access: `import {
+ * readFileSync } from "node:fs"; readFileSync(...)` is reported as
+ * `"node:fs.readFileSync"` (using the imported name, not a local `as`
+ * alias). An *unresolved* named import (module doesn't resolve, or the
+ * named export doesn't exist) still falls back to the bare identifier text
+ * — an unresolvable `import { fetch } from "undici"` must still be
+ * recognized as `fetch` for stub matching, not silently downgraded to no
+ * name at all.
+ *
+ * This does not resolve re-exported bindings several hops away — see the
+ * limitation noted in `src/stubs/node-builtins.ts`.
  */
-function qualifiedNameOf(checker: ts.TypeChecker, expr: ts.Expression): string | undefined {
+function qualifiedNameOf(
+  checker: ts.TypeChecker,
+  expr: ts.Expression,
+  aliasResolved: boolean,
+): string | undefined {
   if (ts.isIdentifier(expr)) {
-    // A bare global call (e.g. `fetch(...)`) has no project declaration of
-    // its own; the identifier text is the best available name for stub
-    // matching regardless of whether it resolves to a lib.dom.d.ts symbol.
+    if (aliasResolved) {
+      const namedImportQualifiedName = namedImportQualifiedNameOf(checker, expr);
+      if (namedImportQualifiedName) return namedImportQualifiedName;
+    }
     return expr.text;
   }
   if (ts.isPropertyAccessExpression(expr)) {
@@ -627,6 +650,31 @@ function qualifiedNameOf(checker: ts.TypeChecker, expr: ts.Expression): string |
     return undefined;
   }
   return undefined;
+}
+
+/**
+ * `"<module specifier>.<imported name>"` for an identifier bound by a named
+ * import (`import { readFileSync } from "node:fs"`), using the *imported*
+ * name (`propertyName`) rather than a local `as` alias (`import {
+ * readFileSync as rf } ...` still yields `"node:fs.readFileSync"`, not
+ * `"node:fs.rf"` — the stub table is keyed on the module's own export
+ * names). `undefined` for anything that isn't a named import of a
+ * string-literal module specifier (namespace/default imports are handled by
+ * `moduleSpecifierOf` via the property-access branch above).
+ */
+function namedImportQualifiedNameOf(
+  checker: ts.TypeChecker,
+  expr: ts.Identifier,
+): string | undefined {
+  const symbol = checker.getSymbolAtLocation(expr);
+  const decl = symbol?.declarations?.[0];
+  if (!decl || !ts.isImportSpecifier(decl)) return undefined;
+  const importDecl = decl.parent.parent.parent;
+  if (!ts.isImportDeclaration(importDecl) || !ts.isStringLiteral(importDecl.moduleSpecifier)) {
+    return undefined;
+  }
+  const importedName = decl.propertyName?.text ?? decl.name.text;
+  return `${importDecl.moduleSpecifier.text}.${importedName}`;
 }
 
 function moduleSpecifierOf(checker: ts.TypeChecker, expr: ts.Expression): string | undefined {
@@ -641,8 +689,14 @@ function moduleSpecifierOf(checker: ts.TypeChecker, expr: ts.Expression): string
       return importDecl.moduleSpecifier.text;
     }
   }
-  if (ts.isImportClause(decl.parent)) {
-    const importDecl = decl.parent.parent;
+  // A default import: `import fs from "node:fs"` — `decl` here is the
+  // ImportClause itself (its `name` is the default binding), unlike a named
+  // import where `decl` is an ImportSpecifier under the clause's
+  // NamedImports. `ts.isImportClause(decl.parent)` would never match a
+  // value import (NamespaceImport is caught above; ImportSpecifier's parent
+  // is NamedImports, not ImportClause).
+  if (ts.isImportClause(decl)) {
+    const importDecl = decl.parent;
     if (ts.isImportDeclaration(importDecl) && ts.isStringLiteral(importDecl.moduleSpecifier)) {
       return importDecl.moduleSpecifier.text;
     }

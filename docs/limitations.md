@@ -31,20 +31,22 @@ Effects are inferred from two bundled tables.
 
 ### The stub table (`src/stubs/node-builtins.ts`)
 
-23 entries — `fetch` plus Node.js builtins — producing only `network`,
+25 entries — `fetch` plus Node.js builtins — producing only `network`,
 `fs_read`, `fs_write`, and `process`. No bundled stub produces `db_read`,
 `db_write`, `llm`, or `env`; those effects enter the analysis only when
 something declares them explicitly. A `pure` function calling a database
 driver therefore reports `unknown`, not a violation.
 
 Matching is import-shape sensitive. Lookup keys are built from the *module
-specifier text*, so:
+specifier text* plus the imported property/export name, so:
 
 - `import * as fs from "node:fs"; fs.writeFileSync(...)` is recognized
-- `import { writeFileSync } from "node:fs"; writeFileSync(...)` is not, and
-  falls back to `unknown`
+- `import fs from "node:fs"; fs.writeFileSync(...)` is recognized
+- `import { writeFileSync } from "node:fs"; writeFileSync(...)` is recognized
+  (a local `as` alias doesn't affect matching — the imported name is used)
 
-Aliased or re-exported bindings several hops away are likewise not resolved.
+A destructured or re-exported binding several hops away (e.g. through a
+barrel file) is not resolved to its originating module specifier.
 
 ### The pure built-ins allowlist (`src/stubs/pure-builtins.ts`)
 

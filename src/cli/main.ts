@@ -19,6 +19,7 @@ const EXIT_OK = 0;
 const EXIT_VIOLATIONS = 1;
 const EXIT_ANALYSIS_FAILED = 2;
 
+/** @effects fs_read */
 export async function main(argv: readonly string[]): Promise<number> {
   const args = parseArgs(argv);
   if (args.error) {
