@@ -120,6 +120,8 @@ explicitly.
 - Diagnostic codes → `docs/diagnostics/`
 - Agent working rules → this file
 - External-facing explanation → `README.md`
+- Implementation limitations in detail (README's overflow) →
+  `docs/limitations.md`
 
 Do not write product specification into this file.
 
@@ -128,7 +130,7 @@ onward. Before that, edit `docs/DESIGN.md` and this file directly.
 
 ## Language
 
-Write in English: `README.md`, diagnostic message text, `docs/diagnostics/`,
-this file. Write in Japanese: `docs/DESIGN.md`, RFCs, commit messages,
+Write in English: `README.md`, `docs/limitations.md`, diagnostic message text,
+`docs/diagnostics/`, this file. Write in Japanese: `docs/DESIGN.md`, RFCs, commit messages,
 issues. Keep `effects`, `capabilities`, `budget`, `boundary`, and `unknown`
 in English in both.
