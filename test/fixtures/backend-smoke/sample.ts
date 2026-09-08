@@ -87,3 +87,21 @@ const anyTypedHandler: any = double;
 export function callsPureBuiltinByReferenceAnyTyped(): number[] {
   return [1, 2, 3].map(anyTypedHandler);
 }
+
+// `reduce`'s seed is not a callback slot: its declared parameter type is the
+// type parameter `U`, not a function type. A callable seed must not make the
+// call look like it takes an opaque callback — the callback here is inline
+// and is walked by collectCalls.
+/** @effects pure */
+export function sumAll(xs: number[]): number {
+  return xs.reduce<number>((a, b) => a + b, 0);
+}
+
+// Same shape as sumAll, but the seed itself is a callable value (a thunk).
+// hasOpaqueCallableArgument must not scan the seed argument just because it
+// happens to be callable — it isn't the callback position.
+/** @effects pure */
+export function foldToThunk(xs: number[]): () => number {
+  const seed = () => 0;
+  return xs.reduce<() => number>((_acc, x) => () => x, seed);
+}
