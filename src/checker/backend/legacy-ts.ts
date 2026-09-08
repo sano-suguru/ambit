@@ -449,9 +449,12 @@ function classifyCall(
   // doesn't exist) — `getAliasedSymbol()` returns TypeScript's `unknownSymbol`
   // in that case, whose `declarations` is `undefined`. Recorded as a
   // fallback reason rather than an early return, so a stub match is still
-  // attempted below (an unresolvable `import { fetch } from "undici"` should
-  // still be recognized as `network` via `qualifiedNameOf`, not silently
-  // downgraded to a warning because the module didn't resolve).
+  // attempted below: an *unresolvable* `import { fetch } from "undici"`
+  // falls back to the bare identifier text (`qualifiedNameOf`, below), which
+  // still matches the stub table's bare `"fetch"` entry. A *resolvable* one
+  // is qualified as `"undici.fetch"` instead and needs its own stub row
+  // (see `src/stubs/node-builtins.ts`) — otherwise it downgrades from a
+  // known `network` effect to `unknown`.
   const importBindingReason: UnresolvedReason | undefined =
     isAlias && !declaration ? "import-binding" : undefined;
 
@@ -625,9 +628,11 @@ function ambientUnresolvedReason(
  * `"node:fs.readFileSync"` (using the imported name, not a local `as`
  * alias). An *unresolved* named import (module doesn't resolve, or the
  * named export doesn't exist) still falls back to the bare identifier text
- * — an unresolvable `import { fetch } from "undici"` must still be
- * recognized as `fetch` for stub matching, not silently downgraded to no
- * name at all.
+ * — an unresolvable `import { fetch } from "undici"` is still recognized as
+ * `fetch` for stub matching, not silently downgraded to no name at all. Once
+ * the same import *resolves*, though, it is qualified as `"undici.fetch"`
+ * instead, which only matches the stub table if that qualified name has its
+ * own row — a bare `"fetch"` row does not cover it.
  *
  * This does not resolve re-exported bindings several hops away — see the
  * limitation noted in `src/stubs/node-builtins.ts`.

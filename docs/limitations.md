@@ -31,11 +31,11 @@ Effects are inferred from two bundled tables.
 
 ### The stub table (`src/stubs/node-builtins.ts`)
 
-25 entries — `fetch` plus Node.js builtins — producing only `network`,
-`fs_read`, `fs_write`, and `process`. No bundled stub produces `db_read`,
-`db_write`, `llm`, or `env`; those effects enter the analysis only when
-something declares them explicitly. A `pure` function calling a database
-driver therefore reports `unknown`, not a violation.
+26 entries — `fetch`, `undici`'s `fetch`, plus Node.js builtins — producing
+only `network`, `fs_read`, `fs_write`, and `process`. No bundled stub
+produces `db_read`, `db_write`, `llm`, or `env`; those effects enter the
+analysis only when something declares them explicitly. A `pure` function
+calling a database driver therefore reports `unknown`, not a violation.
 
 Matching is import-shape sensitive. Lookup keys are built from the *module
 specifier text* plus the imported property/export name, so:

@@ -43,6 +43,17 @@ describe("diagnose (end-to-end: backend -> summarize -> propagate -> diagnose)",
     expect(diag?.location.line).toBeGreaterThan(0);
   });
 
+  it("regression (#11): a resolvable named import of undici's fetch is still recognized as network, not downgraded to unknown", async () => {
+    const diagnostics = await diagnoseFixtures();
+    const diag = byFunction(diagnostics, "pureCallsUndiciFetch");
+    expect(diag).toMatchObject({
+      id: "AMB-E001",
+      severity: "error",
+      category: "effects",
+      contract: { declared: ["pure"], observed: ["network"], via: [] },
+    });
+  });
+
   it("rule 5: await does not hide a direct fetch call from detection", async () => {
     const diagnostics = await diagnoseFixtures();
     const diag = byFunction(diagnostics, "pureAsyncCallsFetchDirectly");

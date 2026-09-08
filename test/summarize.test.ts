@@ -77,6 +77,26 @@ describe("summarizeExtractedFiles", () => {
     ]);
   });
 
+  it("resolves a resolvable-import-qualified stub match (e.g. undici's fetch) to a Call with kind 'stub'", () => {
+    const files: ExtractedFile[] = [
+      {
+        filePath: "f.ts",
+        functions: [
+          {
+            id: "f.ts#fn" as never,
+            location: LOC,
+            jsDoc: undefined,
+            calls: [{ location: LOC, calleeQualifiedName: "undici.fetch" }],
+          },
+        ],
+      },
+    ];
+    const [summary] = summarizeExtractedFiles(files);
+    expect(summary?.calls).toEqual([
+      { kind: "stub", location: LOC, effect: "network", qualifiedName: "undici.fetch" },
+    ]);
+  });
+
   it("treats a named call with no stub match as unresolved, not as no-effect", () => {
     const files: ExtractedFile[] = [
       {
