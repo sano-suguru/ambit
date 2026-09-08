@@ -1,0 +1,29 @@
+{
+  "name": "ambit",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A contract layer on top of TypeScript for AI-generated code",
+  "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "volta": {
+    "node": "24.19.0"
+  },
+  "scripts": {
+    "check": "node src/cli/main.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "fmt": "biome format --write .",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0",
+    "@types/node": "^24.0.0",
+    "typescript": "5.9.3",
+    "vitest": "^3.0.0"
+  }
+}
