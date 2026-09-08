@@ -528,14 +528,62 @@ function classifyCall(
  * rather than as "not callable" — otherwise `arr.map(fnFromAnyRecord)`
  * would slip past this guard the same way `classifyCall`'s own
  * `any-typed` callee case treats `any` as unresolved, not as safe.
+ *
+ * Only argument positions whose *declared* parameter type can itself be
+ * called are scanned (`acceptsCallableArgument`) — otherwise a
+ * non-callback argument that merely happens to be a callable value (e.g.
+ * `Array.prototype.reduce`'s `initialValue`, when the accumulator type is a
+ * function type) would make the whole call look opaque even though its
+ * actual callback is written inline and already walked by `collectCalls`.
+ * Every branch that can't determine whether a position accepts a callable
+ * (`getResolvedSignature` returns nothing, a JSDoc-only signature, an
+ * out-of-range or rest parameter) falls back to scanning that argument
+ * rather than skipping it, so this narrowing can only add opacity checks
+ * back in, never silently drop the `any`/`unknown` fail-open guard above.
  */
 function hasOpaqueCallableArgument(node: ts.CallExpression, checker: ts.TypeChecker): boolean {
-  return node.arguments.some((arg) => {
+  const signature = checker.getResolvedSignature(node);
+  return node.arguments.some((arg, index) => {
     if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) return false;
+    if (signature && !acceptsCallableArgument(signature, index, checker)) return false;
     const type = checker.getTypeAtLocation(arg);
     if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) return true;
     return type.getCallSignatures().length > 0;
   });
+}
+
+/**
+ * True if `signature`'s declared (not instantiated) parameter type at
+ * `index` has call signatures — i.e. this argument position is a callback
+ * slot. `checker.getTypeAtLocation` is called on the *parameter
+ * declaration node*, not the argument: the declaration site carries the
+ * generic, uninstantiated type (e.g. `reduce`'s `initialValue: U`), while
+ * `getTypeAtLocation` on the argument itself would return the type
+ * *instantiated* for this call (e.g. `() => number` when `U` is inferred
+ * as a function type) and defeat the narrowing this function exists for.
+ */
+function acceptsCallableArgument(
+  signature: ts.Signature,
+  index: number,
+  checker: ts.TypeChecker,
+): boolean {
+  const declaration = signature.declaration;
+  // No declaration (e.g. a synthetic signature) or a JSDoc-only signature
+  // (`JSDocSignature` has no `parameters` in the same shape) can't be
+  // inspected — treat the slot as callable so the caller still scans it.
+  if (!declaration || ts.isJSDocSignature(declaration)) return true;
+  const parameter = declaration.parameters[index];
+  // An argument beyond the declared parameter list, or a rest parameter
+  // (whose declared type is the array type, not the element type), can't
+  // be classified from the declaration either — stay conservative.
+  if (!parameter || parameter.dotDotDotToken) return true;
+  return isCallableParameterType(checker.getTypeAtLocation(parameter));
+}
+
+function isCallableParameterType(type: ts.Type): boolean {
+  if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) return true;
+  if (type.isUnion()) return type.types.some(isCallableParameterType);
+  return type.getCallSignatures().length > 0;
 }
 
 function ambientUnresolvedReason(
