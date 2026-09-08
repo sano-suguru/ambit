@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 import type {
@@ -31,6 +32,16 @@ export const legacyTsBackend: TsBackend = {
 
 async function extractProject(rootDir: string): Promise<readonly ExtractedFile[]> {
   const absoluteRoot = path.resolve(rootDir);
+
+  // A missing/non-directory target must fail loudly, not silently produce
+  // zero files (DESIGN.md §3.4: "起動不能、未対応設定、解析失敗を
+  // 「違反なし」に変換しない"). Without this check, ts.findConfigFile still
+  // walks upward from a nonexistent path and can find an unrelated ancestor
+  // tsconfig.json, silently analyzing the wrong (or no) files.
+  if (!fs.existsSync(absoluteRoot) || !fs.statSync(absoluteRoot).isDirectory()) {
+    throw new Error(`project root not found or not a directory: ${absoluteRoot}`);
+  }
+
   const { rootNames, options } = loadProjectConfig(absoluteRoot);
   const program = ts.createProgram({ rootNames, options });
   const checker = program.getTypeChecker();
