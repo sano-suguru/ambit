@@ -9,7 +9,7 @@ requires an RFC (§9).
 
 Message text is written in English; this file is written in English as well,
 independent of the project's Japanese-language documentation policy — see
-`CLAUDE.md`.
+`AGENTS.md`.
 
 ## AMB-E001
 
