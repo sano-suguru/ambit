@@ -50,14 +50,22 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
 
   // Pass 1: find every function/method declaration under the project root
   // and assign it a stable SymbolId, so pass 2 can resolve calls between
-  // them regardless of which file declares which.
+  // them regardless of which file declares which. Each file's declarations
+  // are kept (not just indexed into declaredNodeToId) so pass 2 can reuse
+  // them instead of walking the file a second time.
   const declaredNodeToId = new Map<ts.Node, SymbolId>();
   const sourceFiles = program
     .getSourceFiles()
     .filter((sf) => !sf.isDeclarationFile && isUnderRoot(sf.fileName, absoluteRoot));
 
+  const declarationsByFile = new Map<
+    ts.SourceFile,
+    ReturnType<typeof collectFunctionLikeDeclarations>
+  >();
   for (const sourceFile of sourceFiles) {
-    for (const [node, declPath] of collectFunctionLikeDeclarations(sourceFile)) {
+    const declarations = collectFunctionLikeDeclarations(sourceFile);
+    declarationsByFile.set(sourceFile, declarations);
+    for (const [node, declPath] of declarations) {
       declaredNodeToId.set(node, symbolId(relativePath(absoluteRoot, sourceFile), declPath));
     }
   }
@@ -65,11 +73,12 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
   // Pass 2: extract each function's JSDoc and calls, resolving callees
   // against the map built in pass 1; and tally every function-like node this
   // slice saw but did not extract (`skippedFunctions` — DESIGN.md §4.3).
+  // Reuses pass 1's declarationsByFile instead of re-walking each file.
   const files: ExtractedFile[] = [];
   const skippedFunctions = new Map<SkippedFunctionKind, number>();
-  for (const sourceFile of sourceFiles) {
+  for (const [sourceFile, declarations] of declarationsByFile) {
     const functions: ExtractedFunction[] = [];
-    for (const [node, declPath] of collectFunctionLikeDeclarations(sourceFile)) {
+    for (const [node, declPath] of declarations) {
       const id = symbolId(relativePath(absoluteRoot, sourceFile), declPath);
       functions.push({
         id,
