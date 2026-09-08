@@ -108,6 +108,12 @@ describe("legacyTsBackend.extractProject", () => {
     expect(skippedFunctions.get("nested-function")).toBeGreaterThanOrEqual(1);
   });
 
+  it("classifies a PropertyAssignment-form object-literal method (`{ foo: () => 1 }`) the same as shorthand (`{ foo() {} }`)", async () => {
+    const { skippedFunctions } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
+    // withMethod.method (shorthand) + withPropertyArrow.method (PropertyAssignment arrow)
+    expect(skippedFunctions.get("object-literal-method")).toBeGreaterThanOrEqual(2);
+  });
+
   it("does not count an indexed (extracted) function as skipped", async () => {
     const { skippedFunctions } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
     const totalSkipped = [...skippedFunctions.values()].reduce((a, b) => a + b, 0);

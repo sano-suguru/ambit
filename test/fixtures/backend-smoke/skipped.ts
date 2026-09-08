@@ -15,6 +15,10 @@ export const withMethod = {
   },
 };
 
+export const withPropertyArrow = {
+  method: (): number => 1,
+};
+
 export default function (): number {
   return 1;
 }

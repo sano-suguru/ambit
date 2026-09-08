@@ -7,6 +7,7 @@ const execFileAsync = promisify(execFile);
 const CLI_PATH = path.join(import.meta.dirname, "..", "src", "cli", "main.ts");
 const PROPAGATION_FIXTURES = path.join(import.meta.dirname, "fixtures", "propagation");
 const WARNINGS_ONLY_FIXTURES = path.join(import.meta.dirname, "fixtures", "warnings-only");
+const PAREN_LESS_NEW_FIXTURES = path.join(import.meta.dirname, "fixtures", "paren-less-new");
 
 async function runCli(
   args: readonly string[],
@@ -67,6 +68,17 @@ describe("ambit check (CLI)", () => {
     ]);
     expect(exitCode).toBe(2);
     expect(stderr).toContain("analysis failed");
+  });
+
+  it("does not crash on a parenthesis-less `new` (`NewExpression.arguments` is `undefined`)", async () => {
+    const { exitCode, stderr } = await runCli([
+      "check",
+      PAREN_LESS_NEW_FIXTURES,
+      "--format",
+      "json",
+    ]);
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
   });
 
   it("--format text prints a human-readable line instead of JSON", async () => {

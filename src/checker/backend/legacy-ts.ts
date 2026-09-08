@@ -245,11 +245,29 @@ function collectSkippedFunctionKinds(
 
 function classifySkipped(node: ts.FunctionLikeDeclaration): SkippedFunctionKind {
   if (ts.isGetAccessor(node) || ts.isSetAccessor(node)) return "getter-setter";
-  if (node.parent && ts.isObjectLiteralExpression(node.parent)) return "object-literal-method";
+  if (isObjectLiteralMethod(node)) return "object-literal-method";
   if (isDefaultExport(node)) return "anonymous-default-export";
   if (isCallbackArgument(node)) return "callback-argument";
   if (isNestedInAnotherFunction(node)) return "nested-function";
   return "other";
+}
+
+/**
+ * `{ foo() {} }` (a MethodDeclaration whose parent is the object literal
+ * directly) and `{ foo: () => 1 }` (an arrow/function expression assigned via
+ * a PropertyAssignment, whose parent is the assignment, not the object
+ * literal itself) are both object-literal methods in spirit; both must be
+ * recognized so this kind isn't a narrower category than its name promises.
+ */
+function isObjectLiteralMethod(node: ts.Node): boolean {
+  if (node.parent && ts.isObjectLiteralExpression(node.parent)) return true;
+  const parent = node.parent;
+  return (
+    parent !== undefined &&
+    ts.isPropertyAssignment(parent) &&
+    parent.initializer === node &&
+    ts.isObjectLiteralExpression(parent.parent)
+  );
 }
 
 function isDefaultExport(node: ts.Node): boolean {
@@ -263,7 +281,7 @@ function isDefaultExport(node: ts.Node): boolean {
 function isCallbackArgument(node: ts.Node): boolean {
   const parent = node.parent;
   if (!parent || !(ts.isCallExpression(parent) || ts.isNewExpression(parent))) return false;
-  return (parent.arguments as readonly ts.Node[]).includes(node);
+  return (parent.arguments as readonly ts.Node[] | undefined)?.includes(node) ?? false;
 }
 
 /** Walks up from `node` to the source file, stopping at the first enclosing function-like ancestor. */
