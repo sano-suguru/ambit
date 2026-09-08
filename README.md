@@ -12,6 +12,8 @@ checks it — declared boundaries, not silent trust.
 - How much time or money is an entrypoint allowed to spend?
 - What happens when an agent quietly expands what a function can do?
 
+Only the first is enforced today — see [Status](#status).
+
 ## The accident
 
 ```ts
@@ -43,7 +45,17 @@ Today `ambit check` enforces `@effects`. `@capabilities`, `@budget`, and
 `@entrypoint` are part of the contract model and documented in the design
 spec, but are not implemented yet. `ambit init` is planned, not built.
 Runtime enforcement has not been started — everything Ambit checks today is
-static.
+static. `ambit` is not published yet; run it from a clone as
+`node src/cli/main.ts check <dir>`.
+
+Effects are inferred from a bundled table of 23 entries (`fetch` plus Node.js
+builtins), which produces only `network`, `fs_read`, `fs_write`, and
+`process`. No bundled stub produces `db_read`, `db_write`, `llm`, or `env` —
+those enter the analysis only when something declares them explicitly. A
+`pure` function calling a database driver reports `unknown`, not a
+violation. Stub matching is also import-shape sensitive:
+`import * as fs from "node:fs"` is recognized, `import { writeFileSync }
+from "node:fs"` is not, and falls back to `unknown`.
 
 The design is documented in [docs/DESIGN.md](docs/DESIGN.md) (a Draft — the
 RFC process for spec changes starts at the first public release, so this
