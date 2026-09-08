@@ -59,3 +59,29 @@ treated as undeclared (not as `pure`) for propagation, so it never also
 produces `AMB-E001` for the same tag.
 
 Example: `@effects netwrok` (missing an `r`) instead of `@effects network`.
+
+## AMB-E003
+
+Contract declared on a node that cannot carry one.
+
+**Severity:** error
+**Category:** effects
+
+A contract tag (`@effects`, `@capabilities`, `@budget`, `@entrypoint`) is
+written on a function-like node the analysis does not extract, so it has no
+symbol to attach the contract to. The declaration is inert: nothing propagates
+it, nothing checks it, and it appears in no coverage figure. It is reported for
+the same reason a misspelled effect name is (AMB-E002) — a declaration that
+silently does nothing reads as a guarantee and is not one.
+
+The message names why the node cannot carry a contract, using the same
+classification `--coverage` counts under "skipped": a getter/setter, an
+object-literal member with no stable declaration path, an anonymous default
+export, a callback passed inline as an argument, or a function declared inside
+another function.
+
+Example: `/** @effects fs_read */ get value() { … }`.
+
+Note this is narrower than it was: an object-literal member *can* carry a
+contract when the literal is a module-scope `const` and the member has an
+identifier name. See `docs/limitations.md`.

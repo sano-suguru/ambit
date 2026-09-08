@@ -9,16 +9,6 @@ export class WithAccessors {
   set value(_v: number) {}
 }
 
-export const withMethod = {
-  method(): number {
-    return 1;
-  },
-};
-
-export const withPropertyArrow = {
-  method: (): number => 1,
-};
-
 export default function (): number {
   return 1;
 }

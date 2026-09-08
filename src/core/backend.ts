@@ -24,8 +24,13 @@ import type { SymbolId } from "./symbol-id.ts";
  * - `external-module`: same shape, but the ambient declaration lives in a
  *   third-party package's `.d.ts` (e.g. an ORM client) rather than the
  *   default lib.
- * `unresolved-symbol` remains the residual case: no declaration could be
- * found at all.
+ * `unresolved-symbol` remains the residual case: either no declaration could
+ * be found at all, or one was found but the call still cannot be followed to
+ * an extracted function — a nested function declaration, or a receiver with no
+ * single object literal certainly behind it (a parameter, a `let` binding, a
+ * literal carrying a spread). In the latter shapes the call target may be
+ * fully known to the compiler and may even declare its own `@effects`; the
+ * call site simply has no one `SymbolId` it can honestly propagate from.
  */
 export type UnresolvedReason =
   | "dynamic-import"
@@ -45,6 +50,12 @@ export type UnresolvedReason =
  * boundary — see `collectFunctionLikeDeclarations` in
  * `src/checker/backend/legacy-ts.ts`). Purely descriptive; carries no
  * compiler-specific node, so it can cross the `TsBackend` boundary freely.
+ *
+ * `object-literal-method` is narrower than its name: a member of a module-scope
+ * `const` literal with an identifier name *is* extracted. What remains are the
+ * members that have no stable declaration path (a computed, string, or numeric
+ * key) or no path at all (a nested literal, one declared inside a function
+ * body, one passed inline as an argument, or one bound by `let`).
  */
 export type SkippedFunctionKind =
   | "getter-setter"
@@ -108,16 +119,38 @@ export interface ExtractedFile {
 }
 
 /**
- * Everything `extractProject` produces for one run: the extracted files, plus
- * how many function-like nodes it saw but did not extract, by kind
- * (`SkippedFunctionKind`). The count exists so "no violations" and "nothing
- * was analyzed" stay distinguishable (DESIGN.md §3.4) — a file made entirely
- * of, say, object-literal methods would otherwise vanish from `files` with no
- * trace.
+ * A contract written on a function-like node the backend did not extract, and
+ * which therefore cannot carry one. Reported as `AMB-E003` rather than
+ * dropped: a declaration that silently does nothing is the opposite of what
+ * Ambit is for (DESIGN.md §3.4 — 解析失敗を「違反なし」に変換しない).
+ *
+ * `kind` is the same classification `skippedFunctions` counts, so the message
+ * can say *why* the node cannot carry the contract.
+ */
+export interface UncarriedContract {
+  readonly location: SourceLocation;
+  readonly kind: SkippedFunctionKind;
+  readonly tag: string;
+  readonly raw: string;
+}
+
+/**
+ * Everything `extractProject` produces for one run: the extracted files, how
+ * many function-like nodes it saw but did not extract (by kind), and any
+ * contract written on one of those nodes.
+ *
+ * The count exists so "no violations" and "nothing was analyzed" stay
+ * distinguishable (DESIGN.md §3.4) — a file made entirely of, say, callback
+ * arguments would otherwise vanish from `files` with no trace.
+ *
+ * Both fields are required, not optional: a backend that omitted them would
+ * silently under-report what it could not analyze, which is the failure mode
+ * they exist to prevent.
  */
 export interface ExtractedProject {
   readonly files: readonly ExtractedFile[];
   readonly skippedFunctions: ReadonlyMap<SkippedFunctionKind, number>;
+  readonly uncarriedContracts: readonly UncarriedContract[];
 }
 
 /**

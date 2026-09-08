@@ -26,9 +26,10 @@ it against: would this sentence still be true if all the code were
 discarded? If yes, it belongs in `docs/DESIGN.md`. If no, it's
 implementation status, and belongs in `README.md` or `test/`, not in
 `docs/DESIGN.md` — see Documents below. Where the spec requires something
-the code does not yet do, fix the code or file it under `docs/DESIGN.md`
-§12 (未解決の問題); don't paper over the gap with a note that the code is
-still catching up.
+the code does not yet do, fix the code. File it under `docs/DESIGN.md` §12
+(未解決の問題) only when the gap is an open design question rather than
+missing work — see Scope below. Don't paper over the gap with a note that
+the code is still catching up.
 
 `docs/DESIGN.md` §2 sets the project's design-principle priority order
 (P1→P5); follow it when principles conflict.
@@ -38,21 +39,54 @@ only what Ambit can actually verify, and keep everything else visible.
 
 ## Scope
 
-Ambit is still a Draft. Make the smallest change that correctly solves the
-requested problem.
+Ambit is a solo pre-1.0 project with a written specification and no users
+yet. That combination sets the rule: **the specification is the scope
+boundary, not the size of the diff.**
 
-Do not:
+`docs/DESIGN.md` already describes more than the code does. Closing that
+gap is the work. A change that closes it is in scope however large it
+turns out to be; a change that leaves it half-closed is not finished just
+because it was small. A small diff buys nothing here — there is no
+reviewer to spare and no released behavior to protect — and it costs the
+only thing that matters yet, which is a product that works.
 
-- add features that were not requested
-- refactor unrelated code
-- add abstractions for hypothetical future requirements
-- expand to new languages, runtimes, or backends without a concrete need
-- treat the native TypeScript backend as adopted before its §3.5
+Out of scope is what nothing asks for:
+
+- features neither the request nor `docs/DESIGN.md` calls for
+- abstractions for hypothetical future requirements
+- refactoring unrelated to the change at hand
+- new languages, runtimes, or backends without a concrete need
+- treating the native TypeScript backend as adopted before its §3.5
   validation gate passes
-- assign performance numbers to a backend that has not been run
+- assigning performance numbers to a backend that has not been run
+
+The last two are not size limits but honesty limits; they hold at any
+size.
 
 "May be useful later" is not sufficient justification for added
-complexity.
+complexity. "`docs/DESIGN.md` says so and the code does not do it" always
+is.
+
+The real constraint is not minimality but completeness: a change must
+leave the tree in a state where every claim it makes is true and verified.
+
+### Defects
+
+None of the above licenses leaving a known defect in place. A defect you
+have root-caused, in code you are already touching, is in scope. Fix it.
+
+Recording a fixable defect instead of fixing it is not a deliverable. It
+converts a solvable problem into a permanent one, and writing up why it
+was not fixed usually costs more than the fix. If the write-up is longer
+than the patch would have been, write the patch.
+
+Deferring needs a reason that survives being said out loud. There is no
+one else to escalate to on a solo project, so the only honest reasons are
+that the fix turns on a design question with no settled answer — one that
+needs its own investigation, which is what `docs/DESIGN.md` §12 is for —
+or that it is genuinely a different problem from the one in front of you.
+"Out of scope" is a conclusion, not a reason. When you do defer, the
+record is one line: an issue, or a §12 bullet. Never an essay.
 
 ## Architecture
 
@@ -65,6 +99,12 @@ treat it as disposable until §3.5 validation is done.
 Compiler-specific objects, types, and internal IDs MUST NOT leak outside
 the connection layer — not into diagnostics, persisted formats, or public
 symbol IDs (`docs/DESIGN.md` §3.4).
+
+What declaration a call resolves to is frequently not the one the source
+shape suggests: a type annotation makes the checker return the
+annotation's member signature rather than the value's own member. Probe
+the compiler for the answer before designing around an assumed resolution
+path — a plan built on a guess here can look complete and fix nothing.
 
 ## Toolchain
 
@@ -112,6 +152,25 @@ the design; they do not define it. If a test appears to conflict with the
 intended design, investigate the mismatch instead of hard-coding behavior
 to satisfy the test. If verification cannot be performed, say so
 explicitly.
+
+Never pin a defect with a test. A test asserting current, wrong behavior
+makes the defect read as the specification and the eventual fix read as a
+regression. If you are about to write one, fix the defect instead. If one
+already exists, inverting it is part of the fix, not a weakened test —
+that is the one case the paragraph above does not cover.
+
+`pnpm test` is not the whole signal. Run Ambit against its own source:
+
+```sh
+node src/cli/main.ts check src --coverage
+```
+
+Exit code 0 and the `unresolved-by-reason` breakdown are the fastest
+evidence that a change did what it claimed, and the fastest way to catch a
+new false positive. Quote numbers you measured; never predict them. A
+change to call resolution or extraction also belongs in the self-hosting
+block in `test/backend.legacy-ts.test.ts`, which asserts against `src/`
+directly — fixtures alone cannot catch a shape only the real codebase has.
 
 ## Documents
 

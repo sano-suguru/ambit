@@ -11,6 +11,7 @@ import type {
   SourceLocation,
   SymbolId,
   TsBackend,
+  UncarriedContract,
   UnresolvedReason,
 } from "../../core/index.ts";
 import { symbolId } from "../../core/index.ts";
@@ -77,6 +78,7 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
   // Reuses pass 1's declarationsByFile instead of re-walking each file.
   const files: ExtractedFile[] = [];
   const skippedFunctions = new Map<SkippedFunctionKind, number>();
+  const uncarriedContracts: UncarriedContract[] = [];
   for (const [sourceFile, declarations] of declarationsByFile) {
     const functions: ExtractedFunction[] = [];
     for (const [node, declPath] of declarations) {
@@ -91,11 +93,13 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
     if (functions.length > 0) {
       files.push({ filePath: relativePath(absoluteRoot, sourceFile), functions });
     }
-    for (const kind of collectSkippedFunctionKinds(sourceFile, declaredNodeToId)) {
+    const skipped = collectSkippedFunctions(sourceFile, declaredNodeToId, absoluteRoot);
+    for (const kind of skipped.kinds) {
       skippedFunctions.set(kind, (skippedFunctions.get(kind) ?? 0) + 1);
     }
+    uncarriedContracts.push(...skipped.uncarried);
   }
-  return { files, skippedFunctions };
+  return { files, skippedFunctions, uncarriedContracts };
 }
 
 // ---- project loading --------------------------------------------------
@@ -170,11 +174,13 @@ function relativePath(absoluteRoot: string, sourceFile: ts.SourceFile): string {
 type FunctionLikeDeclaration =
   | ts.FunctionDeclaration
   | ts.MethodDeclaration
-  | (ts.VariableDeclaration & { readonly initializer: ts.FunctionExpression | ts.ArrowFunction });
+  | (ts.VariableDeclaration & { readonly initializer: ts.FunctionExpression | ts.ArrowFunction })
+  | (ts.PropertyAssignment & { readonly initializer: ts.FunctionExpression | ts.ArrowFunction });
 
 /**
- * Walk a source file collecting function declarations, methods, and
- * variable-declared function/arrow expressions, each paired with its
+ * Walk a source file collecting function declarations, class methods,
+ * variable-declared function/arrow expressions, and the identifier-named
+ * members of a module-scope `const` object literal — each paired with its
  * "."-joined declaration path (DESIGN.md §5.3's "ファイル・宣言経路など
  * との対応"). Anonymous functions and functions nested inside another
  * function's body are out of scope for this slice (plan: "最初の垂直
@@ -223,10 +229,106 @@ function collectFunctionLikeDeclarations(
       results.push([node as FunctionLikeDeclaration, [...containerPath, node.name.text]]);
       return;
     }
+    // `const handlers = { read() {…} }` / `{ read: () => {…} }`: the member's
+    // body lives in the literal, so it gets its own id under the existing
+    // declaration-path notation (`file.ts#handlers.read`), exactly as a class
+    // method does. The container `handlers` is never itself indexed — its
+    // initializer is an object literal, not a function — so no extracted
+    // function's body contains these members and nothing is walked twice.
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+      const literal = indexableObjectLiteral(node);
+      if (!literal) return;
+      const objectPath = [...containerPath, node.name.text];
+      for (const member of literal.properties) {
+        // Identifier names only, mirroring the class-method rule above. A
+        // computed, string, or numeric name has no spelling that survives
+        // `symbolId`'s "."-join — `{ "a.b": … }` would be indistinguishable
+        // from nesting — and DESIGN.md §5.3 requires a stable path that does
+        // not lean on anything compiler-internal to disambiguate. Those stay
+        // counted as `object-literal-method`.
+        if (!member.name || !ts.isIdentifier(member.name)) continue;
+        if (ts.isMethodDeclaration(member)) {
+          results.push([member, [...objectPath, member.name.text]]);
+        } else if (
+          ts.isPropertyAssignment(member) &&
+          (ts.isFunctionExpression(member.initializer) || ts.isArrowFunction(member.initializer))
+        ) {
+          results.push([member as FunctionLikeDeclaration, [...objectPath, member.name.text]]);
+        }
+      }
+      return;
+    }
   }
 
   ts.forEachChild(sourceFile, (child) => visitTop(child, []));
   return results;
+}
+
+/**
+ * The object literal a `const` binds, when its members are safe to treat as
+ * the call targets they name. `undefined` for every other binding.
+ *
+ * Two conditions make the syntactic match a fact rather than a convenience:
+ *
+ * - **`const` only.** A `let`/`var` binding may hold a different object by the
+ *   time the call runs, so the members written here would not be the ones
+ *   called.
+ * - **No spread.** A spread can carry members this walk cannot enumerate, so
+ *   any spread rejects the whole literal rather than trusting the members
+ *   written beside it.
+ *
+ * This does not make resolution sound: `const` freezes the binding, not the
+ * properties, so `handlers.read = other` still defeats it. Resolving a class
+ * instance method already rests on the same assumption; this adds no new one.
+ *
+ * `satisfies` and `as const` wrap the literal without changing which object
+ * its members belong to, so they are unwrapped rather than rejected.
+ */
+function indexableObjectLiteral(
+  declaration: ts.VariableDeclaration,
+): ts.ObjectLiteralExpression | undefined {
+  if (!declaration.initializer) return undefined;
+  if ((declaration.parent.flags & ts.NodeFlags.Const) === 0) return undefined;
+
+  const literal = unwrapTypeOnlyExpression(declaration.initializer);
+  if (!ts.isObjectLiteralExpression(literal)) return undefined;
+  if (literal.properties.some(ts.isSpreadAssignment)) return undefined;
+  return literal;
+}
+
+/** Strips wrappers that assert a type without changing the runtime value. */
+function unwrapTypeOnlyExpression(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  while (
+    ts.isSatisfiesExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isParenthesizedExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+/**
+ * True if `member` belongs to a literal `indexableObjectLiteral` accepts. The
+ * same rule has to gate resolution as gates indexing: TypeScript resolves
+ * `handlers.read` to the member's own declaration whether or not `handlers` is
+ * a `const`, so without this check the guards above would apply only to the
+ * receiver path and be bypassed by the direct one.
+ */
+function isInIndexableObjectLiteral(member: ts.Node): boolean {
+  const literal = member.parent;
+  if (literal === undefined || !ts.isObjectLiteralExpression(literal)) return false;
+
+  let container: ts.Node = literal.parent;
+  while (
+    ts.isSatisfiesExpression(container) ||
+    ts.isAsExpression(container) ||
+    ts.isParenthesizedExpression(container)
+  ) {
+    container = container.parent;
+  }
+  return ts.isVariableDeclaration(container) && indexableObjectLiteral(container) === literal;
 }
 
 /**
@@ -250,26 +352,68 @@ function isFunctionLikeNode(node: ts.Node): node is ts.FunctionLikeDeclaration {
 
 /**
  * Every function-like node in `sourceFile` that `collectFunctionLikeDeclarations`
- * did not index, classified by kind (`SkippedFunctionKind`). This is what
- * turns "silent skip" into a visible count (`ambit check --coverage`) — see
- * DESIGN.md §4.3 and the plan's note on measuring extraction coverage before
- * trusting it.
+ * did not index, classified by kind (`SkippedFunctionKind`), plus any contract
+ * written on one of them. The count turns "silent skip" into a visible number
+ * (`ambit check --coverage`, DESIGN.md §4.3); the contracts turn a silently
+ * dropped declaration into `AMB-E003`.
  */
-function collectSkippedFunctionKinds(
+function collectSkippedFunctions(
   sourceFile: ts.SourceFile,
   indexed: ReadonlyMap<ts.Node, SymbolId>,
-): readonly SkippedFunctionKind[] {
+  absoluteRoot: string,
+): { readonly kinds: readonly SkippedFunctionKind[]; readonly uncarried: UncarriedContract[] } {
   const kinds: SkippedFunctionKind[] = [];
+  const uncarried: UncarriedContract[] = [];
 
   function visit(node: ts.Node): void {
-    if (isFunctionLikeNode(node) && !indexed.has(node)) {
-      kinds.push(classifySkipped(node));
+    if (isFunctionLikeNode(node) && !indexed.has(node) && !isIndexedInitializer(node, indexed)) {
+      const kind = classifySkipped(node);
+      kinds.push(kind);
+      // `isFunctionLikeNode` has already narrowed to a real function-like
+      // node; the local alias only widens it to the shape the JSDoc and
+      // location helpers take.
+      const decl = node as FunctionLikeDeclaration;
+      const jsDoc = extractJsDoc(decl);
+      for (const tag of CONTRACT_TAGS) {
+        const raw = jsDoc?.tags.get(tag);
+        if (raw === undefined) continue;
+        uncarried.push({
+          location: locationOf(absoluteRoot, sourceFile, nameOrNode(decl)),
+          kind,
+          tag,
+          raw,
+        });
+      }
     }
     ts.forEachChild(node, visit);
   }
 
   ts.forEachChild(sourceFile, visit);
-  return kinds;
+  return { kinds, uncarried };
+}
+
+/**
+ * The JSDoc tags that declare a contract (DESIGN.md §4.1). Only `@effects` is
+ * enforced today, but a contract tag on a node that cannot carry one is dead
+ * whichever tag it is, so all four are reported.
+ */
+const CONTRACT_TAGS = ["effects", "capabilities", "budget", "entrypoint"] as const;
+
+/**
+ * True if `node` is the function expression that *is* an indexed declaration's
+ * body. `const f = () => {}` and `{ read: () => {} }` index the enclosing
+ * `VariableDeclaration` / `PropertyAssignment`, not the arrow itself, so the
+ * arrow would otherwise be counted as skipped as well as extracted — a
+ * double-count that makes `--coverage` overstate what the analysis missed.
+ */
+function isIndexedInitializer(node: ts.Node, indexed: ReadonlyMap<ts.Node, SymbolId>): boolean {
+  const parent = node.parent;
+  return (
+    parent !== undefined &&
+    (ts.isVariableDeclaration(parent) || ts.isPropertyAssignment(parent)) &&
+    parent.initializer === node &&
+    indexed.has(parent)
+  );
 }
 
 function classifySkipped(node: ts.FunctionLikeDeclaration): SkippedFunctionKind {
@@ -286,7 +430,11 @@ function classifySkipped(node: ts.FunctionLikeDeclaration): SkippedFunctionKind 
  * directly) and `{ foo: () => 1 }` (an arrow/function expression assigned via
  * a PropertyAssignment, whose parent is the assignment, not the object
  * literal itself) are both object-literal methods in spirit; both must be
- * recognized so this kind isn't a narrower category than its name promises.
+ * recognized so the two forms are never classified differently.
+ *
+ * This runs only on members `collectFunctionLikeDeclarations` did not index,
+ * so the kind it feeds is deliberately narrower than its name: what reaches it
+ * are the members `indexableObjectLiteral` rules out.
  */
 function isObjectLiteralMethod(node: ts.Node): boolean {
   if (node.parent && ts.isObjectLiteralExpression(node.parent)) return true;
@@ -329,7 +477,7 @@ function nameOrNode(decl: FunctionLikeDeclaration): ts.Node {
 }
 
 function bodyOf(decl: FunctionLikeDeclaration): ts.Node | undefined {
-  if (ts.isVariableDeclaration(decl)) return decl.initializer;
+  if (ts.isVariableDeclaration(decl) || ts.isPropertyAssignment(decl)) return decl.initializer;
   return decl.body;
 }
 
@@ -442,7 +590,22 @@ function classifyCall(
   if (declaration) {
     const resolvedId = declaredNodeToId.get(declaration);
     if (resolvedId) return { location, resolvedCallee: resolvedId };
+
+    // The callee is an object-literal member: either indexed in its own right,
+    // or holding an already-indexed function by reference.
+    const memberId = objectLiteralMemberTarget(declaration, checker, declaredNodeToId);
+    if (memberId) return { location, resolvedCallee: memberId };
   }
+
+  // A property access on a module-scope `const` bound to an object literal is
+  // resolvable from the value even when the literal carries a type annotation
+  // and `getSymbolAtLocation` therefore lands on the annotation's member
+  // signature instead of the literal's own member — the shape of Ambit's own
+  // `legacyTsBackend: TsBackend = { extractProject }`. Genuine dynamic
+  // dispatch is untouched: a receiver with no single literal behind it fails
+  // the guards in `objectLiteralReceiverTarget` and stays unresolved.
+  const receiverMemberId = objectLiteralReceiverTarget(callee, checker, declaredNodeToId);
+  if (receiverMemberId) return { location, resolvedCallee: receiverMemberId };
 
   // An import binding whose alias couldn't be followed to any declaration at
   // all (e.g. the module specifier doesn't resolve, or the named export
@@ -528,6 +691,87 @@ function classifyCall(
   }
 
   return { location, unresolvedReason: fallbackReason ?? "unresolved-symbol" };
+}
+
+/**
+ * The `SymbolId` a call through an object-literal member resolves to. Three
+ * shapes, one hop each:
+ *
+ * - `{ read() {} }` / `{ read: () => {} }` — the member is indexed by
+ *   `collectFunctionLikeDeclarations`, so it has an id of its own.
+ * - `{ read: readIt }` — the member holds an already-indexed function by
+ *   reference. The call resolves to *that* function's existing id; no second
+ *   id is minted for the same body.
+ * - `{ readIt }` — the same, reached via `getShorthandAssignmentValueSymbol`.
+ *
+ * The referenced function may itself be an import binding, so the value symbol
+ * is de-aliased the way `classifyCall` de-aliases a callee. Exactly one hop: a
+ * member holding another member, or a `const b = a` re-binding, is not
+ * followed. Each further hop is another place the analysis could be wrong
+ * without saying so, and one hop covers every shape this resolves.
+ */
+function objectLiteralMemberTarget(
+  member: ts.Node,
+  checker: ts.TypeChecker,
+  declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+): SymbolId | undefined {
+  const own = declaredNodeToId.get(member);
+  if (own) return own;
+  if (!isInIndexableObjectLiteral(member)) return undefined;
+
+  let valueSymbol: ts.Symbol | undefined;
+  if (ts.isShorthandPropertyAssignment(member)) {
+    valueSymbol = checker.getShorthandAssignmentValueSymbol(member);
+  } else if (ts.isPropertyAssignment(member) && ts.isIdentifier(member.initializer)) {
+    valueSymbol = checker.getSymbolAtLocation(member.initializer);
+  } else {
+    return undefined;
+  }
+  if (!valueSymbol) return undefined;
+
+  const resolved =
+    (valueSymbol.flags & ts.SymbolFlags.Alias) !== 0
+      ? checker.getAliasedSymbol(valueSymbol)
+      : valueSymbol;
+  const target = resolved.declarations?.[0];
+  return target ? declaredNodeToId.get(target) : undefined;
+}
+
+/**
+ * `X.p(...)` where `X` is a module-scope `const` bound to an object literal:
+ * the member is found by name in the literal itself, so a type annotation on
+ * `X` — which makes `getSymbolAtLocation` return the annotation's member
+ * signature rather than the literal's member — does not hide the target.
+ *
+ * Which literals qualify — and why — is `indexableObjectLiteral`.
+ */
+function objectLiteralReceiverTarget(
+  callee: ts.Expression,
+  checker: ts.TypeChecker,
+  declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+): SymbolId | undefined {
+  if (!ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.expression)) {
+    return undefined;
+  }
+
+  const receiverSymbol = checker.getSymbolAtLocation(callee.expression);
+  if (!receiverSymbol) return undefined;
+  const resolved =
+    (receiverSymbol.flags & ts.SymbolFlags.Alias) !== 0
+      ? checker.getAliasedSymbol(receiverSymbol)
+      : receiverSymbol;
+
+  const declaration = resolved.declarations?.[0];
+  if (!declaration || !ts.isVariableDeclaration(declaration)) return undefined;
+  const literal = indexableObjectLiteral(declaration);
+  if (!literal) return undefined;
+
+  for (const member of literal.properties) {
+    if (!member.name || !ts.isIdentifier(member.name)) continue;
+    if (member.name.text !== callee.name.text) continue;
+    return objectLiteralMemberTarget(member, checker, declaredNodeToId);
+  }
+  return undefined;
 }
 
 /**

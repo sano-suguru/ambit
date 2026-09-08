@@ -182,11 +182,13 @@ Representative cases where analysis is narrower than the model suggests:
   away (e.g. through a barrel file) is not.
 - **No higher-order inference.** A call through a callback parameter is
   `unknown`; a callback passed by name (`arr.map(namedFn)`) is never seen.
-- **Not every function can carry a contract.** Getters/setters,
-  object-literal methods, anonymous default exports, and nested functions
-  cannot declare `@effects` of their own. Their calls are attributed to the
-  nearest enclosing extracted function when there is one; with no such
-  ancestor, the call is invisible.
+- **Not every function can carry a contract.** Getters/setters, anonymous
+  default exports, nested functions, and object-literal members the
+  declaration-path notation cannot name (a computed or string key, a literal
+  inside a function body) cannot declare `@effects` of their own. Their calls
+  are attributed to the nearest enclosing extracted function when there is one;
+  with no such ancestor, the call is invisible. Writing a contract on one of
+  them is reported as `AMB-E003` rather than ignored.
 
 Full detail, including how to read `--coverage` output, is in
 [docs/limitations.md](docs/limitations.md).

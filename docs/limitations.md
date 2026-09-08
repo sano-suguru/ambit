@@ -66,6 +66,51 @@ It is deliberately narrow:
   a callback Ambit never sees, so the call stays `unknown` even though
   `Array.map` itself is allowlisted.
 
+### Call resolution
+
+A call is followed to its target only when the callee's declaration is one the
+backend extracts. `handlers.read()` is resolved through the receiver's *value*
+rather than its static type, so a type annotation on `handlers` does not change
+the outcome — what matters is whether one object literal certainly stands
+behind the receiver. These are followed:
+
+- `const handlers = { read() { … } }` and `{ read: () => … }` — the member is
+  extracted and has its own contract
+- `const handlers = { read: readIt }` and `{ readIt }` — the member names an
+  already-extracted function, and the call resolves to that function
+- the same with `satisfies` or `as const`, which assert a type without changing
+  the value
+- a class instance method (`client.read()`)
+
+These are not:
+
+- a receiver with no single literal behind it — a parameter (`function f(d: D)
+  { d.run() }`), a class property, an import of a value built elsewhere. Any
+  object satisfying the type could arrive at runtime.
+- a `let` or `var` receiver, which may hold a different object by the time the
+  call runs
+- a literal containing a spread, which can carry members this analysis cannot
+  enumerate
+- a member with a computed, string, or numeric name (`{ ["a-b"]: … }`,
+  `{ "x y"() { … } }`) — there is no declaration path for it, see Function
+  extraction below
+- a literal that is not a module-scope `const`'s own initializer — one nested in
+  another literal, declared inside a function body, or passed inline as an
+  argument
+- a nested function declaration — one declared inside another function's body
+
+**This is not soundness.** `const` freezes the binding, not the properties, so
+`handlers.read = other` still defeats it. Resolving a class instance method
+rests on exactly the same assumption; following the value adds no new one, and
+neither is a guarantee.
+
+An unfollowed call keeps the "unknown stays unknown" property: it is reported as
+unresolved, becomes `unknown` in the enclosing function, and raises `AMB-W001`
+if that function declares a contract. It is counted under `unresolved-symbol` in
+`--coverage`, and — where the callee is a property access — counted without a
+name, because a name is only built for a bare identifier or a property access on
+an import binding. See Reading `--coverage` below.
+
 ### Higher-order functions
 
 Inferring a callback's effects from the argument passed at the call site is
@@ -90,33 +135,58 @@ covers:
 - named function declarations
 - class methods
 - variable-bound function and arrow expressions
+- members of a module-scope `const` object literal, when the member has an
+  identifier name — `const handlers = { read() { … } }` gives `read` the id
+  `handlers.read`, the same declaration-path notation a class method uses
 
 A call inside any other function-like node — a getter/setter, an
-object-literal method, an anonymous `export default` function, a nested
-function declaration, an inline callback argument, or anything else with no
-extracted ancestor such as a class constructor — is still walked, and its
-effects are attributed to the nearest enclosing *extracted* function. Such a
-call is invisible only when no extracted ancestor exists.
+object-literal member the notation cannot name, an anonymous `export default`
+function, a nested function declaration, an inline callback argument, or
+anything else with no extracted ancestor such as a class constructor — is still
+walked, and its effects are attributed to the nearest enclosing *extracted*
+function. Such a call is invisible only when no extracted ancestor exists.
+
+The identifier-name restriction is not arbitrary. A declaration path is
+`"."`-joined, so a computed, string, or numeric key has no spelling that
+survives it: `{ "a.b": … }` would be indistinguishable from nesting. The same
+rule already limits class-method extraction.
 
 `ambit check --coverage` reports these nodes as "skipped", broken down by
 kind: `getter-setter`, `object-literal-method`, `anonymous-default-export`,
 `callback-argument`, `nested-function`, and a residual `other`. "Skipped"
 means the node cannot declare a contract of its own — not that its effects go
-unseen.
+unseen. `object-literal-method` is now narrower than the kind's name suggests:
+it covers members of the literals Call resolution above rules out — a
+non-identifier key, a `let` binding, a spread, a nested literal, or a literal
+declared inside a function body or passed inline as an argument.
+
+Writing a contract on a skipped node is reported as `AMB-E003` rather than
+ignored — see `docs/diagnostics/README.md`.
+
+Carrying a contract and being reachable as a call target are gated by the same
+rule for object-literal members, so those two lists coincide there. They still
+differ elsewhere: a call through a parameter-typed receiver cannot be followed
+even when the member it would reach is extracted and declares a contract, and
+an inline callback argument's calls are attributed to its enclosing function
+even though the callback itself can declare nothing.
 
 ## Reading `--coverage`
 
-Ambit run against its own `src/` (2026-09, no `@effects` declared in this
-repo yet):
+Ambit run against its own `src/` (2026-09, four functions declaring
+`@effects`):
 
 ```console
 $ node src/cli/main.ts check src --coverage
-files=10 functions=66 declared=0
-unknown-rate=63.6% (42/66 functions)
-skipped=29 (callback-argument=26, nested-function=3)
-call-sites: total=306 resolved=83 stub=0 pure=84 unresolved=139
-unresolved-by-reason: builtin-method=33, external-module=102, unresolved-symbol=4
-top-unresolved-names: Array.push=17, Map.set=9, Set.add=3, visitTop=3, ...
+warning: extractProject declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:37)
+warning: loadProjectConfig declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:108)
+warning: collectTsFiles declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:155)
+warning: main declares fs_read but calls something that could not be resolved (cli/main.ts:24)
+files=10 functions=74 declared=4
+unknown-rate=66.2% (49/74 functions)
+skipped=30 (callback-argument=27, nested-function=3)
+call-sites: total=365 resolved=98 stub=2 pure=89 unresolved=176
+unresolved-by-reason: builtin-method=38, external-module=135, unresolved-symbol=3
+top-unresolved-names: Array.push=21, typescript.isIdentifier=11, Map.set=9, ...
 ```
 
 - `unknown-rate` — the share of extracted functions whose effects could not be
@@ -126,6 +196,12 @@ top-unresolved-names: Array.push=17, Map.set=9, Set.add=3, visitTop=3, ...
 - `unresolved-by-reason` and `top-unresolved-names` are the signal for what to
   stub next. `Array.push` and `Map.set` dominating the list here reflects the
   mutating-method exclusion described above.
+- `top-unresolved-names` lists only calls a textual name could be built for,
+  and only the ten most frequent. An unresolved call with no name — a property
+  access on anything but an import binding — raises the `unresolved-symbol`
+  count and appears nowhere else, so this list is not a complete picture of
+  what is unresolved. The three counted here are all calls to a nested function
+  (named `visitTop`, below the top ten).
 
 The summary line (`files= functions= declared=`) is printed on every run, with
 or without `--coverage`, so a check that analyzed nothing is never

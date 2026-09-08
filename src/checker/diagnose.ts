@@ -3,7 +3,9 @@ import type {
   Diagnostic,
   DiagnosticEngine,
   KnownEffect,
+  SkippedFunctionKind,
   SymbolId,
+  UncarriedContract,
 } from "../core/index.ts";
 import { excessEffects, KNOWN_EFFECTS } from "../core/index.ts";
 import type { PropagatedFunction } from "./propagate.ts";
@@ -151,6 +153,39 @@ function buildInvalidEffectsDiagnostic(
     docs: "docs/diagnostics/README.md#amb-e002",
     engine,
   };
+}
+
+/** Why the node in question cannot carry a contract, for AMB-E003's message. */
+const UNCARRIED_REASON: Record<SkippedFunctionKind, string> = {
+  "getter-setter": "a getter/setter",
+  "object-literal-method": "an object-literal member with no stable declaration path",
+  "anonymous-default-export": "an anonymous default export",
+  "callback-argument": "a callback passed inline as an argument",
+  "nested-function": "a function declared inside another function",
+  other: "a node the analysis does not extract",
+};
+
+/**
+ * A contract tag written on a function-like node the backend does not extract
+ * (DESIGN.md §4.1 permits `@effects` on 任意の関数・メソッド, but only an
+ * extracted node has a `SymbolId` to hang one on). Reported rather than
+ * dropped, on the same principle as AMB-E002: a declaration that silently does
+ * nothing looks like a guarantee and is not one.
+ */
+export function diagnoseUncarriedContracts(
+  uncarried: readonly UncarriedContract[],
+  engine: DiagnosticEngine,
+): readonly Diagnostic[] {
+  return uncarried.map((contract) => ({
+    id: "AMB-E003",
+    severity: "error",
+    category: "effects",
+    message: `@${contract.tag} is declared on ${UNCARRIED_REASON[contract.kind]}, which cannot carry a contract — the declaration has no effect`,
+    location: contract.location,
+    fixes: [],
+    docs: "docs/diagnostics/README.md#amb-e003",
+    engine,
+  }));
 }
 
 function chainToVia(

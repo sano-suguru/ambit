@@ -13,6 +13,11 @@ const ZERO_FUNCTIONS_FIXTURES = path.join(import.meta.dirname, "fixtures", "zero
 const NO_TS_FILES_FIXTURES = path.join(import.meta.dirname, "fixtures", "no-ts-files");
 const BROKEN_TSCONFIG_FIXTURES = path.join(import.meta.dirname, "fixtures", "broken-tsconfig");
 const INVALID_EFFECTS_FIXTURES = path.join(import.meta.dirname, "fixtures", "invalid-effects");
+const UNCARRIED_CONTRACT_FIXTURES = path.join(
+  import.meta.dirname,
+  "fixtures",
+  "uncarried-contract",
+);
 
 async function runCli(
   args: readonly string[],
@@ -205,6 +210,36 @@ describe("ambit check (CLI)", () => {
 
     const forValidFn = diagnostics.filter((d) => d.message.startsWith("declaresValidEffect "));
     expect(forValidFn).toEqual([]);
+  });
+
+  it("reports AMB-E003 for a contract written on a node that cannot carry one", async () => {
+    const { stdout, exitCode } = await runCli([
+      "check",
+      UNCARRIED_CONTRACT_FIXTURES,
+      "--format",
+      "json",
+    ]);
+    expect(exitCode).toBe(1);
+    const diagnostics = stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((r) => !("kind" in r));
+
+    // A getter, an object-literal member with a non-identifier name, and an
+    // anonymous default export — one diagnostic each, none of them dropped.
+    // Exactly three: the fixture's declared function both carries its own
+    // contract and contains an inline callback, so a fourth would mean either
+    // a false positive on an extractable node or a JSDoc walk-up from the
+    // callback to the enclosing declaration.
+    const uncarried = diagnostics.filter((d) => d.id === "AMB-E003");
+    expect(uncarried).toHaveLength(3);
+    for (const diagnostic of uncarried) {
+      expect(diagnostic.severity).toBe("error");
+      expect(diagnostic.docs).toBe("docs/diagnostics/README.md#amb-e003");
+      expect(diagnostic.location.line).toBeGreaterThan(0);
+    }
   });
 
   it("every NDJSON diagnostic carries an engine identity", async () => {
