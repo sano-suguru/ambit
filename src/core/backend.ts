@@ -25,11 +25,12 @@ import type { SymbolId } from "./symbol-id.ts";
  *   third-party package's `.d.ts` (e.g. an ORM client) rather than the
  *   default lib.
  * `unresolved-symbol` remains the residual case: either no declaration could
- * be found at all, or one was found but is not a function the backend
- * extracts — an object-literal property or method, an interface/type-alias
- * member signature, or a nested function declaration. In the latter shape the
- * call target is fully known to the compiler and may even carry its own
- * `@effects`; it simply has no `SymbolId` to propagate from.
+ * be found at all, or one was found but the call still cannot be followed to
+ * an extracted function — a nested function declaration, or a receiver with no
+ * single object literal certainly behind it (a parameter, a `let` binding, a
+ * literal carrying a spread). In the latter shapes the call target may be
+ * fully known to the compiler and may even declare its own `@effects`; the
+ * call site simply has no one `SymbolId` it can honestly propagate from.
  */
 export type UnresolvedReason =
   | "dynamic-import"
@@ -49,6 +50,12 @@ export type UnresolvedReason =
  * boundary — see `collectFunctionLikeDeclarations` in
  * `src/checker/backend/legacy-ts.ts`). Purely descriptive; carries no
  * compiler-specific node, so it can cross the `TsBackend` boundary freely.
+ *
+ * `object-literal-method` is narrower than its name: a member of a module-scope
+ * `const` literal with an identifier name *is* extracted. What remains are the
+ * members that have no stable declaration path (a computed, string, or numeric
+ * key) or no path at all (a nested literal, one declared inside a function
+ * body, one passed inline as an argument, or one bound by `let`).
  */
 export type SkippedFunctionKind =
   | "getter-setter"
