@@ -1,46 +1,101 @@
 # Ambit
 
-A **contract layer** on top of TypeScript, paired with a toolchain built for AI coding agents.
+**Make AI-written TypeScript obey explicit boundaries.**
 
-Ambit is not a new language. It doesn't change the grammar — it adds declarations for "effects, capabilities, and budget" to existing code, and mechanically stops contract violations in AI-written code. The name comes from *ambit*: the range of one's authority or activity. Ambit guarantees only what's inside the declared range, and doesn't hide what's outside it.
+AI agents can change code faster than humans can review the expansion of
+authority those changes introduce. The name comes from *ambit*: the range of
+one's authority or activity. Ambit makes that range explicit and mechanically
+checks it — declared boundaries, not silent trust.
 
-## Why not a new language
+- Can this function reach the network?
+- Can it read or write this database?
+- How much time or money is an entrypoint allowed to spend?
+- What happens when an agent quietly expands what a function can do?
 
-- AI is expected to write more accurate code in languages it has seen more of in training. We don't assume the model will learn a new language.
-- We build on existing assets (npm / tsc / CI / editors).
-- Contract declarations are added to existing TypeScript. This keeps the diff small on the way out, and the exit path is tested automatically.
-
-We're aiming for the next step after what TypeScript did to JavaScript.
-
-## Why TypeScript
-
-Static checking of contracts benefits from type, symbol, and call-signature information. Ambit gets that information from the TypeScript compiler, and takes on the inference, propagation, and checking of contracts itself.
-
-But a resolved call signature doesn't always mean the runtime call target is uniquely determined. For callbacks, dynamic dispatch, and calls that can't be statically resolved, Ambit works with the set of possible call targets, or with `unknown`.
-
-## What Ambit itself is built with
-
-**The leading candidate is to implement contract analysis, the CLI, and the runtime in TypeScript, and delegate type analysis to the Go-based native TypeScript compiler via its official API.** We distinguish the implementation language from the language the type-analysis engine runs in.
-
-- The native API is `unstable` as of the distributed version we checked (7.0.2). We'll fix the client and engine versions, verify conformance, performance, and the maintenance burden of tracking API updates, before adopting it as the product default.
-- The legacy TypeScript Compiler API is our baseline for spec verification and TS 5.x compatibility comparison. Whether the product permanently maintains two engines is undecided.
-- Depending directly on Go's internal compiler, or adding Rust, is something we'll compare only if a concrete problem shows up — missing functionality in the official API, or communication overhead, for example.
-- The runtime doesn't bundle a compiler. The CLI and the editor integration share one contract checker.
-
-The native backend's speed advantage is unproven on Ambit itself. Verification results and the adoption criteria are recorded in the [design spec](docs/DESIGN.md).
-
-## What it does
+## The accident
 
 ```ts
 /** @effects pure */
-export function calculateTax(order: Order): Money { /* ... */ }
+export function calculateTax(order: Order): Money {
+  // ...
+}
+```
 
+An agent later adds a `fetch()` call inside it. Then:
+
+```console
+$ node src/cli/main.ts check src
+error: calculateTax declares pure but performs [network] directly (tax.ts:2)
+```
+
+With `--format json`, the same violation comes out as NDJSON, meant to be
+consumed by an agent directly:
+
+```json
+{"id":"AMB-E001","severity":"error","category":"effects","message":"calculateTax declares pure but performs [network] directly","location":{"file":"tax.ts","line":2,"col":17,"endLine":2,"endCol":29},"contract":{"declared":["pure"],"observed":["network"],"via":[]},"fixes":[],"docs":"docs/diagnostics/README.md#amb-e001"}
+```
+
+## Status
+
+**Ambit is experimental and not production-ready.**
+
+Today `ambit check` enforces `@effects`. `@capabilities`, `@budget`, and
+`@entrypoint` are part of the contract model and documented in the design
+spec, but are not implemented yet. `ambit init` is planned, not built.
+Runtime enforcement has not been started — everything Ambit checks today is
+static.
+
+The design is documented in [docs/DESIGN.md](docs/DESIGN.md) (a Draft — the
+RFC process for spec changes starts at the first public release, so this
+file is edited directly for now) and [docs/diagnostics/](docs/diagnostics/README.md)
+(a diagnostic code ledger; ids like `AMB-E001` can still change before that
+release).
+
+## The problem
+
+TypeScript tells you whether a value has the type you expect. It does not
+tell you whether a function is allowed to do what it does. For code humans
+write, that gap is closed by architecture, code review, conventions, and
+institutional knowledge. That doesn't scale when an agent can rewrite large
+parts of a codebase in a single session. Ambit turns part of that implicit
+knowledge into a machine-checkable contract.
+
+## What Ambit adds
+
+Ambit adds JSDoc declarations to ordinary TypeScript. No new syntax, no
+grammar change, and an unrecognized tag has no effect on runtime behavior.
+
+### Effects
+
+What side effects can this function perform?
+
+```ts
 /**
  * @effects network, db_read
+ */
+export async function getUser(id: UserId) { /* ... */ }
+```
+
+This is the part `ambit check` enforces today: it stops a call to `fetch` or
+`node:fs` inside a function declared `pure`, and propagates effects through
+the call graph.
+
+### Capabilities *(designed, not yet implemented)*
+
+Which specific resource may it access?
+
+```ts
+/**
  * @capabilities db:read:users
  */
-export async function getUser(id: UserId): Promise<User | null> { /* ... */ }
+export async function getUser(id: UserId) { /* ... */ }
+```
 
+### Budgets *(designed, not yet implemented)*
+
+How much execution time or cost may an entrypoint consume?
+
+```ts
 /**
  * @entrypoint
  * @capabilities db:read:users, http:get:api.example.com
@@ -49,33 +104,63 @@ export async function getUser(id: UserId): Promise<User | null> { /* ... */ }
 export async function GET(req: Request): Promise<Response> { /* ... */ }
 ```
 
-- Declarations are JSDoc. They don't change the function body or its signature. Unrecognized tags don't change normal TypeScript runtime behavior.
-- If an AI writes code that calls `fetch` inside `calculateTax`, `ambit check` stops it.
-- Undeclared code isn't forbidden. It's treated as `unknown`, making the unanalyzed range visible instead of hiding it.
-- `ambit init` infers effects for existing code and proposes JSDoc as fix candidates. Adoption becomes "approve a suggestion" instead of "write declarations by hand."
-- Diagnostics are machine-readable from the start. Fix candidates and impact analysis are included, ready for an agent to consume directly.
-- Static checking is per-function; runtime enforcement is per-entrypoint. Dynamic capability and budget checks run through the corresponding runtime adapter.
-- For an agent's iterative checking, Ambit keeps compiler state and contract-analysis results, and re-checks only what a change could affect. Comment-only contract edits are included in what gets re-checked.
+## Designed for coding agents
 
-## What it doesn't do
+**Available today:** machine-readable NDJSON diagnostics
+(`ambit check --format json`).
 
-- Change the grammar, build a custom transpiler, build a custom runtime, or build a custom package registry
-- Support other languages such as Python (out of scope until Phase 1's exit criteria are met)
+**Planned:** stable diagnostic ids (from the first public release), suggested
+fixes (`fixes[].edits` — patches that are actually applicable), impact
+analysis, incremental re-checking, and inferring candidate contracts for
+existing code.
+
+The goal isn't to ask a model to remember architectural rules. It's to make
+violations of those rules mechanically detectable.
+
+## Unknown stays unknown
+
+Ambit doesn't pretend static analysis can resolve everything. Dynamic
+dispatch, callbacks, and unsupported APIs can prevent Ambit from proving what
+a call does. In those cases Ambit reports `unknown` rather than silently
+treating the call as safe — the boundary of the analysis stays visible
+instead of hidden.
+
+## Why not a new language
+
+- A model writes more accurately in a language it has seen more of in
+  training. Ambit doesn't assume the model will learn a new one.
+- It builds on existing assets: npm, tsc, CI, editors.
+- Contract declarations sit inside ordinary TypeScript, so removing Ambit
+  later is a small diff, not a rewrite.
+
+## Why TypeScript
+
+Static contract checking benefits from the type, symbol, and call-signature
+information a TypeScript compiler already produces. The initial target is
+Node.js backend TypeScript — SaaS APIs, background workflows, LLM agents,
+data processing — the kind of code coding agents write in bulk today. The
+baseline runtime is Node.js 24 LTS.
+
+## What Ambit does not do
+
+- Change the grammar, build a custom transpiler, build a custom runtime, or
+  build a custom package registry
+- Support other languages such as Python
 - Target browsers, frontend code, operating systems, or embedded systems
 - Design around the assumption that "the next model won't make this mistake"
-- Guarantee performance without measurement, or guarantee runtime enforcement for unsupported APIs or execution environments
+- Guarantee performance without measurement, or guarantee runtime
+  enforcement for unsupported APIs or execution environments
 
-## Initial target
+## Implementation
 
-**Node.js cloud backends** — the kind of code AI agents write in bulk today: SaaS APIs, workflows, LLM agents, data processing. The initial baseline environment is Node.js 24 LTS.
+Ambit's own analysis backend is not settled. Implementation choices —
+including which TypeScript compiler API it depends on — are treated as
+replaceable until measurement and compatibility testing justify them. See
+[docs/DESIGN.md](docs/DESIGN.md).
 
-Target-code TypeScript compatibility and the version of the analysis engine Ambit itself uses are managed separately. Supported combinations are published as they're verified.
+## The thesis
 
-## Documentation
-
-- [docs/DESIGN.md](docs/DESIGN.md) — design spec: analysis backend, contract model, diagnostics, toolchain, verification results, milestones
-- [docs/diagnostics/](docs/diagnostics/README.md) — diagnostic code ledger
-
-## Status
-
-Design and technical verification are underway alongside initial implementation. The spec changes through RFCs. This spec is a Draft, and does not finalize the native analysis backend as a product decision.
+AI has sharply cut the cost of producing code. It hasn't cut the cost of
+deciding whether that code should be allowed to do what it does. Ambit is an
+experiment in moving that boundary from human convention into an executable
+contract.
