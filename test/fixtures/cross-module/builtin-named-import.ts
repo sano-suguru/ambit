@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 
 export function callsBuiltinNamedImport(): void {
-  readFileSync("x");
+  readdirSync("x");
 }

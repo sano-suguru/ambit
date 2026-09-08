@@ -171,13 +171,14 @@ Representative cases where analysis is narrower than the model suggests:
 - **`new X(...)` is invisible.** Constructor calls are not recorded, not even
   as `unknown`, so a `pure` function that does `new PrismaClient()` or
   `new WebSocket(...)` passes today.
-- **Small bundled effect tables.** 23 entries (`fetch` plus Node.js builtins)
+- **Small bundled effect tables.** 25 entries (`fetch` plus Node.js builtins)
   producing only `network`, `fs_read`, `fs_write`, and `process`. Nothing
   bundled produces `db_read`, `db_write`, `llm`, or `env` — a `pure` function
   calling a database driver reports `unknown`, not a violation.
-- **Import-shape sensitive matching.** `import * as fs from "node:fs"` is
-  recognized; `import { writeFileSync } from "node:fs"` is not, and falls
-  back to `unknown`.
+- **Import-shape sensitive matching.** `import * as fs from "node:fs"`,
+  `import fs from "node:fs"`, and `import { writeFileSync } from "node:fs"`
+  are all recognized; a destructured or re-exported binding several hops
+  away (e.g. through a barrel file) is not.
 - **No higher-order inference.** A call through a callback parameter is
   `unknown`; a callback passed by name (`arr.map(namedFn)`) is never seen.
 - **Not every function can carry a contract.** Getters/setters,

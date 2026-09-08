@@ -185,11 +185,24 @@ describe("legacyTsBackend.extractProject (cross-module alias resolution)", () =>
     );
   });
 
-  it("classifies a named import of a builtin as external-module, not import-binding", async () => {
+  it("classifies a named import of a builtin not in the stub table as external-module, qualified by module specifier", async () => {
     const { files } = await legacyTsBackend.extractProject(CROSS_MODULE_ROOT);
     const fn = findFn(files, "builtin-named-import.ts#callsBuiltinNamedImport");
     const call = fn?.calls.find((c) => !c.resolvedCallee);
     expect(call?.unresolvedReason).toBe("external-module");
+    expect(call?.calleeQualifiedName).toBe("node:fs.readdirSync");
+  });
+
+  it('qualifies a default import of a builtin by module specifier (e.g. `import fs from "node:fs"`)', async () => {
+    const { files } = await legacyTsBackend.extractProject(CROSS_MODULE_ROOT);
+    const fn = findFn(files, "builtin-default-import.ts#callsBuiltinDefaultImport");
+    expect(fn?.calls.some((c) => c.calleeQualifiedName === "node:fs.existsSync")).toBe(true);
+  });
+
+  it("qualifies an aliased named import of a builtin by its imported (not local) name (e.g. `import { readFileSync as rf }`)", async () => {
+    const { files } = await legacyTsBackend.extractProject(CROSS_MODULE_ROOT);
+    const fn = findFn(files, "builtin-aliased-named-import.ts#callsBuiltinAliasedNamedImport");
+    expect(fn?.calls.some((c) => c.calleeQualifiedName === "node:fs.readFileSync")).toBe(true);
   });
 
   it("classifies a named import from a nonexistent module as import-binding", async () => {
