@@ -68,9 +68,9 @@ symbol IDs (`docs/DESIGN.md` §3.4).
 
 ## Toolchain
 
-Node.js 24, pnpm (single package — no workspaces; splitting into
+Node.js 24 (pnpm 12, single package — no workspaces; splitting into
 `@ambit/*` packages waits until npm publish is in view), TypeScript
-5.9.3, Vitest, Biome.
+5.9.3, Vitest 4, Biome.
 
 Non-obvious constraints:
 
@@ -80,6 +80,19 @@ Non-obvious constraints:
 - `erasableSyntaxOnly` is enabled in `tsconfig.json`: no `enum`,
   `namespace`, or parameter properties.
 - Relative imports use the `.ts` extension, not `.js`.
+- Supported runtime is the current Active LTS major of Node.js only
+  (`engines.node` in `package.json`), not every version that happens
+  to run — see `docs/DESIGN.md` §3.1 and §12. `volta.node` and CI's
+  `node-version` pin one representative patch within that range; only
+  `engines` is the actual promise.
+- `@types/node`'s major tracks the supported Active LTS major (currently
+  24.x). Do not bump it ahead of `engines` — a newer major would type
+  APIs that do not exist on the runtime Ambit claims to support.
+- `typescript` is pinned to `5.9.3` on purpose: it is the comparison
+  backend behind `src/checker/backend/legacy-ts.ts`, not merely
+  unmaintained (`docs/DESIGN.md` §3.1, Appendix A.1). It also currently
+  doubles as the build-time compiler for `tsc --noEmit` — see §12 for
+  why that pairing is provisional.
 
 ## Verification
 

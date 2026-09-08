@@ -502,6 +502,8 @@ Phase 1 で計測する。
 - **モノレポ**: 複数 tsconfig、プロジェクト参照、設定探索、プロジェクト境界の unknown、更新伝播を検証する。
 - **エディタ統合**: ネイティブ版で旧 Language Service Plugin の互換性を仮定しない。LSP との接続・診断統合・同じ解析結果の再利用を確認する。
 - **修正候補と診断スキーマ**: 具体的なパッチを安全に生成できない場合、型診断に契約情報がない場合、解析失敗の表現を確定する。
+- **ビルド用コンパイラと解析エンジンの分離**: §3.1 は対象言語の互換性・ビルド用コンパイラ・解析エンジンのバージョンを別管理と定めるが、実装（`package.json`）では `typescript` 1 本が `tsc --noEmit`（ビルド用）と `legacy-ts.ts`（比較用解析バックエンド、付録 A.1 参照）を兼任している。`legacy-ts.ts` は診断の `engine.version` に `ts.version` をそのまま流すため、ビルド用 tsc だけを更新しても診断の engine 表記が黙って変わりうる。M0.5 でネイティブ TypeScript（TS 7 系）をビルド用に採用する際、付録 A.1 の記録どおり比較用バックエンドを別 alias（`typescript-legacy` 等）に分離する。
+- **基準ランタイムの LTS 追従期限**: §3.1 の基準ランタイムは Active LTS 1 本（2026-09 時点で Node.js 24）とし、保守中・未検証の系は `engines` に宣言しない。Node.js 24 は 2026-10-20 に Maintenance LTS へ移行し、2026-10-28 に Node.js 26 が Active LTS になる（[Node.js Release Schedule](https://github.com/nodejs/Release)）。この日付までに Node.js 26 での検証（§3.5 相当の適合確認は不要でも、テスト・CI の通過確認は必要）と `engines` / `@types/node` / CI の乗り換えを完了するか、24 を Maintenance LTS のまま基準に据え続けると明示的に決め直す。放置すると「基準ランタイムは Active LTS」という方針が自動的に成立しなくなる。
 
 ## 付録 A. M0.5 予備検証の記録
 
