@@ -33,10 +33,10 @@ describe("diagnose (end-to-end: backend -> summarize -> propagate -> diagnose)",
       id: "AMB-E001",
       severity: "error",
       category: "effects",
-      contract: { declared: [], observed: ["network"], via: [] },
+      contract: { declared: ["pure"], observed: ["network"], via: [] },
       fixes: [],
     });
-    expect(diag?.location.file.endsWith("rule2-direct.ts")).toBe(true);
+    expect(diag?.location.file).toBe("rule2-direct.ts");
     expect(diag?.location.line).toBeGreaterThan(0);
   });
 
@@ -78,6 +78,9 @@ describe("diagnose (end-to-end: backend -> summarize -> propagate -> diagnose)",
       "cycle.ts#cycleA",
       "cycle.ts#cycleB",
     ]);
+    // via[].file is relative, matching location.file and via[].symbol —
+    // never an absolute filesystem path (core/location.ts's contract).
+    expect(diag?.contract?.via.every((v) => v.file === "cycle.ts")).toBe(true);
   });
 
   it("rule 3: pure reaching an unresolved call warns with AMB-W001, not AMB-E001", async () => {

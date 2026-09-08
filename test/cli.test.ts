@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 const execFileAsync = promisify(execFile);
 const CLI_PATH = path.join(import.meta.dirname, "..", "src", "cli", "main.ts");
 const PROPAGATION_FIXTURES = path.join(import.meta.dirname, "fixtures", "propagation");
-const BACKEND_SMOKE_FIXTURES = path.join(import.meta.dirname, "fixtures", "backend-smoke");
+const WARNINGS_ONLY_FIXTURES = path.join(import.meta.dirname, "fixtures", "warnings-only");
 
 async function runCli(
   args: readonly string[],
@@ -37,15 +37,20 @@ describe("ambit check (CLI)", () => {
   });
 
   it("exits 0 when only warnings (no errors) are present", async () => {
-    // backend-smoke's fixtures produce only W001-shaped input (undeclared
-    // functions, no @effects pure declarations reaching a known effect) —
-    // reuse the propagation fixture's rule3-unknown file in isolation would
-    // need its own dir; instead assert directly on a warning-only diagnostic
-    // set via the library path is covered in diagnose.test.ts. Here we only
-    // need one directory with zero *error* diagnostics to check the exit
-    // code split; backend-smoke has none declared "pure", so it produces
-    // none of AMB-E001/AMB-W001 at all, which is exit 0 too.
-    const { exitCode } = await runCli(["check", BACKEND_SMOKE_FIXTURES, "--format", "json"]);
+    const { stdout, exitCode } = await runCli([
+      "check",
+      WARNINGS_ONLY_FIXTURES,
+      "--format",
+      "json",
+    ]);
+    const diagnostics = stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+
+    expect(diagnostics.length).toBeGreaterThan(0);
+    expect(diagnostics.every((d) => d.severity === "warning")).toBe(true);
     expect(exitCode).toBe(0);
   });
 

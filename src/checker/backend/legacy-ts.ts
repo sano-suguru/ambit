@@ -69,9 +69,9 @@ async function extractProject(rootDir: string): Promise<readonly ExtractedFile[]
       const id = symbolId(relativePath(absoluteRoot, sourceFile), declPath);
       functions.push({
         id,
-        location: locationOf(sourceFile, nameOrNode(node)),
+        location: locationOf(absoluteRoot, sourceFile, nameOrNode(node)),
         jsDoc: extractJsDoc(node),
-        calls: collectCalls(node, sourceFile, checker, declaredNodeToId),
+        calls: collectCalls(node, sourceFile, checker, declaredNodeToId, absoluteRoot),
       });
     }
     if (functions.length > 0) {
@@ -236,6 +236,7 @@ function collectCalls(
   sourceFile: ts.SourceFile,
   checker: ts.TypeChecker,
   declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+  absoluteRoot: string,
 ): readonly CallSite[] {
   const body = bodyOf(decl);
   if (!body) return [];
@@ -244,9 +245,9 @@ function collectCalls(
 
   function visit(node: ts.Node): void {
     if (ts.isCallExpression(node)) {
-      calls.push(classifyCall(node, sourceFile, checker, declaredNodeToId));
+      calls.push(classifyCall(node, sourceFile, checker, declaredNodeToId, absoluteRoot));
     } else if (ts.isNewExpression(node)) {
-      const site = classifyNewExpression(node, sourceFile);
+      const site = classifyNewExpression(node, sourceFile, absoluteRoot);
       if (site) calls.push(site);
     }
     ts.forEachChild(node, visit);
@@ -259,10 +260,11 @@ function collectCalls(
 function classifyNewExpression(
   node: ts.NewExpression,
   sourceFile: ts.SourceFile,
+  absoluteRoot: string,
 ): CallSite | undefined {
   if (ts.isIdentifier(node.expression) && node.expression.text === "Function") {
     return {
-      location: locationOf(sourceFile, node),
+      location: locationOf(absoluteRoot, sourceFile, node),
       unresolvedReason: "new-function",
     };
   }
@@ -274,8 +276,9 @@ function classifyCall(
   sourceFile: ts.SourceFile,
   checker: ts.TypeChecker,
   declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+  absoluteRoot: string,
 ): CallSite {
-  const location = locationOf(sourceFile, node);
+  const location = locationOf(absoluteRoot, sourceFile, node);
 
   // Dynamic import: import(...)
   if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
@@ -384,11 +387,20 @@ function moduleSpecifierOf(checker: ts.TypeChecker, expr: ts.Expression): string
 
 // ---- positions ------------------------------------------------------------
 
-function locationOf(sourceFile: ts.SourceFile, node: ts.Node): SourceLocation {
+function locationOf(
+  absoluteRoot: string,
+  sourceFile: ts.SourceFile,
+  node: ts.Node,
+): SourceLocation {
   const start = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
   const end = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
   return {
-    file: sourceFile.fileName,
+    // Relative to the project root passed to `ambit check` (core/location.ts's
+    // contract) — never absolute: it would leak the local filesystem layout
+    // into NDJSON output and make `via[].file`/`location.file` inconsistent
+    // with the already-relative `via[].symbol` (DESIGN.md §5.1 example uses
+    // "src/tax.ts", not an absolute path).
+    file: relativePath(absoluteRoot, sourceFile),
     line: start.line + 1,
     col: start.character + 1,
     endLine: end.line + 1,

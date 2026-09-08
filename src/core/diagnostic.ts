@@ -13,9 +13,17 @@ export interface ContractViaEntry {
   readonly line: number;
 }
 
-/** DESIGN.md §5.1 `contract` field, for the `effects` category. */
+/**
+ * DESIGN.md §5.1 `contract` field, for the `effects` category.
+ *
+ * `declared` uses `"pure"` as a literal spelling for the declared empty set
+ * (matching the §5.1 example: `"declared": ["pure"]`), rather than `[]` —
+ * `EffectSet`'s internal representation collapses `pure` to an empty
+ * `effects` set (DESIGN.md §4.2 rule 2), but that internal choice should not
+ * leak into what a human or an agent reads back from the diagnostic.
+ */
 export interface EffectsContract {
-  readonly declared: readonly KnownEffect[];
+  readonly declared: readonly (KnownEffect | "pure")[];
   readonly observed: readonly KnownEffect[];
   readonly via: readonly ContractViaEntry[];
 }

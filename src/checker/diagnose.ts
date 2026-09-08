@@ -48,7 +48,7 @@ function buildExcessDiagnostic(
 
   const fnName = displayName(summary.id);
   const excessList = [...excess].filter((e) => KNOWN_EFFECTS.includes(e));
-  const declaredList = declared.size === 0 ? "pure" : [...declared].join(", ");
+  const declaredList = declaredContractList(declared).join(", ");
 
   const message =
     via.length > 0
@@ -62,7 +62,7 @@ function buildExcessDiagnostic(
     message,
     location: summary.location,
     contract: {
-      declared: [...declared],
+      declared: declaredContractList(declared),
       observed: [...propagated.observed.effects],
       via,
     },
@@ -92,7 +92,9 @@ function buildUnknownDiagnostic(
     message,
     location: summary.location,
     contract: {
-      declared: [],
+      // buildUnknownDiagnostic only fires when the function declares pure
+      // (see diagnose()'s isDeclaredPure guard).
+      declared: ["pure"],
       observed: [...propagated.observed.effects],
       via,
     },
@@ -109,6 +111,13 @@ function chainToVia(
     const location = state.get(id)?.summary.location;
     return { symbol: id, file: location?.file ?? "", line: location?.line ?? 0 };
   });
+}
+
+/** `["pure"]` for the declared empty set, matching DESIGN.md §5.1's example; the known effects otherwise. */
+function declaredContractList(
+  declared: ReadonlySet<KnownEffect>,
+): readonly (KnownEffect | "pure")[] {
+  return declared.size === 0 ? ["pure"] : [...declared];
 }
 
 function displayName(id: SymbolId): string {

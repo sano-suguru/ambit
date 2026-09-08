@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from "node:url";
 import { diagnose, legacyTsBackend, propagate, summarizeExtractedFiles } from "../checker/index.ts";
 import type { Diagnostic } from "../core/index.ts";
 
@@ -80,7 +81,9 @@ function errorMessage(error: unknown): string {
 
 // Only run when this file is the process entry point (`node src/cli/main.ts
 // ...`), not when it's imported by a test or another module.
-if (import.meta.url === `file://${process.argv[1]}`) {
+// pathToFileURL (rather than a plain `file://` template) also matches when
+// invoked through a symlinked `bin` entry or a path containing spaces.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main(process.argv.slice(2))
     .then((code) => {
       process.exitCode = code;
