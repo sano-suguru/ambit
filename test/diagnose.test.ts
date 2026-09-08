@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { legacyTsBackend } from "../src/checker/backend/legacy-ts.ts";
@@ -7,6 +8,8 @@ import { summarizeExtractedFiles } from "../src/checker/summarize.ts";
 import type { Diagnostic } from "../src/core/index.ts";
 
 const FIXTURE_ROOT = path.join(import.meta.dirname, "fixtures", "propagation");
+const PROJECT_ROOT = path.resolve(import.meta.dirname, "..");
+const DIAGNOSTICS_DOC_PATH = "docs/diagnostics/README.md";
 
 async function diagnoseFixtures(): Promise<readonly Diagnostic[]> {
   const files = await legacyTsBackend.extractProject(FIXTURE_ROOT);
@@ -106,4 +109,34 @@ describe("diagnose (end-to-end: backend -> summarize -> propagate -> diagnose)",
       expect(diag.location.col).toBeGreaterThan(0);
     }
   });
+
+  it("every diagnostic's docs field resolves to a heading that actually exists in docs/diagnostics/README.md", async () => {
+    const diagnostics = await diagnoseFixtures();
+    const readmeContent = await readFile(path.join(PROJECT_ROOT, DIAGNOSTICS_DOC_PATH), "utf8");
+    const anchors = new Set(
+      [...readmeContent.matchAll(/^##\s+(.+)$/gm)].map((match) => githubSlug(match[1] ?? "")),
+    );
+    expect(anchors.size).toBeGreaterThan(0);
+
+    for (const diag of diagnostics) {
+      expect(diag.docs, `diagnostic ${diag.id} is missing a docs field`).toBeDefined();
+      const [docPath, anchor] = (diag.docs ?? "").split("#");
+      expect(docPath, `diagnostic ${diag.id}'s docs field: "${diag.docs}"`).toBe(
+        DIAGNOSTICS_DOC_PATH,
+      );
+      expect(
+        anchors.has(anchor ?? ""),
+        `diagnostic ${diag.id}'s docs anchor "#${anchor}" has no matching heading in ${DIAGNOSTICS_DOC_PATH} (available: ${[...anchors].join(", ")})`,
+      ).toBe(true);
+    }
+  });
 });
+
+/** Reproduces GitHub's Markdown heading-to-anchor slug algorithm. */
+function githubSlug(heading: string): string {
+  return heading
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\- ]/g, "")
+    .replace(/ /g, "-");
+}

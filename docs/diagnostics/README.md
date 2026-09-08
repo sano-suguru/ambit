@@ -11,7 +11,9 @@ Message text is written in English; this file is written in English as well,
 independent of the project's Japanese-language documentation policy — see
 `CLAUDE.md`.
 
-## AMB-E001 — declared effects exceeded
+## AMB-E001
+
+Declared effects exceeded.
 
 **Severity:** error
 **Category:** effects
@@ -25,7 +27,9 @@ least one call.
 Example: a function declared `@effects pure` calls another function that
 performs a `fetch`.
 
-## AMB-W001 — pure reaches unknown
+## AMB-W001
+
+Pure reaches unknown.
 
 **Severity:** warning
 **Category:** effects
