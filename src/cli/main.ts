@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import type { CoverageReport } from "../checker/coverage.ts";
 import {
@@ -196,11 +197,32 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-// Only run when this file is the process entry point (`node src/cli/main.ts
-// ...`), not when it's imported by a test or another module.
-// pathToFileURL (rather than a plain `file://` template) also matches when
-// invoked through a symlinked `bin` entry or a path containing spaces.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/**
+ * True when this file is the process entry point (`node src/cli/main.ts ...`,
+ * or the installed `ambit` bin), false when a test or another module imports
+ * it.
+ *
+ * npm installs `bin` as a symlink (`node_modules/.bin/ambit ->
+ * ../ambit/dist/cli/main.js`), and `process.argv[1]` is then the *symlink*
+ * path while `import.meta.url` is the resolved target — so comparing the two
+ * directly makes the installed CLI silently do nothing and exit 0, which reads
+ * exactly like "checked, no violations" (DESIGN.md §3.4 forbids that). The
+ * symlink is resolved before comparing. `pathToFileURL` (rather than a plain
+ * `file://` template) also handles a path containing spaces.
+ */
+function isProcessEntryPoint(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  let resolved: string;
+  try {
+    resolved = realpathSync(entry);
+  } catch {
+    resolved = entry;
+  }
+  return import.meta.url === pathToFileURL(resolved).href;
+}
+
+if (isProcessEntryPoint()) {
   main(process.argv.slice(2))
     .then((code) => {
       process.exitCode = code;

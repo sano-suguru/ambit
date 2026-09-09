@@ -18,13 +18,27 @@
     "lint:fix": "biome check --write .",
     "fmt": "biome format --write .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "tsc -p tsconfig.build.json"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",
     "@types/node": "^24.13.3",
-    "typescript": "5.9.3",
     "vite": "^8.2.2",
     "vitest": "^4.1.11"
+  },
+  "bin": {
+    "ambit": "dist/cli/main.js"
+  },
+  "files": [
+    "dist",
+    "docs/diagnostics",
+    "docs/limitations.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "typescript": "5.9.3"
   }
 }

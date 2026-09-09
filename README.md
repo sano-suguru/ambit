@@ -40,22 +40,40 @@ consumed by an agent directly:
 
 ## Quick start
 
-`ambit` is not published to npm yet; run it from a clone. Requires Node.js 24
-and pnpm.
+Requires Node.js 24.
+
+### Install into your project
+
+`ambit` is not published to npm yet, so install it from a tarball you build
+from a clone:
 
 ```sh
 git clone https://github.com/sano-suguru/ambit.git
-cd ambit
-pnpm install
+cd ambit && pnpm install && pnpm pack        # → ambit-0.0.0.tgz
+cd /path/to/your-project
+npm install -D /path/to/ambit/ambit-0.0.0.tgz
+npx ambit check src
+```
+
+```sh
+npx ambit check src --format json   # NDJSON, one diagnostic per line
+npx ambit check src --coverage      # unknown rate and why calls stayed unresolved
+```
+
+Removing it is `npm remove ambit`. The `@effects` declarations left behind are
+ordinary JSDoc comments: the project still type-checks and still runs. Both the
+install path and the removal path are covered by an automated test against a
+scratch project (`test/e2e.install.test.ts`).
+
+### Run it from a clone
+
+```sh
 node src/cli/main.ts check <dir>
 ```
 
-There is no build step — `.ts` files run directly under Node's type stripping.
-
-```sh
-node src/cli/main.ts check src --format json   # NDJSON, one diagnostic per line
-node src/cli/main.ts check src --coverage      # unknown rate and why calls stayed unresolved
-```
+There is no build step during development — `.ts` files run directly under
+Node's type stripping. A build exists only for distribution, because Node
+refuses to strip types for files under `node_modules`.
 
 `check` exits 0 when no error was reported, 1 when one was, and 2 when the
 analysis itself could not run.

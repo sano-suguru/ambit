@@ -116,7 +116,12 @@ Non-obvious constraints:
 
 - No build step during development. Run `.ts` files directly via Node's
   type stripping (e.g. `node src/cli/main.ts check <dir> --format json`).
-  `tsc` is for type checking only (`--noEmit`).
+  `tsc --noEmit` is for type checking. The one build that exists,
+  `pnpm build` (`tsconfig.build.json` → `dist/`), is for distribution only:
+  Node refuses to strip types under `node_modules`
+  (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`), so an installed Ambit has
+  to ship emitted JavaScript. It runs from `prepack`; do not add it to a
+  development loop.
 - `erasableSyntaxOnly` is enabled in `tsconfig.json`: no `enum`,
   `namespace`, or parameter properties.
 - Relative imports use the `.ts` extension, not `.js`.

@@ -1,0 +1,23 @@
+{
+  // Distribution only. AGENTS.md's "no build step during development" holds:
+  // `.ts` files still run directly under Node's type stripping in this repo.
+  // But Node refuses to strip types for files under `node_modules`
+  // (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING), so an *installed* Ambit
+  // cannot ship `.ts` and must ship emitted JavaScript.
+  //
+  // `rewriteRelativeImportExtensions` turns the repo's `./x.ts` specifiers
+  // into `./x.js` on the way out, so the same source works both ways.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "allowImportingTsExtensions": false,
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "test"]
+}

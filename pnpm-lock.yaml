@@ -108,6 +108,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
     devDependencies:
       '@biomejs/biome':
         specifier: ^2.5.12
@@ -115,9 +119,6 @@ importers:
       '@types/node':
         specifier: ^24.13.3
         version: 24.13.3
-      typescript:
-        specifier: 5.9.3
-        version: 5.9.3
       vite:
         specifier: ^8.2.2
         version: 8.2.2(@types/node@24.13.3)(esbuild@0.28.2)
