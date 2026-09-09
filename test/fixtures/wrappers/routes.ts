@@ -1,5 +1,6 @@
 import { withAmbit } from "ambit/runtime";
 import { ambitHandler } from "ambit/runtime/hono";
+import { ambitRoute } from "ambit/runtime/next";
 
 /**
  * @entrypoint
@@ -192,3 +193,52 @@ export function specNotLiteral(id: string): string {
 // JSDoc here does not make the contract implicit — it makes it missing, and
 // that stays visible as AMB-W004 plus AMB-W002.
 export const SPEC_NOT_LITERAL = ambitHandler({ capabilities: built }, specNotLiteral, () => [""]);
+
+// --- The Next.js adapter reads the same way (DESIGN.md §4.4) --------------
+
+/**
+ * @entrypoint
+ * @capabilities db:read:orders
+ * @effects pure
+ */
+export function nextAgrees(id: string): string {
+  return id;
+}
+
+// `ambitRoute` puts `spec` and `handler` in the same two positions as
+// `ambitHandler`, so the one extraction reaches it: agreeing is silent.
+export const NEXT_AGREES = ambitRoute({ capabilities: ["db:read:orders"] }, nextAgrees, () => [""]);
+
+/**
+ * @entrypoint
+ * @capabilities db:read:orders
+ * @budget timeMs=500 onExceed=throw
+ * @effects pure
+ */
+export function nextDrifts(id: string): string {
+  return id;
+}
+
+// Writing both and disagreeing is still an error through this adapter —
+// AMB-E010 for the capability set, AMB-E011 for the budget.
+export const NEXT_DRIFTS = ambitRoute(
+  { capabilities: ["db:write:orders"], budget: { timeMs: 5000, onExceed: "throw" } },
+  nextDrifts,
+  () => [""],
+);
+
+/**
+ * @entrypoint
+ * @effects pure
+ */
+export function nextSpecOnly(id: string): string {
+  return id;
+}
+
+// No `@capabilities` and no `@budget`: the literal spec is the declaration,
+// exactly as for the other two wrappers.
+export const NEXT_SPEC_ONLY = ambitRoute(
+  { capabilities: ["db:read:orders"], budget: { timeMs: 500, onExceed: "throw" } },
+  nextSpecOnly,
+  () => [""],
+);

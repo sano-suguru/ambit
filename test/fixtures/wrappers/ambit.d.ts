@@ -25,3 +25,16 @@ declare module "ambit/runtime/hono" {
     decode: (c: unknown) => readonly [...Args] | Promise<readonly [...Args]>,
   ): (c: unknown) => Promise<unknown>;
 }
+
+declare module "ambit/runtime/next" {
+  import type { AmbitSpec } from "ambit/runtime";
+
+  export function ambitRoute<Args extends readonly unknown[], Result>(
+    spec: AmbitSpec,
+    handler: (...args: Args) => Result | Promise<Result>,
+    decode: (
+      request: unknown,
+      context: unknown,
+    ) => readonly [...Args] | Promise<readonly [...Args]>,
+  ): (request: unknown, context: unknown) => Promise<unknown>;
+}

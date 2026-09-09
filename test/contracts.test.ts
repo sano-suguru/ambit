@@ -415,4 +415,50 @@ describe("contract-to-handler agreement (DESIGN.md §4.4「契約とハンドラ
       diagnostics.filter((d) => d.id === "AMB-E010" && d.message.includes("dynamicBudget")),
     ).toEqual([]);
   });
+
+  /**
+   * The Next.js adapter (`ambit/runtime/next`'s `ambitRoute`) is the third
+   * name in `RUNTIME_WRAPPER_NAMES`, and it earns nothing of its own: it puts
+   * `spec` and `handler` in the same first two positions, so the extraction
+   * written for `withAmbit` reaches it unchanged. These three assert that it
+   * really does — an adapter the checker cannot read would establish a context
+   * at runtime that no `ambit check` ever compares.
+   */
+  it("stays quiet when an ambitRoute registration agrees with the JSDoc", async () => {
+    const { diagnostics } = await analyze(WRAPPER_ROOT);
+    expect(diagnostics.filter((d) => d.message.includes("nextAgrees"))).toEqual([]);
+  });
+
+  it("catches an ambitRoute registration that drifts on both halves", async () => {
+    const { diagnostics } = await analyze(WRAPPER_ROOT);
+    const capabilities = diagnostics.filter(
+      (d) => d.id === "AMB-E010" && d.message.includes("nextDrifts"),
+    );
+    expect(capabilities).toHaveLength(1);
+    expect(capabilities[0]?.severity).toBe("error");
+    // The diagnostic names the call the source wrote, not another adapter's.
+    expect(capabilities[0]?.message).toContain("ambitRoute grants [db:write:orders]");
+
+    const budget = diagnostics.filter(
+      (d) => d.id === "AMB-E011" && d.message.includes("nextDrifts"),
+    );
+    expect(budget).toHaveLength(1);
+    expect(budget[0]?.severity).toBe("error");
+    expect(budget[0]?.message).toContain("ambitRoute sets budget timeMs=5000");
+    expect(budget[0]?.message).toContain("declares @budget timeMs=500");
+  });
+
+  it("reads a literal ambitRoute spec as the handler's own declaration", async () => {
+    const { diagnostics, state } = await analyze(WRAPPER_ROOT);
+    expect(diagnostics.filter((d) => d.message.includes("nextSpecOnly"))).toEqual([]);
+    const summary = [...state.values()].find(
+      (p) => p.summary.id === "routes.ts#nextSpecOnly",
+    )?.summary;
+    expect(summary?.declaredBy).toEqual({ effects: "jsdoc", capabilities: "spec", budget: "spec" });
+    expect(summary?.capabilities.kind).toBe("declared");
+    expect(summary?.budget).toEqual({
+      kind: "declared",
+      budget: { timeMs: 500, onExceed: "throw" },
+    });
+  });
 });

@@ -820,6 +820,7 @@ function isFunctionValuedProperty(member: ts.ClassElement): member is ts.Propert
 const RUNTIME_WRAPPER_NAMES: ReadonlyMap<string, string> = new Map([
   ["ambit/runtime.withAmbit", "withAmbit"],
   ["ambit/runtime/hono.ambitHandler", "ambitHandler"],
+  ["ambit/runtime/next.ambitRoute", "ambitRoute"],
 ]);
 
 /**
