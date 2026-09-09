@@ -1,6 +1,7 @@
 import type {
   Budget,
   Capability,
+  ContractOperation,
   ContractViaEntry,
   Diagnostic,
   DiagnosticEngine,
@@ -478,6 +479,9 @@ function buildExcessDiagnostic(
   const primaryEffect = KNOWN_EFFECTS.find((effect) => excess.has(effect));
   const chain = primaryEffect ? witnessChain(summary.id, primaryEffect, state) : [];
   const via = chainToVia(chain, state);
+  const operation = primaryEffect
+    ? operationSite(primaryEffect, chain[chain.length - 1] ?? summary.id, state)
+    : undefined;
 
   const fnName = displayName(summary.id);
   const excessList = [...excess].filter((e) => KNOWN_EFFECTS.includes(e));
@@ -498,6 +502,7 @@ function buildExcessDiagnostic(
       declared: declaredContractList(declared),
       observed: [...propagated.observed.effects],
       via,
+      operation,
     },
     fixes: buildWidenFix(propagated, declared, excess, state),
     docs: "docs/diagnostics/README.md#amb-e001",
@@ -914,6 +919,38 @@ function chainToVia(
     const location = state.get(id)?.summary.location;
     return { symbol: id, file: location?.file ?? "", line: location?.line ?? 0 };
   });
+}
+
+/**
+ * The call site inside `ownerId` that performs `effect` — the `fetch(...)` line
+ * rather than the enclosing function's declaration line.
+ *
+ * Only a stub call answers: it is the layer that knows an operation's name and
+ * its effects. A `state_write` that came from an assignment or a mutating
+ * method has no operation to name, and an effect that reached `ownerId`
+ * through its own `@effects` declaration alone has no site inside it — both
+ * return `undefined` rather than a guess (DESIGN.md §5.2).
+ *
+ * The first matching site in source order is reported when a function performs
+ * the same effect more than once: one site is enough to send the reader to the
+ * right place, and picking the first is stable across re-analysis.
+ */
+function operationSite(
+  effect: KnownEffect,
+  ownerId: SymbolId,
+  state: ReadonlyMap<SymbolId, PropagatedFunction>,
+): ContractOperation | undefined {
+  const owner = state.get(ownerId);
+  if (!owner) return undefined;
+  const site = owner.summary.calls.find(
+    (call): call is StubCall => call.kind === "stub" && call.effects.includes(effect),
+  );
+  if (!site) return undefined;
+  return {
+    qualifiedName: site.qualifiedName,
+    file: site.location.file,
+    line: site.location.line,
+  };
 }
 
 /** `["pure"]` for the declared empty set, matching DESIGN.md §5.1's example; the known effects otherwise. */

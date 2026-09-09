@@ -19,7 +19,7 @@ import {
   summarizeExtractedFiles,
 } from "../checker/index.ts";
 import type { Diagnostic } from "../core/index.ts";
-import { displayName } from "../core/index.ts";
+import { displayName, isEffectsContract } from "../core/index.ts";
 
 /**
  * Exit codes (plan step 9): distinguish "checked, no error-level violation"
@@ -270,8 +270,18 @@ function formatText(diagnostic: Diagnostic): string {
  * fabricating a fix candidate).
  */
 function viaPath(diagnostic: Diagnostic): readonly string[] {
-  const via = diagnostic.contract?.via ?? [];
-  return via.map((hop) => `-> ${displayName(hop.symbol)} (${hop.file}:${hop.line})`);
+  const contract = diagnostic.contract;
+  const via = contract?.via ?? [];
+  // The operation site is not a hop — it is where, inside the last function of
+  // the path, the effect is performed — so it is labelled rather than arrowed,
+  // and it appears for a direct diagnostic that has no path at all.
+  const operation = contract && isEffectsContract(contract) ? contract.operation : undefined;
+  return [
+    ...via.map((hop) => `-> ${displayName(hop.symbol)} (${hop.file}:${hop.line})`),
+    ...(operation
+      ? [`operation: ${operation.qualifiedName} (${operation.file}:${operation.line})`]
+      : []),
+  ];
 }
 
 function formatSummaryText(coverage: CoverageReport): string {

@@ -736,7 +736,8 @@ Optional アクセスなどの型安全性は再実装しない。選択した T
   "contract": {
     "declared": ["pure"],
     "observed": ["network"],
-    "via": [{"symbol": "src/rates.ts#fetchRate", "file": "src/rates.ts", "line": 10}]
+    "via": [{"symbol": "src/rates.ts#fetchRate", "file": "src/rates.ts", "line": 10}],
+    "operation": {"qualifiedName": "fetch", "file": "src/rates.ts", "line": 12}
   },
   "fixes": [
     {
@@ -754,6 +755,8 @@ Optional アクセスなどの型安全性は再実装しない。選択した T
 }
 ```
 
+`via` は関数の列であり、各要素の位置はその関数の宣言位置である。効果を起こす操作そのものの位置（`fetch(...)` の行）は `contract.operation` が持つ。読み手が診断だけで操作の行に到達できるようにするためで、`via` の意味は変えない。
+
 この例では修正対象の41行目が `/** @effects pure */` の20文字であると仮定する。位置は例示用で、実際のパッチは解析した元ファイルに基づいて生成する。契約を守る具体的パッチを生成できないため、緩和候補だけを表示している。元仕様の省略記号を含む擬似パッチを、適用可能な修正として出力しない。
 
 ### 5.2 フィールド
@@ -766,6 +769,7 @@ Optional アクセスなどの型安全性は再実装しない。選択した T
 | `contract` | 契約診断の宣言・観測差分と経路。`category` によって形が変わる: `effects` は `{declared, observed, via}`、`capabilities` は `{declared, required, excess, via}`（`declared` は付与された権限、`required` は本体が必要とする権限、`excess` はそのうち `declared` が許可しないもの）。判別用の追加フィールドは持たせない — 消費者は `category` を見る。コンパイラ由来の型診断などへの適用はスキーマで定義する |
 | `fixes` | 修正候補。`consistentWithContract` で契約を守る修正と緩める修正を区別する |
 | `fixes[].impact` | 契約を緩める修正で影響を受ける呼び出し元など |
+| `contract.operation` | 効果を起こす操作の位置。`{qualifiedName, file, line}`。`via` の末尾の関数（`via` が空なら診断対象の関数）の中で、その効果を起こすスタブ呼び出しの位置。`effects` の超過診断（`AMB-E001`）にのみ付く。位置が確定できない場合 — 効果が callee の `@effects` 宣言だけから来ていて本体に対応する操作が無い、代入やミューテーション由来で名前を持つ操作が無い — はフィールドごと省く。宣言位置で代用しない |
 | `engine` | `{name, version}`。診断を生成した解析バックエンドの識別（`name` は接続層の実装名、`version` はそのバックエンドが依存するコンパイラのバージョン） |
 
 診断はバージョン付き JSON Schema で管理する。スキーマ版、Ambit 版、解析失敗の表現、coverage の母数・信頼区分を M1 で定義する（`engine` フィールドのみ先行して確定済み）。NDJSON の既存コンシューマを壊すメタデータ行を無断で追加しない。

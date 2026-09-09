@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
@@ -321,6 +322,35 @@ describe("ambit check (CLI)", () => {
       expect(index).toBeGreaterThanOrEqual(0);
       expect(lines[index + 1]).not.toMatch(/^ {2}-> /);
     }
+  });
+
+  it("reports the operation site itself, on the line the source performs it", async () => {
+    // DESIGN.md §5.2 `contract.operation`: `via` ends at a function's
+    // declaration; the operation line is what a reader actually needs.
+    const json = await runCli(["check", PROPAGATION_FIXTURES, "--format", "json"]);
+    const text = await runCli(["check", PROPAGATION_FIXTURES]);
+    const withOperation = json.stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((record) => record.contract?.operation);
+    expect(withOperation.length).toBeGreaterThan(0);
+
+    for (const diagnostic of withOperation) {
+      const { qualifiedName, file, line } = diagnostic.contract.operation;
+      expect(text.stdout).toContain(`  operation: ${qualifiedName} (${file}:${line})`);
+      const source = await readFile(path.join(PROPAGATION_FIXTURES, file), "utf8");
+      const operationName = qualifiedName.split(".").at(-1);
+      expect(source.split("\n")[line - 1]).toContain(operationName);
+    }
+
+    // The site is reported for a direct diagnostic too, which has no path at
+    // all — that is the case where the declaration line and the operation line
+    // differ with nothing else to say so.
+    const direct = withOperation.filter((d) => d.contract.via.length === 0);
+    expect(direct.length).toBeGreaterThan(0);
+    expect(direct.some((d) => d.contract.operation.line !== d.location.line)).toBe(true);
   });
 
   it("every NDJSON diagnostic carries an engine identity", async () => {

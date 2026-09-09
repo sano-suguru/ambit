@@ -14,6 +14,26 @@ export interface ContractViaEntry {
 }
 
 /**
+ * Where an effect is actually performed: the operation's own call site, inside
+ * the last function of `via` (or inside the reported function itself, when
+ * `via` is empty).
+ *
+ * `via` names functions, and a function's location is its declaration — not
+ * the `fetch(...)` or `readFileSync(...)` line inside it. This field carries
+ * that line, so a reader of a diagnostic never has to open the file to find
+ * the operation the contract was broken by.
+ *
+ * `qualifiedName` is the operation as the stub tables name it (`fetch`,
+ * `node:fs.readFileSync`), in `StubCall.qualifiedName`'s module-specifier
+ * namespace.
+ */
+export interface ContractOperation {
+  readonly qualifiedName: string;
+  readonly file: string;
+  readonly line: number;
+}
+
+/**
  * DESIGN.md §5.1 `contract` field, for the `effects` category.
  *
  * `declared` uses `"pure"` as a literal spelling for the declared empty set
@@ -26,6 +46,14 @@ export interface EffectsContract {
   readonly declared: readonly (KnownEffect | "pure")[];
   readonly observed: readonly KnownEffect[];
   readonly via: readonly ContractViaEntry[];
+  /**
+   * Absent when the operation site is not known: the effect came from a
+   * callee's `@effects` declaration with no matching operation in its body, or
+   * from a mutation, which has no operation to name. Never synthesized — an
+   * unknown site stays absent rather than falling back to the function's
+   * declaration line (DESIGN.md §5.3).
+   */
+  readonly operation?: ContractOperation;
 }
 
 /**
