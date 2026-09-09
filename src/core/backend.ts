@@ -206,9 +206,44 @@ export interface ExtractedFunction {
   readonly calls: readonly CallSite[];
 }
 
+/**
+ * A hand-written `withAmbit(spec, handler)` from `ambit/runtime`, as the source
+ * shows it (DESIGN.md §4.4: 「アダプタがない場合は `withAmbit(spec, handler)`
+ * を手動で挟む」).
+ *
+ * Ambit reads it to check one thing only: that the capability list the runtime
+ * would establish is the one the handler's JSDoc declares. Written twice, the
+ * two drift, and nothing noticed before this existed.
+ *
+ * The check is **on the source alone**. §12's 「契約とハンドラの対応付け」 —
+ * a build that strips comments, a bundle that moves the handler — is not
+ * solved here, and `unmatchedReason` exists so a wrapper this comparison
+ * cannot reach is reported rather than passed over.
+ */
+export interface RuntimeWrapper {
+  /** The `withAmbit(...)` call itself: where a mismatch is reported. */
+  readonly location: SourceLocation;
+  /**
+   * The capability strings in the spec's literal `capabilities` array. An
+   * empty array is a real grant of nothing, not a missing one — that case is
+   * `unmatchedReason` instead.
+   */
+  readonly capabilities?: readonly string[];
+  /** The wrapped handler, when it is an identifier naming a declaration extracted from the same file. */
+  readonly handler?: SymbolId;
+  /** Why this wrapper could not be compared, when it could not. */
+  readonly unmatchedReason?: "dynamic-capabilities" | "handler-not-in-this-file";
+}
+
 export interface ExtractedFile {
   readonly filePath: string;
   readonly functions: readonly ExtractedFunction[];
+  /**
+   * Required, not optional, for the reason {@link ExtractedProject}'s counts
+   * are: a backend that omitted them would report "no wrappers" and "wrappers
+   * not looked for" identically.
+   */
+  readonly runtimeWrappers: readonly RuntimeWrapper[];
 }
 
 /**

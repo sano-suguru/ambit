@@ -338,6 +338,97 @@ export async function formatCents(cents: number): Promise<string> {
     );
   }, 60_000);
 
+  it("accident 6: a withAmbit list that disagrees with the handler's @capabilities is AMB-E010", async () => {
+    await withVariant(
+      [
+        {
+          file: "src/routes/orders.ts",
+          find: '{ capabilities: ["db:write:orders"], budget: { timeMs: 800, onExceed: "throw" } },',
+          replace:
+            '{ capabilities: ["db:write:orders", "db:write:users"], budget: { timeMs: 800, onExceed: "throw" } },',
+        },
+      ],
+      (result) => {
+        const diagnostic = at(result, "AMB-E010", "src/routes/orders.ts", 27);
+        expect(diagnostic?.message).toContain("db:write:users");
+        expect(diagnostic?.message).toContain("createOrder");
+        expect(diagnostic?.fixes).toEqual([]);
+        expect(result.exitCode).toBe(1);
+      },
+    );
+  }, 60_000);
+
+  it("accident 6: the same drift written into the JSDoc instead is caught too", async () => {
+    // The pair has no privileged side: whichever half an agent edits, they
+    // stop agreeing.
+    await withVariant(
+      [
+        {
+          file: "src/routes/orders.ts",
+          find: " * @capabilities db:write:orders",
+          replace: " * @capabilities db:write:orders, db:write:users",
+        },
+      ],
+      (result) => {
+        expect(at(result, "AMB-E010", "src/routes/orders.ts", 27)).toBeDefined();
+        expect(result.exitCode).toBe(1);
+      },
+    );
+  }, 60_000);
+
+  it("accident 6: a capability list built at runtime is a warning that says so", async () => {
+    await withVariant(
+      [
+        {
+          file: "src/routes/orders.ts",
+          find: `export const GET = withAmbit(
+  { capabilities: ["db:read:orders"], budget: { timeMs: 500 } },
+  listOrderTotals,
+);`,
+          replace: `const readCaps = ["db:read:orders"];
+
+export const GET = withAmbit({ capabilities: readCaps, budget: { timeMs: 500 } }, listOrderTotals);`,
+        },
+      ],
+      (result) => {
+        const warning = result.diagnostics.find((d) => d.id === "AMB-W004");
+        expect(warning?.message).toContain("not a literal array of strings");
+        expect(warning?.message).toContain("source only");
+        // Not knowing is not a violation: it must not fail the build.
+        expect(errors(result)).toEqual([]);
+        expect(result.exitCode).toBe(0);
+      },
+    );
+  }, 60_000);
+
+  it("accident 6: a handler declared in another file is reported as not compared", async () => {
+    await withVariant(
+      [
+        {
+          file: "src/routes/orders.ts",
+          find: `export const GET = withAmbit(
+  { capabilities: ["db:read:orders"], budget: { timeMs: 500 } },
+  listOrderTotals,
+);`,
+          replace: `export const GET = withAmbit(
+  { capabilities: ["db:read:orders"], budget: { timeMs: 500 } },
+  findOrderTotals,
+);`,
+        },
+        {
+          file: "src/routes/orders.ts",
+          find: 'import { insertOrder, pool } from "../lib/index.ts";',
+          replace: 'import { findOrderTotals, insertOrder, pool } from "../lib/index.ts";',
+        },
+      ],
+      (result) => {
+        const warning = result.diagnostics.find((d) => d.id === "AMB-W004");
+        expect(warning?.message).toContain("not a declaration in this file");
+        expect(errors(result)).toEqual([]);
+      },
+    );
+  }, 60_000);
+
   it("round-trips `ambit init`: every proposal applies and `check` stays clean", async () => {
     const dir = await scratchCopy();
     try {

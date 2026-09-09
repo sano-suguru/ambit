@@ -5,6 +5,7 @@ import type { CoverageReport } from "../checker/coverage.ts";
 import {
   computeCoverage,
   diagnose,
+  diagnoseRuntimeWrappers,
   diagnoseUncarriedContracts,
   legacyTsBackend,
   propagate,
@@ -42,12 +43,13 @@ export async function main(argv: readonly string[]): Promise<number> {
   let coverage: CoverageReport;
   try {
     const project = await legacyTsBackend.extractProject(args.dir);
-    // A backend only ever pushes a file that had at least one extracted
-    // function, so an empty `files` array means "nothing analyzable was
-    // found" (zero .ts files, or every function-like node was skipped) —
-    // that must not read the same as "checked, no violations" (DESIGN.md
-    // §3.4).
-    if (project.files.length === 0) {
+    // No extracted function anywhere means "nothing analyzable was found"
+    // (zero .ts files, or every function-like node was skipped) — that must
+    // not read the same as "checked, no violations" (DESIGN.md §3.4). Counted
+    // over functions rather than over `files`, because a file can now be
+    // pushed for its `withAmbit` wrappers alone.
+    const functionsFound = project.files.reduce((total, file) => total + file.functions.length, 0);
+    if (functionsFound === 0) {
       throw new Error(`no analyzable functions found under ${args.dir}`);
     }
     const summaries = summarizeExtractedFiles(project.files);
@@ -60,6 +62,11 @@ export async function main(argv: readonly string[]): Promise<number> {
             [
               ...diagnose(state, engine),
               ...diagnoseUncarriedContracts(project.uncarriedContracts, engine),
+              ...diagnoseRuntimeWrappers(
+                project.files.flatMap((file) => file.runtimeWrappers),
+                state,
+                engine,
+              ),
             ],
             args.strict,
           );

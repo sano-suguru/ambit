@@ -31,6 +31,7 @@ describe("summarizeExtractedFiles", () => {
   it("treats a missing @effects tag as undeclared, not as declared-pure", () => {
     const files: ExtractedFile[] = [
       {
+        runtimeWrappers: [],
         filePath: "f.ts",
         functions: [
           {
@@ -50,6 +51,7 @@ describe("summarizeExtractedFiles", () => {
   it("treats a typo'd @effects tag as invalid, not as declared-pure", () => {
     const files: ExtractedFile[] = [
       {
+        runtimeWrappers: [],
         filePath: "f.ts",
         functions: [
           {
@@ -69,6 +71,7 @@ describe("summarizeExtractedFiles", () => {
   it("resolves a stub-matched call to a Call with kind 'stub'", () => {
     const files: ExtractedFile[] = [
       {
+        runtimeWrappers: [],
         filePath: "f.ts",
         functions: [
           {
@@ -98,6 +101,7 @@ describe("summarizeExtractedFiles", () => {
   it("resolves a resolvable-import-qualified stub match (e.g. undici's fetch) to a Call with kind 'stub'", () => {
     const files: ExtractedFile[] = [
       {
+        runtimeWrappers: [],
         filePath: "f.ts",
         functions: [
           {
@@ -125,6 +129,7 @@ describe("summarizeExtractedFiles", () => {
   it("treats a named call with no stub match as unresolved, not as no-effect", () => {
     const files: ExtractedFile[] = [
       {
+        runtimeWrappers: [],
         filePath: "f.ts",
         functions: [
           {
@@ -151,6 +156,7 @@ describe("summarizeExtractedFiles", () => {
   it("uses the connector layer's own reason over the generic fallback, when a stub-miss call already carries one", () => {
     const files: ExtractedFile[] = [
       {
+        runtimeWrappers: [],
         filePath: "f.ts",
         functions: [
           {
@@ -183,6 +189,7 @@ describe("summarizeExtractedFiles", () => {
   it("resolves an allowlisted builtin method to a Call with kind 'known-pure'", () => {
     const files: ExtractedFile[] = [
       {
+        runtimeWrappers: [],
         filePath: "f.ts",
         functions: [
           {
@@ -204,6 +211,7 @@ describe("summarizeExtractedFiles", () => {
   it("refuses known-pure for an allowlisted method whose callback is passed by reference", () => {
     const files: ExtractedFile[] = [
       {
+        runtimeWrappers: [],
         filePath: "f.ts",
         functions: [
           {
@@ -232,6 +240,7 @@ describe("summarizeExtractedFiles", () => {
   it("treats an unlisted builtin method name as unresolved, not as pure", () => {
     const files: ExtractedFile[] = [
       {
+        runtimeWrappers: [],
         filePath: "f.ts",
         functions: [
           {
@@ -255,6 +264,7 @@ describe("summarizeExtractedFiles", () => {
   it("passes through a resolved call unchanged", () => {
     const files: ExtractedFile[] = [
       {
+        runtimeWrappers: [],
         filePath: "f.ts",
         functions: [
           {

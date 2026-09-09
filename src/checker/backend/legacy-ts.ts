@@ -8,6 +8,7 @@ import type {
   ExtractedProject,
   LiteralArgument,
   RawJsDoc,
+  RuntimeWrapper,
   SkippedFunctionKind,
   SourceLocation,
   SymbolId,
@@ -95,8 +96,18 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
         calls: collectCalls(node, sourceFile, program, checker, declaredNodeToId, absoluteRoot),
       });
     }
-    if (functions.length > 0) {
-      files.push({ filePath: relativePath(absoluteRoot, sourceFile), functions });
+    const runtimeWrappers = collectRuntimeWrappers(
+      sourceFile,
+      checker,
+      declaredNodeToId,
+      absoluteRoot,
+    );
+    if (functions.length > 0 || runtimeWrappers.length > 0) {
+      files.push({
+        filePath: relativePath(absoluteRoot, sourceFile),
+        functions,
+        runtimeWrappers,
+      });
     }
     const skipped = collectSkippedFunctions(sourceFile, declaredNodeToId, absoluteRoot);
     for (const kind of skipped.kinds) {
@@ -642,6 +653,128 @@ function isFunctionValuedProperty(member: ts.ClassElement): member is ts.Propert
     member.initializer !== undefined &&
     (ts.isArrowFunction(member.initializer) || ts.isFunctionExpression(member.initializer))
   );
+}
+
+// ---- runtime wrappers ---------------------------------------------------
+
+/**
+ * The export `withAmbit` is imported from. Matched by module specifier and
+ * exported name, the same way the stub tables match everything else — a local
+ * `as` alias or a re-export chain does not hide it, and a `withAmbit` of one's
+ * own from somewhere else is not mistaken for it.
+ */
+const RUNTIME_WRAPPER_NAME = "ambit/runtime.withAmbit";
+
+/**
+ * Every `withAmbit(spec, handler)` in the file, with what the source fixes
+ * about it (see {@link RuntimeWrapper}).
+ *
+ * A wrapper this pass cannot compare gets an `unmatchedReason` rather than
+ * being left out: a wrapper that silently produced no record would read as
+ * "checked and agreed".
+ */
+function collectRuntimeWrappers(
+  sourceFile: ts.SourceFile,
+  checker: ts.TypeChecker,
+  declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+  absoluteRoot: string,
+): readonly RuntimeWrapper[] {
+  const wrappers: RuntimeWrapper[] = [];
+
+  function visit(node: ts.Node): void {
+    if (ts.isCallExpression(node) && isRuntimeWrapperCallee(checker, node.expression)) {
+      wrappers.push(runtimeWrapperOf(node, sourceFile, checker, declaredNodeToId, absoluteRoot));
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  ts.forEachChild(sourceFile, visit);
+  return wrappers;
+}
+
+function isRuntimeWrapperCallee(checker: ts.TypeChecker, callee: ts.Expression): boolean {
+  return importedQualifiedNameOf(checker, callee) === RUNTIME_WRAPPER_NAME;
+}
+
+function runtimeWrapperOf(
+  node: ts.CallExpression,
+  sourceFile: ts.SourceFile,
+  checker: ts.TypeChecker,
+  declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+  absoluteRoot: string,
+): RuntimeWrapper {
+  const location = locationOf(absoluteRoot, sourceFile, node);
+  const capabilities = literalCapabilityListOf(node.arguments[0]);
+  const handler = sameFileHandlerOf(node.arguments[1], sourceFile, checker, declaredNodeToId);
+
+  if (capabilities === undefined) {
+    return { location, unmatchedReason: "dynamic-capabilities" };
+  }
+  if (handler === undefined) {
+    return { location, capabilities, unmatchedReason: "handler-not-in-this-file" };
+  }
+  return { location, capabilities, handler };
+}
+
+/**
+ * The spec's `capabilities` as written, or `undefined` when the source does not
+ * fix it — the spec is not an object literal, the array is not a literal, or an
+ * element is not a string literal.
+ *
+ * A spec with no `capabilities` key yields `[]`: that is a grant of nothing,
+ * which the handler's JSDoc can agree or disagree with, not an absence of
+ * information.
+ */
+function literalCapabilityListOf(spec: ts.Expression | undefined): readonly string[] | undefined {
+  if (!spec) return undefined;
+  const literal = unwrapTypeOnlyExpression(spec);
+  if (!ts.isObjectLiteralExpression(literal)) return undefined;
+  if (literal.properties.some(ts.isSpreadAssignment)) return undefined;
+
+  const property = literal.properties.find(
+    (member): member is ts.PropertyAssignment =>
+      ts.isPropertyAssignment(member) &&
+      ts.isIdentifier(member.name) &&
+      member.name.text === "capabilities",
+  );
+  if (!property) return [];
+
+  const array = unwrapTypeOnlyExpression(property.initializer);
+  if (!ts.isArrayLiteralExpression(array)) return undefined;
+
+  const capabilities: string[] = [];
+  for (const element of array.elements) {
+    const value = unwrapTypeOnlyExpression(element);
+    if (!ts.isStringLiteral(value) && !ts.isNoSubstitutionTemplateLiteral(value)) return undefined;
+    capabilities.push(value.text);
+  }
+  return capabilities;
+}
+
+/**
+ * The handler's `SymbolId`, when it is an identifier naming a declaration this
+ * file also declares and the analysis extracted.
+ *
+ * Same file on purpose. The comparison this feeds is between two statements a
+ * reader sees together — the JSDoc above the handler and the spec beside it.
+ * A handler declared elsewhere is reported as uncompared (`AMB-W004`), not
+ * silently accepted; whether the same equality is the right test across files
+ * is part of §12's 「契約とハンドラの対応付け」, which this does not settle.
+ */
+function sameFileHandlerOf(
+  handler: ts.Expression | undefined,
+  sourceFile: ts.SourceFile,
+  checker: ts.TypeChecker,
+  declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+): SymbolId | undefined {
+  if (!handler || !ts.isIdentifier(handler)) return undefined;
+  const symbol = checker.getSymbolAtLocation(handler);
+  if (!symbol) return undefined;
+  const resolved =
+    (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(symbol) : symbol;
+  const declaration = resolved.declarations?.[0];
+  if (!declaration || declaration.getSourceFile() !== sourceFile) return undefined;
+  return declaredNodeToId.get(declaration);
 }
 
 // ---- JSDoc extraction ---------------------------------------------------

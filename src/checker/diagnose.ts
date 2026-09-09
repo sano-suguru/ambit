@@ -7,6 +7,7 @@ import type {
   FixEdit,
   FunctionSummary,
   KnownEffect,
+  RuntimeWrapper,
   SkippedFunctionKind,
   SourceLocation,
   StubCall,
@@ -584,6 +585,116 @@ export function diagnoseUncarriedContracts(
     docs: "docs/diagnostics/README.md#amb-e003",
     engine,
   }));
+}
+
+/** How a wrapper that could not be compared is described, by why. */
+const UNCOMPARED_WRAPPER_REASON: Record<NonNullable<RuntimeWrapper["unmatchedReason"]>, string> = {
+  "dynamic-capabilities": "its capability list is not a literal array of strings in the source",
+  "handler-not-in-this-file":
+    "its handler is not a declaration in this file, so there is no JSDoc contract beside it to compare",
+};
+
+/**
+ * DESIGN.md §4.4: with no framework adapter, the capability set is written
+ * twice — once as `@capabilities` on the handler, once in the
+ * `withAmbit(spec, handler)` beside it. Nothing checked that the two agree, so
+ * an agent adding `db:write:users` to one of them expanded authority silently.
+ *
+ * This compares the two **as source**. §12's 「契約とハンドラの対応付け」 —
+ * matching a contract to a handler after a build strips the comments, or after
+ * a bundler moves it — stays open, and a wrapper this comparison cannot reach
+ * is reported (`AMB-W004`) rather than passed over.
+ */
+export function diagnoseRuntimeWrappers(
+  wrappers: readonly RuntimeWrapper[],
+  state: ReadonlyMap<SymbolId, PropagatedFunction>,
+  engine: DiagnosticEngine,
+): readonly Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+
+  for (const wrapper of wrappers) {
+    if (wrapper.unmatchedReason) {
+      diagnostics.push(
+        uncomparedWrapper(wrapper, UNCOMPARED_WRAPPER_REASON[wrapper.unmatchedReason], engine),
+      );
+      continue;
+    }
+    const handler = wrapper.handler ? state.get(wrapper.handler)?.summary : undefined;
+    if (!handler || wrapper.capabilities === undefined) {
+      diagnostics.push(
+        uncomparedWrapper(
+          wrapper,
+          "its handler could not be matched to an analyzed declaration",
+          engine,
+        ),
+      );
+      continue;
+    }
+    // A `@capabilities` that did not parse is AMB-E004's business; comparing
+    // against a tag Ambit already rejected would name the wrong problem.
+    if (handler.capabilities.kind === "invalid") continue;
+    if (!handler.entrypoint && handler.capabilities.kind === "none") {
+      diagnostics.push(
+        uncomparedWrapper(
+          wrapper,
+          `${displayName(handler.id)} declares neither @entrypoint nor @capabilities, so there is nothing to compare the spec against`,
+          engine,
+        ),
+      );
+      continue;
+    }
+
+    const declared =
+      handler.capabilities.kind === "declared"
+        ? handler.capabilities.capabilities.capabilities.map(formatCapability)
+        : [];
+    const wrapped = [...wrapper.capabilities];
+    if (sameCapabilityText(declared, wrapped)) continue;
+
+    diagnostics.push({
+      id: "AMB-E010",
+      severity: "error",
+      category: "capabilities",
+      message: `withAmbit grants [${wrapped.join(", ")}] but ${displayName(handler.id)} declares @capabilities [${declared.join(", ")}]`,
+      location: wrapper.location,
+      contract: {
+        declared,
+        required: wrapped,
+        excess: wrapped.filter((capability) => !declared.includes(capability)),
+        via: [],
+      },
+      fixes: [],
+      docs: "docs/diagnostics/README.md#amb-e010",
+      engine,
+    });
+  }
+
+  return diagnostics;
+}
+
+function uncomparedWrapper(
+  wrapper: RuntimeWrapper,
+  reason: string,
+  engine: DiagnosticEngine,
+): Diagnostic {
+  return {
+    id: "AMB-W004",
+    severity: "warning",
+    category: "capabilities",
+    message: `withAmbit here was not compared with a declared contract: ${reason}. The check is on the source only (DESIGN.md §12)`,
+    location: wrapper.location,
+    fixes: [],
+    docs: "docs/diagnostics/README.md#amb-w004",
+    engine,
+  };
+}
+
+/** Set equality over the capability text as written; order is not part of the contract. */
+function sameCapabilityText(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const left = [...a].sort();
+  const right = [...b].sort();
+  return left.every((value, index) => value === right[index]);
 }
 
 function chainToVia(

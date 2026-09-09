@@ -202,6 +202,60 @@ declared no `@capabilities`, or an operation whose target the source does not
 fix (a URL built at runtime — see AMB-E009), which §4.4 assigns to the runtime
 hook rather than to the checker.
 
+## AMB-E010
+
+`withAmbit` disagrees with the handler's `@capabilities`.
+
+**Severity:** error
+**Category:** capabilities
+
+With no framework adapter, DESIGN.md §4.4 has the capability set written twice
+— as `@capabilities` on the handler, and again in the `withAmbit(spec,
+handler)` beside it. This reports the two disagreeing, as sets of the text each
+one wrote. Order does not matter; anything else does, including a glob on one
+side only, since `db:read:*` and `db:read:users` are different grants.
+
+Reported at the `withAmbit` call. Neither side is privileged: whichever half an
+agent edited, the pair stopped agreeing, and Ambit cannot tell which one the
+author meant.
+
+Compared only when all of this holds — otherwise `AMB-W004`:
+
+- the spec is an object literal with no spread, and its `capabilities` is a
+  literal array of string literals (a missing `capabilities` key counts as an
+  empty grant, which can still disagree);
+- the handler is an identifier naming a declaration in the same file that the
+  analysis extracted;
+- that declaration carries `@entrypoint` or `@capabilities`.
+
+A handler whose `@capabilities` failed to parse is skipped here: `AMB-E004`
+already reports that tag, and comparing against a declaration Ambit rejected
+would name the wrong problem.
+
+**Fixes:** none. Aligning the two means choosing which one is right, which is
+the decision being reported (§5.3).
+
+## AMB-W004
+
+`withAmbit` was not compared with a declared contract.
+
+**Severity:** warning
+**Category:** capabilities
+
+A `withAmbit(spec, handler)` was found, but one of `AMB-E010`'s conditions does
+not hold: the capability list is built at runtime, the handler is not a
+declaration in the same file, or the handler declares neither `@entrypoint` nor
+`@capabilities`. The message names which.
+
+Reported rather than skipped for the reason `AMB-E003` reports an inert
+declaration: a wrapper that produced no diagnostic at all would read as
+"checked and agreed".
+
+Not an error, and not promoted by `--strict`. The comparison is on the source
+only; matching a contract to the handler that actually runs — after a build
+strips the comments, or a bundler moves it — is DESIGN.md §12's
+「契約とハンドラの対応付け」 and is still open.
+
 ## AMB-W002
 
 Entrypoint with no capabilities.
