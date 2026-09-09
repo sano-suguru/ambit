@@ -11,7 +11,7 @@ contract and verifies it.
 - **Can it read or write this database?** `@capabilities` is checked statically
   and may only narrow from caller to callee.
 - **How much time or money may an entrypoint spend?** `@budget` is parsed and
-  validated; `timeMs` is the one limit enforced while the code runs.
+  validated; of its three limits only `timeMs` is enforced while the code runs.
 - **What happens when an agent quietly widens what a function can do?** The
   check fails, naming the observed effects and the call path they came from.
 
@@ -148,9 +148,9 @@ git clone https://github.com/sano-suguru/ambit.git && cd ambit && pnpm install &
 ```
 
 Requires Node.js 24. That last command needs nothing prepared — it checks
-Ambit's own source: 21 files, 176 functions, 0.77–0.92 s across five runs on
-the author's laptop. Nothing is cached, so a re-check costs the same, and no
-performance gate has run yet; `docs/status.md` has the measurement in full.
+Ambit's own source: 21 files, 176 functions, 0.77–0.92 s across five runs.
+Nothing is cached, so a re-check costs the same, and nothing larger than that
+has been measured yet; `docs/status.md` has the numbers.
 
 Point `check` at your own directory instead, with `--coverage`, `--strict`, or
 `--format json`. `ambit init` proposes `@effects` for undeclared functions, and
