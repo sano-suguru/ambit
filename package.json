@@ -26,6 +26,7 @@
     "@biomejs/biome": "^2.5.12",
     "@types/node": "^24.13.3",
     "hono": "^4.13.7",
+    "next": "^16.3.4",
     "vite": "^8.2.2",
     "vitest": "^4.1.11"
   },
@@ -58,6 +59,10 @@
     "./runtime/hono": {
       "types": "./dist/runtime/hono.d.ts",
       "import": "./dist/runtime/hono.js"
+    },
+    "./runtime/next": {
+      "types": "./dist/runtime/next.d.ts",
+      "import": "./dist/runtime/next.js"
     }
   }
 }
