@@ -25,9 +25,13 @@ import { withAmbit } from "./index.ts";
  *
  * The three arguments are the decision §4.4 records, not a convenience:
  *
- * - `spec` sits in the same call as `handler`, so `ambit check` can compare the
- *   capability list the runtime will establish with the `@capabilities` the
- *   handler declares (`AMB-E010`; `AMB-W004` when it cannot). Explicit
+ * - `spec` sits in the same call as `handler`, so `ambit check` can compare
+ *   what the runtime will establish with what the handler declares: the
+ *   capability list against `@capabilities` (`AMB-E010`), and `spec.budget`
+ *   against `@budget` (`AMB-E011`, with an omitted `onExceed` defaulted to
+ *   `throw` on both sides). The two halves are judged independently — a spec
+ *   may write one as a literal and build the other at runtime — and
+ *   `AMB-W004` reports whichever half could not be compared. Explicit
  *   registration was chosen over generated contract data because the contract
  *   is then a value in the module — it survives a build that strips comments,
  *   and a bundler that renames everything.
