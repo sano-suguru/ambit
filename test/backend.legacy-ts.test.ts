@@ -103,11 +103,38 @@ describe("legacyTsBackend.extractProject", () => {
 
   it("counts function-like nodes it did not extract, by kind", async () => {
     const { skippedFunctions } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
-    expect(skippedFunctions.get("getter-setter")).toBeGreaterThanOrEqual(2);
     expect(skippedFunctions.get("object-literal-method")).toBeGreaterThanOrEqual(1);
-    expect(skippedFunctions.get("anonymous-default-export")).toBeGreaterThanOrEqual(1);
     expect(skippedFunctions.get("callback-argument")).toBeGreaterThanOrEqual(1);
     expect(skippedFunctions.get("nested-function")).toBeGreaterThanOrEqual(1);
+    // Accessors and anonymous default exports are extracted now (DESIGN.md
+    // §4.1 (a)), so they are no longer skipped — they have declaration paths
+    // `ambit.config.ts` can name.
+    expect(skippedFunctions.get("getter-setter")).toBeUndefined();
+    expect(skippedFunctions.get("anonymous-default-export")).toBeUndefined();
+  });
+
+  it("indexes accessors and an anonymous default export under §4.1 (a)'s paths", async () => {
+    const { files } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
+    // `get value` / `set value` share a name, so the accessor's kind is part
+    // of the segment; the default export has no name at all and exactly one
+    // per file, so `#default` is as stable as any identifier.
+    expect(findFn(files, "skipped.ts#WithAccessors.get value")).toBeDefined();
+    expect(findFn(files, "skipped.ts#WithAccessors.set value")).toBeDefined();
+    expect(findFn(files, "skipped.ts#default")).toBeDefined();
+  });
+
+  it("still refuses a JSDoc contract on an accessor, naming the config key instead", async () => {
+    // §4.1 (a) keeps the config namespace a superset of the JSDoc one: the
+    // accessor propagates, but the comment on it is inert and must not be
+    // adopted silently.
+    const { files, uncarriedContracts } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
+    const accessor = findFn(files, "skipped.ts#WithAccessors.get value");
+    expect(accessor?.configOnly).toBe(true);
+    expect(accessor?.jsDoc).toBeUndefined();
+    const reported = uncarriedContracts.find(
+      (contract) => contract.configKey === "skipped.ts#WithAccessors.get value",
+    );
+    expect(reported).toMatchObject({ kind: "getter-setter", tag: "effects", raw: "fs_read" });
   });
 
   it("keeps counting object-literal members it cannot give a stable declaration path", async () => {

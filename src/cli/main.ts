@@ -3,13 +3,19 @@ import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import type { CoverageReport } from "../checker/coverage.ts";
 import {
+  type ConfigTarget,
   computeCoverage,
   diagnose,
+  diagnoseContractDivergence,
   diagnoseRuntimeWrappers,
   diagnoseUncarriedContracts,
+  diagnoseUnmatchedConfigKeys,
   legacyTsBackend,
+  loadConfig,
   propagate,
   proposeContracts,
+  type ResolvedConfig,
+  resolveConfig,
   summarizeExtractedFiles,
 } from "../checker/index.ts";
 import type { Diagnostic } from "../core/index.ts";
@@ -20,7 +26,7 @@ import type { Diagnostic } from "../core/index.ts";
  * analysis failure into "no violations").
  */
 const USAGE = `Usage: ambit check <dir> [--format json] [--coverage] [--strict]
-       ambit init  <dir> [--format json]   propose @effects for undeclared functions
+       ambit init  <dir> [--format json] [--config]   propose @effects for undeclared functions
 `;
 
 const EXIT_OK = 0;
@@ -42,6 +48,11 @@ export async function main(argv: readonly string[]): Promise<number> {
   let diagnostics: readonly Diagnostic[];
   let coverage: CoverageReport;
   try {
+    // Loaded before extraction so a broken config stops the run before any
+    // work is reported (DESIGN.md §3.4): a config that could not be read must
+    // never come out as "checked, no violations".
+    const loaded = await loadConfig(args.dir);
+    const config: ResolvedConfig | undefined = loaded ? resolveConfig(loaded, args.dir) : undefined;
     const project = await legacyTsBackend.extractProject(args.dir);
     // No extracted function anywhere means "nothing analyzable was found"
     // (zero .ts files, or every function-like node was skipped) — that must
@@ -52,12 +63,12 @@ export async function main(argv: readonly string[]): Promise<number> {
     if (functionsFound === 0) {
       throw new Error(`no analyzable functions found under ${args.dir}`);
     }
-    const summaries = summarizeExtractedFiles(project.files);
+    const summaries = summarizeExtractedFiles(project.files, config);
     const state = propagate(summaries);
     const engine = { name: legacyTsBackend.name, version: legacyTsBackend.version };
     diagnostics =
       args.command === "init"
-        ? proposeContracts(state, engine)
+        ? proposeContracts(state, engine, args.config ? configTarget(config, args.dir) : undefined)
         : applyStrict(
             [
               ...diagnose(state, engine),
@@ -67,6 +78,15 @@ export async function main(argv: readonly string[]): Promise<number> {
                 state,
                 engine,
               ),
+              ...(config ? diagnoseContractDivergence(state, config.configPath, engine) : []),
+              ...(config
+                ? diagnoseUnmatchedConfigKeys(
+                    config.unmatchedExactKeys(),
+                    config.configPath,
+                    config.sourceText,
+                    engine,
+                  )
+                : []),
             ],
             args.strict,
           );
@@ -112,11 +132,13 @@ interface Args {
   readonly coverage: boolean;
   /** `--strict`: promote the `unknown` warnings to errors (DESIGN.md §4.2 rule 3). */
   readonly strict: boolean;
+  /** `init --config`: also propose `ambit.config.ts` entries for declarations JSDoc cannot carry (§4.1 (a)). */
+  readonly config: boolean;
   /** Set when argv could not be parsed; `main` reports it and exits 2 rather than running with a silently-ignored option (DESIGN.md §3.4). */
   readonly error?: string;
 }
 
-const KNOWN_FLAGS = new Set(["--format", "--coverage", "--strict"]);
+const KNOWN_FLAGS = new Set(["--format", "--coverage", "--strict", "--config"]);
 
 /**
  * The diagnostics `--strict` promotes to errors: the two that say "analysis
@@ -136,12 +158,30 @@ function applyStrict(diagnostics: readonly Diagnostic[], strict: boolean): reado
   );
 }
 
+/**
+ * Where `ambit init --config` should write, and what is already there — the
+ * config file's path and text.
+ *
+ * `undefined` when no config file was found: §4.1's patch is an *append* to a
+ * `contracts` block, and inventing a whole file (with a `defineConfig` import
+ * whose specifier depends on how the consumer installed Ambit) is not a patch
+ * this command can generate safely (§5.3).
+ */
+function configTarget(
+  config: ResolvedConfig | undefined,
+  rootDir: string,
+): ConfigTarget | undefined {
+  if (!config) return undefined;
+  return { path: config.configPath, source: config.sourceText, rootDir };
+}
+
 function parseArgs(argv: readonly string[]): Args {
   const [command = "check", ...rest] = argv;
   let dir = ".";
   let format: "json" | "text" = "text";
   let coverage = false;
   let strict = false;
+  let config = false;
 
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
@@ -154,6 +194,7 @@ function parseArgs(argv: readonly string[]): Args {
           format,
           coverage,
           strict,
+          config,
           error: `--format expects "json" or "text", got ${value === undefined ? "nothing" : JSON.stringify(value)}`,
         };
       }
@@ -163,16 +204,18 @@ function parseArgs(argv: readonly string[]): Args {
       coverage = true;
     } else if (arg === "--strict") {
       strict = true;
+    } else if (arg === "--config") {
+      config = true;
     } else if (arg?.startsWith("--")) {
       if (!KNOWN_FLAGS.has(arg)) {
-        return { command, dir, format, coverage, strict, error: `unknown option: ${arg}` };
+        return { command, dir, format, coverage, strict, config, error: `unknown option: ${arg}` };
       }
     } else if (arg) {
       dir = arg;
     }
   }
 
-  return { command, dir, format, coverage, strict };
+  return { command, dir, format, coverage, strict, config };
 }
 
 function formatJson(diagnostic: Diagnostic): string {
@@ -205,6 +248,7 @@ function formatCoverageText(coverage: CoverageReport): string {
   // number without the other would show declaring boundaries as progress.
   const boundaryPct = (coverage.functionBoundaryRate * 100).toFixed(1);
   const lines = [
+    `declared-by: jsdoc=${coverage.functionsDeclaredByJsDoc} config=${coverage.functionsDeclaredByConfig}`,
     `unknown-rate=${unknownPct}% (${Math.round(coverage.functionUnknownRate * coverage.functionsExtracted)}/${coverage.functionsExtracted} functions) boundary-rate=${boundaryPct}% (${coverage.functionsBoundary}/${coverage.functionsExtracted} functions)`,
     `entrypoints=${coverage.functionsEntrypoint} (without-capabilities=${coverage.entrypointsWithoutCapabilities})`,
     `skipped=${coverage.functionsSkipped} (${mapEntries(coverage.skippedByKind)})`,
@@ -222,6 +266,8 @@ function formatCoverageText(coverage: CoverageReport): string {
 function formatCoverageJson(coverage: CoverageReport): string {
   return `${JSON.stringify({
     kind: "coverage",
+    functionsDeclaredByJsDoc: coverage.functionsDeclaredByJsDoc,
+    functionsDeclaredByConfig: coverage.functionsDeclaredByConfig,
     functionUnknownRate: coverage.functionUnknownRate,
     functionBoundaryRate: coverage.functionBoundaryRate,
     functionsBoundary: coverage.functionsBoundary,

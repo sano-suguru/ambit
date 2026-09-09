@@ -89,6 +89,15 @@ object-literal member with no stable declaration path, an anonymous default
 export, a callback passed inline as an argument, or a function declared inside
 another function.
 
+Two of those *are* analyzed: a `get`/`set` accessor and an anonymous
+`export default` have stable declaration paths (`Cls.get total`, `default`),
+so their bodies propagate and `ambit.config.ts` can declare contracts for
+them — DESIGN.md §4.1 (a) keeps the config namespace a superset of the JSDoc
+one. The comment on them is still inert, so this is still an error, and the
+message ends with the config key that would work:
+`declare it in ambit.config.ts under "src/cart.ts#Cart.get total" instead`.
+DESIGN.md §12 records the asymmetry that leaves.
+
 One case is not a function-like node at all: a contract written on a `class`.
 The class's construction *is* analyzed (indexed as `Class.constructor`), but a
 class's own comment is never read as its implicit constructor's contract — a
@@ -310,6 +319,62 @@ Not an error, and not promoted by `--strict`. The comparison is on the source
 only; matching a contract to the handler that actually runs — after a build
 strips the comments, or a bundler moves it — is DESIGN.md §12's
 「契約とハンドラの対応付け」 and is still open.
+
+## AMB-W005
+
+JSDoc and `ambit.config.ts` declare the same tag differently.
+
+**Severity:** warning
+**Category:** effects
+
+One symbol has both a JSDoc contract and a `contracts` entry, and for at least
+one of the five tags the two do not say the same thing. DESIGN.md §4.1 settles
+which wins — 「同一シンボルに JSDoc と config の両方があれば JSDoc を優先し、
+差異を警告する」 — so the run proceeds with the JSDoc declaration and this
+diagnostic reports what was ignored.
+
+Compared tag by tag, on the parsed values rather than on the text: `@effects
+db_read, network` and `effects: ["network", "db_read"]` are the same
+declaration and are not reported. A tag only one side declares is not a
+difference either — it is the other side filling a gap, which is the normal
+way a config supplements code it cannot edit.
+
+A warning rather than an error, because the specified behaviour is exactly
+what happened. It is still reported for AMB-E003's reason: a config entry the
+author believes is in force, and is not, is a declaration that does nothing.
+
+Not promoted by `--strict`, in either its command-line or its per-directory
+form. `--strict` means "an unverified path is not acceptable here" (§4.2 rule
+3); a disagreement between two declarations is a different thing.
+
+No fix is offered. Deleting the config entry and rewriting the JSDoc are
+opposite intentions, and §5.3 forbids inventing a candidate to fill the slot.
+
+## AMB-W006
+
+A `contracts` key matches nothing.
+
+**Severity:** warning
+**Category:** effects
+
+An exact `contracts` key — one whose file half contains no `*` — named no
+declaration in what was analyzed. The contract it declares is not in force,
+which is AMB-E003's failure in a different file: a declaration that silently
+applies to nothing reads as a guarantee and is not one.
+
+Only exact keys are reported. A glob is written to cover whatever is there,
+and `ambit check src/domain` legitimately matches none of a
+`src/legacy/**` pattern; reporting those would make the diagnostic noisiest
+exactly when the run is narrowest.
+
+The location is the key's own line in the config file, found textually — the
+config is loaded by importing it, not by parsing it, so a key built by an
+expression rather than written literally falls back to the file's first
+character.
+
+Common causes: a typo in the symbol half, a declaration path that is not what
+the checker uses (`Cls.get total`, not `Cls.total` — DESIGN.md §4.1 (a)), or a
+key naming a file outside the directory being checked.
 
 ## AMB-W002
 

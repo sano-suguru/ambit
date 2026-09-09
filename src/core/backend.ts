@@ -216,6 +216,17 @@ export interface ExtractedFunction {
    * a patch that changes nothing, which is worse than no proposal.
    */
   readonly implicitConstructor?: true;
+  /**
+   * Set on a declaration only `ambit.config.ts` can name (DESIGN.md §4.1
+   * (a)): a `get`/`set` accessor, or an anonymous `export default`.
+   *
+   * The declaration is extracted and propagates like any other — its body's
+   * effects are real — but {@link ExtractedFunction.jsDoc} is left undefined
+   * for it on purpose: §4.1 (a) keeps the config namespace a superset of the
+   * JSDoc one, so a contract comment here is inert and is reported as
+   * `AMB-E003` instead (with the config key that would work).
+   */
+  readonly configOnly?: true;
   readonly jsDoc: RawJsDoc | undefined;
   readonly calls: readonly CallSite[];
 }
@@ -304,6 +315,13 @@ export interface UncarriedContract {
   readonly kind: SkippedFunctionKind;
   readonly tag: string;
   readonly raw: string;
+  /**
+   * The `ambit.config.ts` key that *would* carry this contract, when one
+   * exists (DESIGN.md §4.1 (a) — an accessor or an anonymous default export).
+   * Absent for a node config cannot name either, where the only honest advice
+   * is to restructure the code.
+   */
+  readonly configKey?: string;
 }
 
 /**

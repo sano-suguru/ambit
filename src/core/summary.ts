@@ -154,6 +154,25 @@ export type DeclaredBoundary =
   | { readonly kind: "invalid"; readonly raw: string }
   | { readonly kind: "declared"; readonly reason: string };
 
+/**
+ * One tag where JSDoc and `ambit.config.ts` both declared something and the
+ * two did not agree (DESIGN.md §4.1: 「同一シンボルに JSDoc と config の両方が
+ * あれば JSDoc を優先し、差異を警告する」). Reported as `AMB-W005`.
+ *
+ * Both sides are held as their formatted text, not as parsed objects: the
+ * comparison has already happened, and what the message needs is the two
+ * declarations as a reader would recognize them.
+ */
+export interface ContractDivergence {
+  /** The contract tag: `effects`, `capabilities`, `budget`, `entrypoint` or `boundary`. */
+  readonly tag: string;
+  readonly jsDoc: string;
+  readonly config: string;
+}
+
+/** Where a declaration came from, for `--coverage`'s `declared-by` breakdown. */
+export type DeclarationOrigin = "jsdoc" | "config";
+
 /** Ambit's own representation of one function, independent of any backend. */
 export interface FunctionSummary {
   readonly id: SymbolId;
@@ -170,6 +189,17 @@ export interface FunctionSummary {
   readonly jsDocRange?: SourceLocation;
   /** A class's construction with no constructor written: real, but with nowhere to hang a contract. */
   readonly implicitConstructor?: true;
+  /** Only `ambit.config.ts` can declare this symbol — see {@link ExtractedFunction.configOnly}. */
+  readonly configOnly?: true;
+  /**
+   * Which side supplied {@link FunctionSummary.declared}, when anything did.
+   * Absent for an undeclared function. `--coverage` counts the two apart so a
+   * codebase can see how much of its contract surface lives outside the code
+   * (DESIGN.md §4.1「コード外宣言」).
+   */
+  readonly declaredBy?: DeclarationOrigin;
+  /** Tags JSDoc and config both declared and disagreed on. JSDoc is what {@link FunctionSummary} carries. */
+  readonly divergences?: readonly ContractDivergence[];
   readonly declared: DeclaredEffects;
   readonly capabilities: DeclaredCapabilities;
   readonly budget: DeclaredBudget;

@@ -1,6 +1,7 @@
 export * from "./backend.ts";
 export * from "./budget.ts";
 export * from "./capability.ts";
+export * from "./config.ts";
 export * from "./diagnostic.ts";
 export * from "./effects.ts";
 export * from "./location.ts";

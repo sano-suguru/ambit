@@ -592,12 +592,110 @@ export function diagnoseUncarriedContracts(
     id: "AMB-E003",
     severity: "error",
     category: "effects",
-    message: `@${contract.tag} is declared on ${UNCARRIED_REASON[contract.kind]}, which cannot carry a contract — the declaration has no effect`,
+    message: `@${contract.tag} is declared on ${UNCARRIED_REASON[contract.kind]}, which cannot carry a contract — the declaration has no effect${
+      contract.configKey
+        ? `; declare it in ambit.config.ts under "${contract.configKey}" instead`
+        : ""
+    }`,
     location: contract.location,
     fixes: [],
     docs: "docs/diagnostics/README.md#amb-e003",
     engine,
   }));
+}
+
+/**
+ * JSDoc and `ambit.config.ts` declare the same tag for one symbol and the two
+ * do not agree (DESIGN.md §4.1: 「同一シンボルに JSDoc と config の両方が
+ * あれば JSDoc を優先し、差異を警告する」).
+ *
+ * A warning, not an error: JSDoc winning is the specified behaviour, so the
+ * run is doing the right thing — but a config entry that is being ignored is
+ * a declaration the author believes is in force and is not, which is the same
+ * failure AMB-E003 exists to prevent. `--strict` does not promote it: the
+ * disagreement is between two declarations, not an unverified path.
+ *
+ * No fix is offered. Which side is wrong is the author's decision — deleting
+ * the config entry and rewriting the JSDoc are opposite intentions, and §5.3
+ * forbids inventing a candidate to fill the slot.
+ */
+export function diagnoseContractDivergence(
+  state: ReadonlyMap<SymbolId, PropagatedFunction>,
+  configPath: string,
+  engine: DiagnosticEngine,
+): readonly Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  for (const { summary } of state.values()) {
+    for (const divergence of summary.divergences ?? []) {
+      diagnostics.push({
+        id: "AMB-W005",
+        severity: "warning",
+        category: "effects",
+        message: `${displayName(summary.id)} declares @${divergence.tag} as [${divergence.jsDoc}] in JSDoc and [${divergence.config}] in ${configPath}; the JSDoc declaration is the one in force`,
+        location: summary.location,
+        fixes: [],
+        docs: "docs/diagnostics/README.md#amb-w005",
+        engine,
+      });
+    }
+  }
+  return diagnostics;
+}
+
+/**
+ * An exact `contracts` key that named no extracted symbol (DESIGN.md §4.1).
+ *
+ * Same principle as AMB-E003: a declaration that silently applies to nothing
+ * reads as a guarantee and is not one. Only *exact* keys are reported — a
+ * glob covering a directory this run did not check matches nothing for a
+ * reason that is not a mistake, and reporting it would make `ambit check
+ * src/domain` noisy in proportion to how much of the project it skipped.
+ *
+ * A warning rather than an error, and not promoted by `--strict`: the key may
+ * name a file outside the directory being checked, which is a normal thing
+ * for one config to do.
+ */
+export function diagnoseUnmatchedConfigKeys(
+  keys: readonly string[],
+  configPath: string,
+  configSource: string,
+  engine: DiagnosticEngine,
+): readonly Diagnostic[] {
+  return keys.map((key) => ({
+    id: "AMB-W006",
+    severity: "warning" as const,
+    category: "effects" as const,
+    message: `contracts key "${key}" matches no analyzed declaration; the contract it declares is not in force`,
+    location: configKeyLocation(configPath, configSource, key),
+    fixes: [],
+    docs: "docs/diagnostics/README.md#amb-w006",
+    engine,
+  }));
+}
+
+/**
+ * Where a `contracts` key is written in the config file's own text.
+ *
+ * Found textually rather than by parsing: the config was imported as a
+ * module, not parsed into an AST, and a key's line is all a reader needs to
+ * find it. Falls back to the file's first character when the key cannot be
+ * located (an object built by an expression rather than written literally),
+ * which is honest — the key is real, its line is not knowable here.
+ */
+function configKeyLocation(configPath: string, configSource: string, key: string): SourceLocation {
+  const lines = configSource.split("\n");
+  for (const [index, line] of lines.entries()) {
+    const col = line.indexOf(key);
+    if (col < 0) continue;
+    return {
+      file: configPath,
+      line: index + 1,
+      col: col + 1,
+      endLine: index + 1,
+      endCol: col + 1 + key.length,
+    };
+  }
+  return { file: configPath, line: 1, col: 1, endLine: 1, endCol: 1 };
 }
 
 /** How a wrapper whose handler could not be reached at all is described. */

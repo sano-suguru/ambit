@@ -89,13 +89,38 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
     const functions: ExtractedFunction[] = [];
     for (const [node, declPath] of declarations) {
       const id = symbolId(relativePath(absoluteRoot, sourceFile), declPath);
+      const location = locationOf(absoluteRoot, sourceFile, nameOrNode(node));
+      // An accessor / anonymous default export propagates like any other
+      // function but does not adopt a contract comment (DESIGN.md §4.1 (a)).
+      // Its JSDoc is deliberately not read — and a contract written there is
+      // reported as AMB-E003 rather than dropped, exactly as it was before
+      // the declaration became indexable.
+      const configOnly = configOnlyPath(declPath);
+      if (configOnly) {
+        const jsDoc = extractJsDoc(node, absoluteRoot);
+        for (const tag of CONTRACT_TAGS) {
+          const raw = jsDoc?.tags.get(tag);
+          if (raw === undefined) continue;
+          uncarriedContracts.push({
+            location,
+            kind:
+              ts.isGetAccessor(node) || ts.isSetAccessor(node)
+                ? "getter-setter"
+                : "anonymous-default-export",
+            tag,
+            raw,
+            configKey: id,
+          });
+        }
+      }
       functions.push({
         id,
-        location: locationOf(absoluteRoot, sourceFile, nameOrNode(node)),
+        location,
         declarationStart: declarationStartOf(absoluteRoot, sourceFile, node),
         ...jsDocRangeOf(absoluteRoot, sourceFile, node),
         ...(ts.isClassDeclaration(node) ? { implicitConstructor: true as const } : {}),
-        jsDoc: extractJsDoc(node, absoluteRoot),
+        ...(configOnly ? { configOnly: true as const } : {}),
+        jsDoc: configOnly ? undefined : extractJsDoc(node, absoluteRoot),
         calls: collectCalls(node, sourceFile, program, checker, declaredNodeToId, absoluteRoot),
       });
     }
@@ -204,6 +229,10 @@ type FunctionLikeDeclaration =
    */
   | ts.ConstructorDeclaration
   | ts.ClassDeclaration
+  | ts.GetAccessorDeclaration
+  | ts.SetAccessorDeclaration
+  | ts.ArrowFunction
+  | ts.FunctionExpression
   | (ts.PropertyDeclaration & { readonly initializer: ts.FunctionExpression | ts.ArrowFunction })
   | (ts.VariableDeclaration & { readonly initializer: ts.FunctionExpression | ts.ArrowFunction })
   | (ts.PropertyAssignment & { readonly initializer: ts.FunctionExpression | ts.ArrowFunction });
@@ -224,6 +253,17 @@ function collectFunctionLikeDeclarations(
   const results: Array<[FunctionLikeDeclaration, readonly string[]]> = [];
 
   function visitTop(node: ts.Node, containerPath: readonly string[]): void {
+    // `export default function () {}` / `export default () => {}`: no name,
+    // but exactly one such declaration can exist per file, so `#default` is
+    // as stable a path as any identifier (DESIGN.md §4.1 (a)). Indexed at the
+    // top level only — a default export is not nestable.
+    if (containerPath.length === 0) {
+      const anonymousDefault = anonymousDefaultExport(node);
+      if (anonymousDefault) {
+        results.push([anonymousDefault, [DEFAULT_EXPORT_PATH_SEGMENT]]);
+        return;
+      }
+    }
     if (ts.isFunctionDeclaration(node) && node.name) {
       const declPath = [...containerPath, node.name.text];
       results.push([node, declPath]);
@@ -242,6 +282,18 @@ function collectFunctionLikeDeclarations(
         // would make every `new Controller()` look like it hit the network.
         if (isFunctionValuedProperty(member)) {
           results.push([member, [...classPath, member.name.text]]);
+        }
+        // An accessor's body runs like any other method's, so it propagates
+        // like one; it is indexed under `get x` / `set x` because `get` and
+        // `set` share a name and a plain `x` could not tell them apart
+        // (DESIGN.md §4.1 (a)). A JSDoc tag written on it is still inert —
+        // see `configOnlyPath`.
+        if (
+          (ts.isGetAccessor(member) || ts.isSetAccessor(member)) &&
+          member.name &&
+          ts.isIdentifier(member.name)
+        ) {
+          results.push([member, [...classPath, accessorSegment(member, member.name.text)]]);
         }
       }
       // `new C(...)` has to have somewhere to propagate *from*, or a
@@ -298,7 +350,9 @@ function collectFunctionLikeDeclarations(
         // not lean on anything compiler-internal to disambiguate. Those stay
         // counted as `object-literal-method`.
         if (!member.name || !ts.isIdentifier(member.name)) continue;
-        if (ts.isMethodDeclaration(member)) {
+        if (ts.isGetAccessor(member) || ts.isSetAccessor(member)) {
+          results.push([member, [...objectPath, accessorSegment(member, member.name.text)]]);
+        } else if (ts.isMethodDeclaration(member)) {
           results.push([member, [...objectPath, member.name.text]]);
         } else if (
           ts.isPropertyAssignment(member) &&
@@ -475,6 +529,52 @@ const CONTRACT_TAGS = ["effects", "capabilities", "budget", "entrypoint", "bound
  */
 const CONSTRUCTOR_PATH_SEGMENT = "constructor";
 
+/** The declaration-path segment an anonymous `export default` is indexed under (DESIGN.md §4.1 (a)). */
+const DEFAULT_EXPORT_PATH_SEGMENT = "default";
+
+/** `get total` / `set total` — the accessor's kind is part of the segment (DESIGN.md §4.1 (a)). */
+function accessorSegment(
+  node: ts.GetAccessorDeclaration | ts.SetAccessorDeclaration,
+  name: string,
+): string {
+  return `${ts.isGetAccessor(node) ? "get" : "set"} ${name}`;
+}
+
+/**
+ * The function an `export default` with no name introduces, or `undefined`.
+ *
+ * Covers both spellings: `export default function () {}` (a nameless
+ * `FunctionDeclaration`) and `export default () => {}` / `export default
+ * function () {}` as an expression (an `ExportAssignment`). A *named* default
+ * export is not this case — it already has an identifier path.
+ */
+function anonymousDefaultExport(node: ts.Node): FunctionLikeDeclaration | undefined {
+  if (ts.isFunctionDeclaration(node) && !node.name && isDefaultExport(node)) return node;
+  if (ts.isExportAssignment(node) && !node.isExportEquals) {
+    const expression = node.expression;
+    if (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression)) {
+      if (!ts.isFunctionExpression(expression) || !expression.name) return expression;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * True for the declaration paths only `ambit.config.ts` can name: an accessor
+ * and an anonymous default export (DESIGN.md §4.1 (a)).
+ *
+ * These nodes propagate like any other function, but a contract *comment* on
+ * them is not adopted — §4.1 (a) keeps the config namespace a superset of the
+ * JSDoc one, and §12 records the asymmetry that leaves. Derived from the path
+ * rather than tracked in a side table so that the rule has exactly one
+ * spelling.
+ */
+function configOnlyPath(declPath: readonly string[]): boolean {
+  if (declPath.length === 1 && declPath[0] === DEFAULT_EXPORT_PATH_SEGMENT) return true;
+  const last = declPath[declPath.length - 1] ?? "";
+  return last.startsWith("get ") || last.startsWith("set ");
+}
+
 /**
  * True if `node` is the function expression that *is* an indexed declaration's
  * body. `const f = () => {}` and `{ read: () => {} }` index the enclosing
@@ -595,6 +695,9 @@ function jsDocRangeOf(
 
 function nameOrNode(decl: FunctionLikeDeclaration): ts.Node {
   if (ts.isVariableDeclaration(decl) || ts.isPropertyDeclaration(decl)) return decl.name;
+  // An arrow function has no name node at all; an anonymous default export is
+  // reported at the expression itself.
+  if (ts.isArrowFunction(decl)) return decl;
   return decl.name ?? decl;
 }
 

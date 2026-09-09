@@ -251,6 +251,60 @@ console.log("DENIED:" + JSON.stringify(await denied.json()));
     expect(executed.stdout.trim()).toBe('DENIED:{"error":"AmbitCapabilityError"}');
   }, 120_000);
 
+  it("loads an ambit.config.ts that imports defineConfig from ambit/config (§4.1)", async () => {
+    // The whole point of the `ambit/config` subpath is that a consumer's
+    // config file can import it. Nothing in this repository can test that: in
+    // a clone the specifier resolves to `./dist/config.js` by self-reference,
+    // and in a scratch copy it resolves to nothing at all. Only an installed
+    // package answers the question.
+    //
+    // `applyDiscount` in the consumer's `src/app.ts` carries no JSDoc, so it
+    // is undeclared and silent. The config declares it `pure`, which the
+    // multiplication in its body satisfies — and then a second entry declares
+    // `fetchRate` as `pure` too, which its `fetch` does not.
+    await fs.writeFile(
+      path.join(consumer, "ambit.config.ts"),
+      `import { defineConfig } from "ambit/config";
+
+export default defineConfig({
+  contracts: {
+    "src/app.ts#applyDiscount": { effects: [] },
+    "src/app.ts#totalPrice": { effects: ["db_read"] },
+  },
+});
+`,
+    );
+
+    const result = await run(
+      "npx",
+      ["--no-install", "ambit", "check", "src", "--format", "json"],
+      consumer,
+    );
+    const diagnostics = result.stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((record) => record.kind === undefined);
+
+    // The config was read: `totalPrice` declares `@effects pure` in its JSDoc
+    // and `db_read` in the config, which is exactly AMB-W005. A run that had
+    // silently ignored the file would produce no such diagnostic.
+    const divergence = diagnostics.find((d) => d.id === "AMB-W005");
+    expect(divergence, result.stdout).toBeDefined();
+    expect(divergence.message).toContain("totalPrice");
+    expect(divergence.message).toContain("ambit.config.ts");
+
+    // …and the config's own contract is in force where JSDoc said nothing:
+    // `applyDiscount` is now declared, so the run counts three declarations
+    // where the earlier tests in this file counted two.
+    expect(result.stdout).toContain('"functionsExtracted":3,"functionsDeclared":3');
+
+    // Removed again so the tests after this one see the consumer as they did
+    // before: a config is a project-wide input, not a per-test one.
+    await fs.rm(path.join(consumer, "ambit.config.ts"));
+  }, 120_000);
+
   it("type-checks the README's own examples against the installed package", async () => {
     // The claim is README's, so README is the input: copying the examples into
     // this file would let the copy drift from the document silently, which is

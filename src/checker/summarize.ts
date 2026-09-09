@@ -1,6 +1,10 @@
 import type {
+  Budget,
   Call,
   CallSite,
+  CapabilitySet,
+  ConfigContract,
+  ContractDivergence,
   DeclaredBoundary,
   DeclaredBudget,
   DeclaredCapabilities,
@@ -13,11 +17,18 @@ import type {
   RawJsDoc,
 } from "../core/index.ts";
 import {
+  capabilitySetsEqual,
+  DEFAULT_ON_EXCEED,
   effectSetOf,
+  effectSetsEqual,
   emptyEffectSet,
+  formatBudget,
+  formatCapability,
   isKnownEffect,
+  KNOWN_EFFECTS,
   parseBudgetTag,
   parseCapabilitiesTag,
+  parseCapability,
 } from "../core/index.ts";
 import {
   isConstructorKey,
@@ -28,6 +39,7 @@ import { lookupClientEffects } from "../stubs/data-clients.ts";
 import { lookupHttpCapability } from "../stubs/http-capabilities.ts";
 import { lookupStubEffect } from "../stubs/node-builtins.ts";
 import { isKnownPureBuiltin } from "../stubs/pure-builtins.ts";
+import type { ResolvedConfig } from "./config.ts";
 
 /**
  * Turn a backend's raw extraction into Ambit's own analysis representation
@@ -35,10 +47,20 @@ import { isKnownPureBuiltin } from "../stubs/pure-builtins.ts";
  */
 export function summarizeExtractedFiles(
   files: readonly ExtractedFile[],
+  config?: ResolvedConfig,
 ): readonly FunctionSummary[] {
   const summaries: FunctionSummary[] = [];
   for (const file of files) {
     for (const fn of file.functions) {
+      const jsDoc = {
+        declared: parseDeclaredEffects(fn.jsDoc),
+        capabilities: parseDeclaredCapabilities(fn.jsDoc),
+        budget: parseDeclaredBudget(fn.jsDoc),
+        boundary: parseDeclaredBoundary(fn.jsDoc),
+        entrypoint: fn.jsDoc?.tags.has("entrypoint") ?? false,
+      };
+      const declaredContract = config?.contractFor(fn.id);
+      const merged = mergeContract(jsDoc, declaredContract);
       summaries.push({
         id: fn.id,
         location: fn.location,
@@ -46,16 +68,171 @@ export function summarizeExtractedFiles(
         declarationStart: fn.declarationStart,
         ...(fn.jsDocRange ? { jsDocRange: fn.jsDocRange } : {}),
         ...(fn.implicitConstructor ? { implicitConstructor: true as const } : {}),
-        declared: parseDeclaredEffects(fn.jsDoc),
-        capabilities: parseDeclaredCapabilities(fn.jsDoc),
-        budget: parseDeclaredBudget(fn.jsDoc),
-        boundary: parseDeclaredBoundary(fn.jsDoc),
-        entrypoint: fn.jsDoc?.tags.has("entrypoint") ?? false,
+        ...(fn.configOnly ? { configOnly: true as const } : {}),
+        ...merged,
         calls: fn.calls.map(toCall),
       });
     }
   }
   return summaries;
+}
+
+/** The five contract tags as JSDoc alone declares them. */
+interface JsDocContract {
+  readonly declared: DeclaredEffects;
+  readonly capabilities: DeclaredCapabilities;
+  readonly budget: DeclaredBudget;
+  readonly boundary: DeclaredBoundary;
+  readonly entrypoint: boolean;
+}
+
+/**
+ * Combine a JSDoc contract with the one `ambit.config.ts` declares for the
+ * same symbol (DESIGN.md §4.1).
+ *
+ * Two rules, both from §4.1. JSDoc wins per tag — a tag JSDoc declares is the
+ * one that propagates, and config fills only the tags JSDoc left out, so
+ * `@effects` in the code plus `capabilities` in the config is one complete
+ * contract rather than a conflict. Where both declare the *same* tag and the
+ * two parse to different values, the difference is recorded as a
+ * {@link ContractDivergence} and reported (`AMB-W005`) rather than resolved
+ * silently.
+ *
+ * A JSDoc tag that failed to parse still counts as "JSDoc declared this":
+ * config must not quietly stand in for a tag the author wrote and misspelled,
+ * or `AMB-E002` would be reported against a contract that is not the one in
+ * force.
+ */
+function mergeContract(
+  jsDoc: JsDocContract,
+  config: ConfigContract | undefined,
+): Pick<
+  FunctionSummary,
+  "declared" | "capabilities" | "budget" | "boundary" | "entrypoint" | "declaredBy" | "divergences"
+> {
+  if (config === undefined) {
+    return {
+      ...jsDoc,
+      ...(jsDoc.declared.kind === "declared" ? { declaredBy: "jsdoc" as const } : {}),
+    };
+  }
+
+  const divergences: ContractDivergence[] = [];
+  const configEffects = config.effects ? expandConfigEffects(config.effects) : undefined;
+  const configCapabilities = config.capabilities
+    ? configCapabilitySet(config.capabilities)
+    : undefined;
+  const configBudget: Budget | undefined = config.budget
+    ? { ...config.budget, onExceed: config.budget.onExceed ?? DEFAULT_ON_EXCEED }
+    : undefined;
+
+  let declared = jsDoc.declared;
+  let declaredBy: "jsdoc" | "config" | undefined =
+    jsDoc.declared.kind === "declared" ? "jsdoc" : undefined;
+  if (configEffects) {
+    if (jsDoc.declared.kind === "none") {
+      declared = { kind: "declared", effects: configEffects };
+      declaredBy = "config";
+    } else if (
+      jsDoc.declared.kind === "declared" &&
+      !effectSetsEqual(jsDoc.declared.effects, configEffects)
+    ) {
+      divergences.push({
+        tag: "effects",
+        jsDoc: formatEffects(jsDoc.declared.effects.effects),
+        config: formatEffects(configEffects.effects),
+      });
+    }
+  }
+
+  let capabilities = jsDoc.capabilities;
+  if (configCapabilities) {
+    if (jsDoc.capabilities.kind === "none") {
+      capabilities = { kind: "declared", capabilities: configCapabilities };
+    } else if (
+      jsDoc.capabilities.kind === "declared" &&
+      !capabilitySetsEqual(jsDoc.capabilities.capabilities, configCapabilities)
+    ) {
+      divergences.push({
+        tag: "capabilities",
+        jsDoc: formatCapabilities(jsDoc.capabilities.capabilities),
+        config: formatCapabilities(configCapabilities),
+      });
+    }
+  }
+
+  let budget = jsDoc.budget;
+  if (configBudget) {
+    if (jsDoc.budget.kind === "none") {
+      budget = { kind: "declared", budget: configBudget };
+    } else if (
+      jsDoc.budget.kind === "declared" &&
+      formatBudget(jsDoc.budget.budget) !== formatBudget(configBudget)
+    ) {
+      divergences.push({
+        tag: "budget",
+        jsDoc: formatBudget(jsDoc.budget.budget),
+        config: formatBudget(configBudget),
+      });
+    }
+  }
+
+  let boundary = jsDoc.boundary;
+  if (config.boundary !== undefined) {
+    if (jsDoc.boundary.kind === "none") {
+      boundary = { kind: "declared", reason: config.boundary };
+    } else if (jsDoc.boundary.kind === "declared" && jsDoc.boundary.reason !== config.boundary) {
+      divergences.push({
+        tag: "boundary",
+        jsDoc: jsDoc.boundary.reason,
+        config: config.boundary,
+      });
+    }
+  }
+
+  // No `@entrypoint` is not a declaration that the function is *not* one, so
+  // only an explicit `entrypoint: false` beside the tag is a disagreement.
+  let entrypoint = jsDoc.entrypoint;
+  if (config.entrypoint !== undefined) {
+    if (!jsDoc.entrypoint && config.entrypoint) entrypoint = true;
+    else if (jsDoc.entrypoint && !config.entrypoint) {
+      divergences.push({ tag: "entrypoint", jsDoc: "true", config: "false" });
+    }
+  }
+
+  return {
+    declared,
+    capabilities,
+    budget,
+    boundary,
+    entrypoint,
+    ...(declaredBy ? { declaredBy } : {}),
+    ...(divergences.length > 0 ? { divergences } : {}),
+  };
+}
+
+/**
+ * A config `effects` list turned into an {@link EffectSet}. Every name is a
+ * standard effect, which `validateConfig` already guaranteed.
+ */
+function expandConfigEffects(names: readonly string[]): EffectSet {
+  return effectSetOf(...names.filter(isKnownEffect));
+}
+
+function configCapabilitySet(tokens: readonly string[]): CapabilitySet {
+  const capabilities = tokens
+    .map(parseCapability)
+    .filter((capability): capability is NonNullable<typeof capability> => capability !== undefined);
+  return { capabilities, unknown: false };
+}
+
+function formatEffects(effects: ReadonlySet<KnownEffect>): string {
+  const ordered = KNOWN_EFFECTS.filter((effect) => effects.has(effect));
+  return ordered.length === 0 ? "pure" : ordered.join(", ");
+}
+
+function formatCapabilities(set: CapabilitySet): string {
+  return set.capabilities.map(formatCapability).join(", ");
 }
 
 function parseDeclaredEffects(jsDoc: RawJsDoc | undefined): DeclaredEffects {

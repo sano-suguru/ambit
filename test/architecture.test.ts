@@ -53,6 +53,46 @@ describe("architecture constraint: only the connection layer depends on typescri
   });
 });
 
+describe("architecture constraint: the config layer is independent of the compiler", () => {
+  // DESIGN.md §4.1 (c): `ambit.config.ts` is loaded by importing it, not by
+  // parsing it, and the contracts it declares are plain data about symbol ids
+  // the backend already produced. Named file by file rather than left to the
+  // src/-wide rule above, because these three are the ones a future change
+  // would be tempted to give a parser — and the `ambit/config` entry point is
+  // imported by *consumer* projects, where pulling in a compiler would be a
+  // dependency they never asked for.
+  const CONFIG_FILES = ["src/core/config.ts", "src/config.ts", "src/checker/config.ts"];
+
+  it("neither the config types, the ambit/config entry, nor the loader imports typescript", async () => {
+    for (const relative of CONFIG_FILES) {
+      const content = await readFile(path.join(PROJECT_ROOT, relative), "utf8");
+      expect(TYPESCRIPT_IMPORT.test(content), `${relative} imports "typescript"`).toBe(false);
+      // Nor by way of the connection layer, which does import it.
+      expect(/from\s+["'][^"']*backend\//.test(content), `${relative} imports the backend`).toBe(
+        false,
+      );
+    }
+  });
+
+  it("src/core/ and src/stubs/ still import neither typescript nor the checker", async () => {
+    // The `src/`-wide rule above allows `src/checker/` to reach the backend;
+    // core and stubs may not reach either (DESIGN.md §6.1).
+    for (const dir of ["core", "stubs"]) {
+      const files = await listTsFiles(path.join(PROJECT_ROOT, "src", dir));
+      expect(files.length, `expected .ts files under src/${dir}`).toBeGreaterThan(0);
+      for (const file of files) {
+        const relative = path.relative(PROJECT_ROOT, file);
+        const content = await readFile(file, "utf8");
+        expect(TYPESCRIPT_IMPORT.test(content), `${relative} imports "typescript"`).toBe(false);
+        expect(
+          /from\s+["'][^"']*\/checker\//.test(content),
+          `${relative} imports the checker`,
+        ).toBe(false);
+      }
+    }
+  });
+});
+
 describe("architecture constraint: the runtime is independent of the analysis engine", () => {
   // DESIGN.md §3.4: 「ランタイム強制 … コンパイラから独立。解析エンジンを
   // 本番依存にしない」. A production process that enforces capabilities must

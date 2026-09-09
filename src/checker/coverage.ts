@@ -21,6 +21,17 @@ export interface CoverageReport {
   readonly functionsExtracted: number;
   readonly functionsDeclared: number;
   /**
+   * How {@link functionsDeclared} splits by where the declaration was written
+   * (DESIGN.md §4.1「コード外宣言」). Reported apart because the two are not
+   * interchangeable evidence: a JSDoc contract travels with the code and
+   * survives the package being removed (P5), while a config contract is a
+   * statement *about* code that was not touched — often third-party or
+   * generated. A coverage figure that merged them would hide how much of the
+   * declared surface lives outside the source it describes.
+   */
+  readonly functionsDeclaredByJsDoc: number;
+  readonly functionsDeclaredByConfig: number;
+  /**
    * Functions whose body is excluded from static analysis by `@boundary`
    * (DESIGN.md §4.6). Counted apart from everything else because §4.3
    * requires it: 「境界への移行は解析成功と区別して集計する」. A boundary is a
@@ -72,7 +83,12 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
   const { filesAnalyzed, skippedFunctions, summaries, state } = input;
 
   const functionsExtracted = summaries.length;
-  const functionsDeclared = summaries.filter((s) => s.declared.kind === "declared").length;
+  const declaredSummaries = summaries.filter((s) => s.declared.kind === "declared");
+  const functionsDeclared = declaredSummaries.length;
+  const functionsDeclaredByConfig = declaredSummaries.filter(
+    (s) => s.declaredBy === "config",
+  ).length;
+  const functionsDeclaredByJsDoc = functionsDeclared - functionsDeclaredByConfig;
   const functionsBoundary = summaries.filter((s) => s.boundary.kind === "declared").length;
   const entrypoints = summaries.filter((s) => s.entrypoint);
   const entrypointsWithoutCapabilities = entrypoints.filter(
@@ -132,6 +148,8 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
     filesAnalyzed,
     functionsExtracted,
     functionsDeclared,
+    functionsDeclaredByJsDoc,
+    functionsDeclaredByConfig,
     functionsBoundary,
     functionsEntrypoint: entrypoints.length,
     entrypointsWithoutCapabilities,
