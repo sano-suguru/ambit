@@ -9,6 +9,11 @@ import type {
   RawJsDoc,
 } from "../core/index.ts";
 import { effectSetOf, emptyEffectSet, isKnownEffect } from "../core/index.ts";
+import {
+  isConstructorKey,
+  isKnownPureConstructor,
+  lookupConstructorEffect,
+} from "../stubs/constructors.ts";
 import { lookupStubEffect } from "../stubs/node-builtins.ts";
 import { isKnownPureBuiltin } from "../stubs/pure-builtins.ts";
 
@@ -66,6 +71,12 @@ function toCall(site: CallSite): Call {
     return { kind: "resolved", location: site.location, callee: site.resolvedCallee };
   }
   if (site.calleeQualifiedName) {
+    // A construction is keyed in its own namespace (`src/stubs/
+    // constructors.ts`) — `new URL(...)` and `URL(...)` are different
+    // operations and must never share a table entry.
+    if (isConstructorKey(site.calleeQualifiedName)) {
+      return toConstructorCall(site, site.calleeQualifiedName);
+    }
     const effect = lookupStubEffect(site.calleeQualifiedName);
     if (effect) {
       return {
@@ -106,5 +117,25 @@ function toCall(site: CallSite): Call {
     kind: "unresolved",
     location: site.location,
     reason: site.unresolvedReason ?? "unresolved-symbol",
+  };
+}
+
+function toConstructorCall(site: CallSite, qualifiedName: string): Call {
+  const withoutArguments = site.constructedWithoutArguments === true;
+  const effect = lookupConstructorEffect(qualifiedName, withoutArguments);
+  if (effect) {
+    return { kind: "stub", location: site.location, effect, qualifiedName };
+  }
+  // A callback passed by reference is never walked, so an allowlisted
+  // constructor that runs one (`new Promise(namedExecutor)`) cannot be
+  // trusted as effect-free (DESIGN.md §4.2 rule 4).
+  if (isKnownPureConstructor(qualifiedName, withoutArguments) && !site.callbackByReference) {
+    return { kind: "known-pure", location: site.location, qualifiedName };
+  }
+  return {
+    kind: "unresolved",
+    location: site.location,
+    reason: site.unresolvedReason ?? "unresolved-symbol",
+    qualifiedName,
   };
 }

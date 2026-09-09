@@ -97,6 +97,14 @@ export interface CallSite {
   readonly calleeQualifiedName?: string;
   readonly pureBuiltinName?: string;
   readonly callbackByReference?: true;
+  /**
+   * Set on a construction (`new X(...)`, `super(...)`, a derived class's
+   * implicit base call) that passes no arguments. `src/stubs/constructors.ts`
+   * needs it to tell `new Date()` (reads the clock — `env`) from
+   * `new Date(2020, 0, 1)` (a pure conversion of its arguments). Absent on a
+   * plain call.
+   */
+  readonly constructedWithoutArguments?: true;
   readonly unresolvedReason?: UnresolvedReason;
 }
 

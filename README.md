@@ -161,27 +161,26 @@ a call does. In those cases Ambit reports `unknown` rather than silently
 treating the call as safe — the boundary of the analysis stays visible
 instead of hidden.
 
-There is one gap in that promise today: `new X(...)` is not recorded as a call
-at all, so it does not even surface as `unknown`. See below.
-
 ## Known limitations
 
 Representative cases where analysis is narrower than the model suggests:
 
-- **`new X(...)` is invisible.** Constructor calls are not recorded, not even
-  as `unknown`, so a `pure` function that does `new PrismaClient()` or
-  `new WebSocket(...)` passes today.
-- **Small bundled effect tables.** 26 entries (`fetch`, `undici`'s `fetch`,
-  and Node.js builtins) producing only `network`, `fs_read`, `fs_write`, and
-  `process`. Nothing bundled produces `db_read`, `db_write`, `llm`, or `env`
-  — a `pure` function calling a database driver reports `unknown`, not a
-  violation.
+- **Small bundled effect tables.** 26 call entries (`fetch`, `undici`'s
+  `fetch`, and Node.js builtins) plus 6 constructor entries, producing only
+  `network`, `fs_read`, `fs_write`, `process`, and `env`. Nothing bundled
+  produces `db_read`, `db_write`, or `llm` — a `pure` function calling a
+  database driver reports `unknown`, not a violation.
 - **Import-shape sensitive matching.** `import * as fs from "node:fs"`,
   `import fs from "node:fs"`, and `import { writeFileSync } from "node:fs"`
   are all recognized; a destructured or re-exported binding several hops
   away (e.g. through a barrel file) is not.
 - **No higher-order inference.** A call through a callback parameter is
   `unknown`; a callback passed by name (`arr.map(namedFn)`) is never seen.
+- **Construction is resolved, anonymous classes are not.** `new X(...)`,
+  `super(...)`, a derived class's implicit base call, and a class's property
+  initializers all propagate through `Class.constructor`. A construction of an
+  anonymous class expression has no stable declaration path and stays
+  `unknown`.
 - **Not every function can carry a contract.** Getters/setters, anonymous
   default exports, nested functions, and object-literal members the
   declaration-path notation cannot name (a computed or string key, a literal

@@ -208,5 +208,10 @@ function declaredContractList(
 function displayName(id: SymbolId): string {
   const afterHash = id.split("#")[1] ?? id;
   const parts = afterHash.split(".");
-  return parts[parts.length - 1] ?? id;
+  const last = parts[parts.length - 1];
+  if (last === undefined) return id;
+  // A bare "constructor" names nothing — keep the class with it
+  // (`Client.constructor`), since every class contributes one.
+  if (last === "constructor" && parts.length >= 2) return `${parts[parts.length - 2]}.${last}`;
+  return last;
 }

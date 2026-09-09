@@ -15,6 +15,7 @@ import type {
   UnresolvedReason,
 } from "../../core/index.ts";
 import { symbolId } from "../../core/index.ts";
+import { constructorStubKey } from "../../stubs/constructors.ts";
 
 /**
  * `TsBackend` implementation on the legacy TypeScript Compiler API
@@ -174,6 +175,17 @@ function relativePath(absoluteRoot: string, sourceFile: ts.SourceFile): string {
 type FunctionLikeDeclaration =
   | ts.FunctionDeclaration
   | ts.MethodDeclaration
+  /**
+   * A class's *construction*, indexed under the declaration path
+   * `Class.constructor`. Two node shapes stand for it: the
+   * `ConstructorDeclaration` when the class writes one, and the
+   * `ClassDeclaration` itself when it does not (an implicit constructor
+   * still runs the property initializers and the base constructor, so it
+   * still has effects to attribute). Exactly one of the two is indexed per
+   * class, so a class never yields two entries for the same id.
+   */
+  | ts.ConstructorDeclaration
+  | ts.ClassDeclaration
   | (ts.VariableDeclaration & { readonly initializer: ts.FunctionExpression | ts.ArrowFunction })
   | (ts.PropertyAssignment & { readonly initializer: ts.FunctionExpression | ts.ArrowFunction });
 
@@ -205,6 +217,18 @@ function collectFunctionLikeDeclarations(
           results.push([member, [...classPath, member.name.text]]);
         }
       }
+      // `new C(...)` has to have somewhere to propagate *from*, or a
+      // constructor that opens a socket is invisible rather than `unknown`
+      // (DESIGN.md §3.4). The explicit constructor is indexed when the class
+      // writes one; otherwise the class node stands in for the implicit one,
+      // which still runs property initializers and the base constructor.
+      // Overload signatures carry no body, so the implementation is the one
+      // indexed.
+      const explicitConstructor = node.members.find(
+        (member): member is ts.ConstructorDeclaration =>
+          ts.isConstructorDeclaration(member) && member.body !== undefined,
+      );
+      results.push([explicitConstructor ?? node, [...classPath, CONSTRUCTOR_PATH_SEGMENT]]);
       return;
     }
     if (
@@ -400,6 +424,14 @@ function collectSkippedFunctions(
 const CONTRACT_TAGS = ["effects", "capabilities", "budget", "entrypoint"] as const;
 
 /**
+ * The declaration-path segment a class's construction is indexed under
+ * (`src/db.ts#Client.constructor`). `constructor` cannot collide with a
+ * method of the same name: `constructor(){}` in a class body *is* the
+ * constructor, and a method named `constructor` is not expressible.
+ */
+const CONSTRUCTOR_PATH_SEGMENT = "constructor";
+
+/**
  * True if `node` is the function expression that *is* an indexed declaration's
  * body. `const f = () => {}` and `{ read: () => {} }` index the enclosing
  * `VariableDeclaration` / `PropertyAssignment`, not the arrow itself, so the
@@ -476,14 +508,47 @@ function nameOrNode(decl: FunctionLikeDeclaration): ts.Node {
   return decl.name ?? decl;
 }
 
-function bodyOf(decl: FunctionLikeDeclaration): ts.Node | undefined {
-  if (ts.isVariableDeclaration(decl) || ts.isPropertyAssignment(decl)) return decl.initializer;
-  return decl.body;
+/**
+ * The node(s) whose calls belong to `decl`.
+ *
+ * More than one for a class's construction: an explicit constructor's body
+ * runs *alongside* the class's property initializers and its parameter
+ * defaults, and all three are effects of the same `new C(...)`. Attributing
+ * them to one entry (`Class.constructor`) is what lets a caller propagate
+ * from a single symbol.
+ */
+function bodiesOf(decl: FunctionLikeDeclaration): readonly ts.Node[] {
+  if (ts.isVariableDeclaration(decl) || ts.isPropertyAssignment(decl)) {
+    return decl.initializer ? [decl.initializer] : [];
+  }
+  if (ts.isClassDeclaration(decl)) return propertyInitializersOf(decl);
+  if (ts.isConstructorDeclaration(decl)) {
+    const classBody = ts.isClassLike(decl.parent) ? propertyInitializersOf(decl.parent) : [];
+    const parameterDefaults = decl.parameters
+      .map((parameter) => parameter.initializer)
+      .filter((initializer): initializer is ts.Expression => initializer !== undefined);
+    return [...(decl.body ? [decl.body] : []), ...parameterDefaults, ...classBody];
+  }
+  return decl.body ? [decl.body] : [];
+}
+
+function propertyInitializersOf(node: ts.ClassLikeDeclaration): readonly ts.Node[] {
+  return node.members
+    .filter(ts.isPropertyDeclaration)
+    .map((member) => member.initializer)
+    .filter((initializer): initializer is ts.Expression => initializer !== undefined);
 }
 
 // ---- JSDoc extraction ---------------------------------------------------
 
 function extractJsDoc(decl: FunctionLikeDeclaration): RawJsDoc | undefined {
+  // A `ClassDeclaration` is only ever indexed as a stand-in for an *implicit*
+  // constructor (`collectFunctionLikeDeclarations`). That constructor has no
+  // declaration site, so the class's own JSDoc must not be read as its
+  // contract: `/** @effects pure */ class C {}` documents the class, and
+  // treating it as a verified constructor contract would manufacture a
+  // guarantee out of a comment about something else.
+  if (ts.isClassDeclaration(decl)) return undefined;
   const target = ts.isVariableDeclaration(decl) ? (decl.parent.parent ?? decl) : decl;
   const tags = ts.getJSDocTags(target);
   if (tags.length === 0) return undefined;
@@ -517,8 +582,8 @@ function collectCalls(
   declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
   absoluteRoot: string,
 ): readonly CallSite[] {
-  const body = bodyOf(decl);
-  if (!body) return [];
+  const bodies = bodiesOf(decl);
+  if (bodies.length === 0 && !ts.isClassDeclaration(decl)) return [];
 
   const calls: CallSite[] = [];
 
@@ -526,28 +591,157 @@ function collectCalls(
     if (ts.isCallExpression(node)) {
       calls.push(classifyCall(node, sourceFile, program, checker, declaredNodeToId, absoluteRoot));
     } else if (ts.isNewExpression(node)) {
-      const site = classifyNewExpression(node, sourceFile, absoluteRoot);
-      if (site) calls.push(site);
+      calls.push(
+        classifyNewExpression(node, sourceFile, program, checker, declaredNodeToId, absoluteRoot),
+      );
     }
     ts.forEachChild(node, visit);
   }
 
-  ts.forEachChild(body, visit);
+  for (const body of bodies) {
+    // A property initializer / parameter default *is itself* an expression
+    // that may be a call, unlike a block body — visit it, don't only descend.
+    if (ts.isBlock(body)) ts.forEachChild(body, visit);
+    else visit(body);
+  }
+
+  // An implicit constructor still calls its base constructor. There is no
+  // `super(...)` node to classify, so the heritage clause stands in for it;
+  // without this a `class Derived extends Effectful {}` would report no calls
+  // at all (DESIGN.md §3.4).
+  if (ts.isClassDeclaration(decl)) {
+    const base = baseTypeExpressionOf(decl);
+    if (base) {
+      calls.push(
+        classifyConstruct(base, base, sourceFile, program, checker, declaredNodeToId, absoluteRoot),
+      );
+    }
+  }
+
   return calls;
 }
 
+function enclosingClassOf(node: ts.Node): ts.ClassLikeDeclaration | undefined {
+  let current: ts.Node | undefined = node.parent;
+  while (current && !ts.isSourceFile(current)) {
+    if (ts.isClassLike(current)) return current;
+    current = current.parent;
+  }
+  return undefined;
+}
+
+function baseTypeExpressionOf(node: ts.ClassLikeDeclaration): ts.Expression | undefined {
+  for (const clause of node.heritageClauses ?? []) {
+    if (clause.token !== ts.SyntaxKind.ExtendsKeyword) continue;
+    return clause.types[0]?.expression;
+  }
+  return undefined;
+}
+
+/**
+ * `new X(...)`. Before this existed the expression was dropped unless it was
+ * `new Function`, so a `pure` function that did `new PrismaClient()` reported
+ * no call at all — not even `unknown`. DESIGN.md §3.4 forbids exactly that:
+ * an unanalyzed path must stay visible, never collapse into "no violation".
+ */
 function classifyNewExpression(
   node: ts.NewExpression,
   sourceFile: ts.SourceFile,
+  program: ts.Program,
+  checker: ts.TypeChecker,
+  declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
   absoluteRoot: string,
-): CallSite | undefined {
+): CallSite {
   if (ts.isIdentifier(node.expression) && node.expression.text === "Function") {
     return {
       location: locationOf(absoluteRoot, sourceFile, node),
       unresolvedReason: "new-function",
     };
   }
-  return undefined;
+  return classifyConstruct(
+    node.expression,
+    node,
+    sourceFile,
+    program,
+    checker,
+    declaredNodeToId,
+    absoluteRoot,
+  );
+}
+
+/**
+ * Resolve a construction — `new X(...)`, `super(...)`, or the implicit base
+ * call of a derived class — to the `Class.constructor` entry it runs, or to a
+ * named-but-external constructor the stub tables may know
+ * (`src/stubs/constructors.ts`).
+ *
+ * `classExpression` is the expression naming the class; `site` is the node the
+ * diagnostic should point at (the whole `new` expression, or the heritage
+ * clause for an implicit base call).
+ */
+function classifyConstruct(
+  classExpression: ts.Expression,
+  site: ts.Node,
+  sourceFile: ts.SourceFile,
+  program: ts.Program,
+  checker: ts.TypeChecker,
+  declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+  absoluteRoot: string,
+): CallSite {
+  const location = locationOf(absoluteRoot, sourceFile, site);
+
+  const symbol = checker.getSymbolAtLocation(classExpression);
+  const isAlias = symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0;
+  const resolvedSymbol = isAlias ? checker.getAliasedSymbol(symbol) : symbol;
+  const declaration = resolvedSymbol?.declarations?.find(ts.isClassLike);
+
+  if (declaration) {
+    const resolved = constructorTarget(declaration, declaredNodeToId);
+    if (resolved) return { location, resolvedCallee: resolved };
+  }
+
+  const declarationSourceFile = declaration?.getSourceFile();
+  const ambientReason = declarationSourceFile?.isDeclarationFile
+    ? ambientUnresolvedReason(declarationSourceFile, program)
+    : undefined;
+  const importBindingReason: UnresolvedReason | undefined =
+    isAlias && !resolvedSymbol?.declarations ? "import-binding" : undefined;
+
+  const name = qualifiedNameOf(checker, classExpression, importBindingReason === undefined);
+  if (name) {
+    return {
+      location,
+      calleeQualifiedName: constructorStubKey(name),
+      unresolvedReason: importBindingReason ?? ambientReason,
+      // `new Promise(namedExecutor)` runs `namedExecutor` immediately; the
+      // pure-constructor allowlist must not cover a body this walk never
+      // visited (DESIGN.md §4.2 rule 4).
+      callbackByReference:
+        (ts.isNewExpression(site) && hasOpaqueCallableArgument(site, checker)) || undefined,
+      // `new Date()` reads the clock; `new Date(2020, 0, 1)` does not
+      // (DESIGN.md §4.2 lists 時刻 under `env`).
+      constructedWithoutArguments:
+        (ts.isNewExpression(site) ? (site.arguments?.length ?? 0) === 0 : true) || undefined,
+    };
+  }
+
+  return {
+    location,
+    unresolvedReason: importBindingReason ?? ambientReason ?? "unresolved-symbol",
+  };
+}
+
+/** The indexed `Class.constructor` entry for a class: its explicit constructor, or the class node standing in for the implicit one. */
+function constructorTarget(
+  declaration: ts.ClassLikeDeclaration,
+  declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+): SymbolId | undefined {
+  for (const member of declaration.members) {
+    if (!ts.isConstructorDeclaration(member) || !member.body) continue;
+    const id = declaredNodeToId.get(member);
+    if (id) return id;
+  }
+  return declaredNodeToId.get(declaration);
 }
 
 function classifyCall(
@@ -570,6 +764,24 @@ function classifyCall(
   // eval(...)
   if (ts.isIdentifier(callee) && callee.text === "eval") {
     return { location, unresolvedReason: "eval" };
+  }
+
+  // `super(...)` runs the base class's constructor. `getSymbolAtLocation` on
+  // the `super` keyword does not name it, so the base is taken from the
+  // enclosing class's heritage clause instead.
+  if (callee.kind === ts.SyntaxKind.SuperKeyword) {
+    const enclosingClass = enclosingClassOf(node);
+    const base = enclosingClass ? baseTypeExpressionOf(enclosingClass) : undefined;
+    if (!base) return { location, unresolvedReason: "unresolved-symbol" };
+    return classifyConstruct(
+      base,
+      node,
+      sourceFile,
+      program,
+      checker,
+      declaredNodeToId,
+      absoluteRoot,
+    );
   }
 
   const symbol = checker.getSymbolAtLocation(callee);
@@ -800,9 +1012,12 @@ function objectLiteralReceiverTarget(
  * rather than skipping it, so this narrowing can only add opacity checks
  * back in, never silently drop the `any`/`unknown` fail-open guard above.
  */
-function hasOpaqueCallableArgument(node: ts.CallExpression, checker: ts.TypeChecker): boolean {
+function hasOpaqueCallableArgument(
+  node: ts.CallExpression | ts.NewExpression,
+  checker: ts.TypeChecker,
+): boolean {
   const signature = checker.getResolvedSignature(node);
-  return node.arguments.some((arg, index) => {
+  return (node.arguments ?? []).some((arg, index) => {
     if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) return false;
     if (signature && !acceptsCallableArgument(signature, index, checker)) return false;
     const type = checker.getTypeAtLocation(arg);

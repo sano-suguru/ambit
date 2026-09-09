@@ -118,14 +118,44 @@ not implemented. A call through a callback parameter falls back to `unknown`.
 
 ### `new X(...)`
 
-Constructor calls are not recorded as calls at all — not even as `unknown`.
-`new PrismaClient()` or `new WebSocket(...)` disappears from the analysis
-entirely, and a `pure` function that constructs a database client or a socket
-passes today. `new Function(...)` is the sole exception: it is reported as an
-`eval`-like unresolved call.
+Construction is part of the call graph. Every class is indexed under the
+declaration path `Class.constructor`, and a construction resolves to it:
 
-This is the one place where the "unknown stays unknown" property does not
-hold, and the gap is invisible in `--coverage` output.
+- `new X(...)` on a project class, whether or not the class writes a
+  constructor
+- `super(...)`, and the implicit base call a derived class makes when it
+  writes no constructor of its own
+- a class's property initializers and its constructor's parameter defaults,
+  which run as part of the same construction and are attributed to the same
+  `Class.constructor` entry
+
+A construction of a class Ambit cannot name — an anonymous class expression,
+or a class declared inside a function body — stays `unresolved`, so the
+enclosing function becomes `unknown` rather than silently effect-free.
+
+`new Function(...)` is reported as an `eval`-like unresolved call, as before.
+
+An *external* construction is matched against a bundled constructor table
+(`src/stubs/constructors.ts`), keyed in its own namespace so that `URL(...)`
+and `new URL(...)` never share an entry. The table is small and split three
+ways:
+
+- always effectful: `node:net.Socket`, `node:tls.TLSSocket`,
+  `node:http.Agent`, `node:https.Agent`, `WebSocket` (`network`);
+  `node:worker_threads.Worker` (`process`)
+- effectful only with no arguments: `new Date()` reads the clock (`env`),
+  while `new Date(2020, 0, 1)` only converts its arguments
+- known effect-free: the standard collections, typed arrays, error types,
+  `Promise`, `RegExp`, `URL`, `AbortController`, and similar
+
+Anything not in that table — `new PrismaClient()`, for one — is `unknown`,
+not effect-free. `new Promise(namedExecutor)` is also `unknown` rather than
+effect-free: the executor runs immediately and its body was never walked, the
+same rule that applies to `arr.forEach(handler)`.
+
+A class's own JSDoc is never read as its implicit constructor's contract. A
+contract belongs on a declaration, and an implicit constructor has none;
+`/** @effects pure */ class C {}` documents the class.
 
 ## Function extraction
 
@@ -135,6 +165,9 @@ covers:
 - named function declarations
 - class methods
 - variable-bound function and arrow expressions
+- a class's construction, under `Class.constructor` — a written constructor
+  carries the contract; a class with no constructor has no declaration site
+  for one
 - members of a module-scope `const` object literal, when the member has an
   identifier name — `const handlers = { read() { … } }` gives `read` the id
   `handlers.read`, the same declaration-path notation a class method uses
@@ -142,9 +175,9 @@ covers:
 A call inside any other function-like node — a getter/setter, an
 object-literal member the notation cannot name, an anonymous `export default`
 function, a nested function declaration, an inline callback argument, or
-anything else with no extracted ancestor such as a class constructor — is still
-walked, and its effects are attributed to the nearest enclosing *extracted*
-function. Such a call is invisible only when no extracted ancestor exists.
+anything else with no extracted ancestor — is still walked, and its effects are
+attributed to the nearest enclosing *extracted* function. Such a call is
+invisible only when no extracted ancestor exists.
 
 The identifier-name restriction is not arbitrary. A declaration path is
 `"."`-joined, so a computed, string, or numeric key has no spelling that
