@@ -41,6 +41,41 @@ an executable contract.
 
 ## What is actually enforced
 
+Contracts are JSDoc tags on ordinary TypeScript. `@effects` says what side
+effects a function may perform, `@capabilities` which resources it may reach,
+`@budget` how much an entrypoint may spend, `@entrypoint` marks where a request
+enters, and `@boundary reason="…"` stops analysis of a body and trusts its
+declared contract in its place.
+
+```ts
+import { withAmbit } from "ambit/runtime";
+
+/**
+ * @entrypoint
+ * @effects network
+ * @capabilities http:get:api.example.com
+ * @budget timeMs=500 costUsd=0.01
+ */
+async function handler(req: Request): Promise<Response> {
+  await fetch("https://api.example.com/rates");   // granted
+  await fetch("https://elsewhere.example/steal"); // AMB-E009 at check time
+  return new Response("ok");
+}
+
+export const GET = withAmbit(
+  { capabilities: ["http:get:api.example.com"], budget: { timeMs: 500, onExceed: "throw" } },
+  handler,
+);
+```
+
+`ambit check` reads the JSDoc: it rejects the second `fetch` against the
+granted target, and compares the literal array in `withAmbit` with the
+handler's `@capabilities`. `withAmbit` enforces the same set while the code
+runs — with `installFetchHook()` installed, a `fetch` to an ungranted host
+throws before reaching the socket, and `timeMs` is measured against the wall
+clock. Outside any entrypoint the default is to allow, so adopting the runtime
+does not break code that has no contracts yet.
+
 | | Static check | Runtime block | Audit only | Unsupported |
 |---|---|---|---|---|
 | `@effects` | yes | — | — | — |
@@ -54,20 +89,13 @@ an executable contract.
 | `@budget costUsd`, `llmCalls` | parsed and validated | — | — | no hook increments them |
 | `@entrypoint` vs. the `withAmbit` beside it | yes, in the same file (`AMB-E010`) | — | — | no adapter links the two |
 
-Contracts are ordinary JSDoc — `@effects`, `@capabilities`, `@budget`,
-`@entrypoint`, and `@boundary reason="…"`, which stops analysis of a body and
-trusts its declared contract in its place. Runtime blocking comes from `withAmbit(...)`
-around an entrypoint plus `installFetchHook()` from `ambit/runtime`; with no
-active context the
-process-wide `setUnscopedPolicy` decides, defaulting to `allow`.
-
 Effects are inferred from bundled tables covering `fetch`/`undici`, the
 `node:fs`, `node:http`/`https`/`net`, and `node:child_process` builtins, and
 five clients (`pg`, `mysql2`, `@prisma/client`, `openai`,
 `@anthropic-ai/sdk`). Everything else resolves to `unknown` — never to `pure`,
-and `--strict` turns those warnings into errors. Linking a contract to the
-handler that actually runs, after a build or bundler moves either half, is
-DESIGN.md §12 and still open.
+and `--strict` turns those warnings into errors. Matching a contract to the handler that
+actually runs, after a build moves either half, is DESIGN.md §12 and still
+open.
 
 ## Why not ESLint / Effect-TS / dependency-cruiser
 
