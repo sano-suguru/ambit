@@ -90,7 +90,10 @@ analysis itself could not run.
   that saw nothing is never indistinguishable from a check that found nothing.
 - **Also works:** `@capabilities` is checked statically — a callee may not
   require a capability its caller does not grant, and the check crosses
-  undeclared functions. `@entrypoint` warns when it declares no capability
+  undeclared functions. In practice, with today's unknown rate, a function
+  that declares `@capabilities` will usually also get `AMB-W003`: everything
+  it reaches has to be declared, stubbed, or bounded before its requirement
+  is fully known. `@entrypoint` warns when it declares no capability
   set. `@boundary reason="…"` stops checking a body and trusts the declared
   contract instead, counted separately in `--coverage`. `@budget` is parsed
   and validated. `--strict` promotes the `unknown` warnings to errors.

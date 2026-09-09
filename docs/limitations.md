@@ -157,6 +157,21 @@ A class's own JSDoc is never read as its implicit constructor's contract. A
 contract belongs on a declaration, and an implicit constructor has none;
 `/** @effects pure */ class C {}` documents the class.
 
+## `@boundary` and the coverage numbers
+
+A `@boundary` function's body is excluded from propagation, so it leaves the
+`unknown` numerator without ever having been checked. `--coverage` therefore
+prints `boundary-rate` on the same line as `unknown-rate`, over the same
+denominator: the two together are the fraction of functions whose contract is
+not backed by an analyzed body. Reading `unknown-rate` alone would show
+"declare more boundaries" as an improvement.
+
+For the same reason a boundary's own call sites are left out of the
+`call-sites:` and `unresolved-by-reason:` lines. Those measure how well
+analysis resolves what it looks at, and a boundary is code it deliberately
+does not look at; including it would also pad `top-unresolved-names`, the
+"what to stub next" signal, with names no stub would help.
+
 ## Function extraction
 
 The set of function-like nodes that can carry their own `@effects` contract

@@ -185,9 +185,13 @@ function formatSummaryJson(coverage: CoverageReport): string {
 
 function formatCoverageText(coverage: CoverageReport): string {
   const unknownPct = (coverage.functionUnknownRate * 100).toFixed(1);
+  // Reported beside the unknown rate on purpose: a boundary leaves the
+  // unknown numerator without the body ever being checked, so reading one
+  // number without the other would show declaring boundaries as progress.
+  const boundaryPct = (coverage.functionBoundaryRate * 100).toFixed(1);
   const lines = [
-    `unknown-rate=${unknownPct}% (${Math.round(coverage.functionUnknownRate * coverage.functionsExtracted)}/${coverage.functionsExtracted} functions)`,
-    `boundary=${coverage.functionsBoundary} entrypoints=${coverage.functionsEntrypoint} (without-capabilities=${coverage.entrypointsWithoutCapabilities})`,
+    `unknown-rate=${unknownPct}% (${Math.round(coverage.functionUnknownRate * coverage.functionsExtracted)}/${coverage.functionsExtracted} functions) boundary-rate=${boundaryPct}% (${coverage.functionsBoundary}/${coverage.functionsExtracted} functions)`,
+    `entrypoints=${coverage.functionsEntrypoint} (without-capabilities=${coverage.entrypointsWithoutCapabilities})`,
     `skipped=${coverage.functionsSkipped} (${mapEntries(coverage.skippedByKind)})`,
     `call-sites: total=${coverage.callSitesTotal} resolved=${coverage.callSitesResolved} stub=${coverage.callSitesStub} pure=${coverage.callSitesPure} unresolved=${coverage.callSitesUnresolved}`,
     `unresolved-by-reason: ${mapEntries(coverage.unresolvedByReason)}`,
@@ -204,6 +208,7 @@ function formatCoverageJson(coverage: CoverageReport): string {
   return `${JSON.stringify({
     kind: "coverage",
     functionUnknownRate: coverage.functionUnknownRate,
+    functionBoundaryRate: coverage.functionBoundaryRate,
     functionsBoundary: coverage.functionsBoundary,
     functionsEntrypoint: coverage.functionsEntrypoint,
     entrypointsWithoutCapabilities: coverage.entrypointsWithoutCapabilities,

@@ -367,7 +367,7 @@ Optional アクセスなどの型安全性は再実装しない。選択した T
 | `id` | 安定した診断コード。削除・再利用しない |
 | `severity` | `error` / `warning` / `info` |
 | `category` | `effects` / `capabilities` / `budget` / `boundary` / `types` |
-| `contract` | 契約診断の宣言・観測差分と経路。コンパイラ由来の型診断などへの適用はスキーマで定義する |
+| `contract` | 契約診断の宣言・観測差分と経路。`category` によって形が変わる: `effects` は `{declared, observed, via}`、`capabilities` は `{declared, required, excess, via}`（`declared` は付与された権限、`required` は本体が必要とする権限、`excess` はそのうち `declared` が許可しないもの）。判別用の追加フィールドは持たせない — 消費者は `category` を見る。コンパイラ由来の型診断などへの適用はスキーマで定義する |
 | `fixes` | 修正候補。`consistentWithContract` で契約を守る修正と緩める修正を区別する |
 | `fixes[].impact` | 契約を緩める修正で影響を受ける呼び出し元など |
 | `engine` | `{name, version}`。診断を生成した解析バックエンドの識別（`name` は接続層の実装名、`version` はそのバックエンドが依存するコンパイラのバージョン） |

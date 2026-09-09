@@ -15,7 +15,12 @@ import {
   KNOWN_EFFECTS,
 } from "../core/index.ts";
 import type { PropagatedFunction } from "./propagate.ts";
-import { capabilityWitnessChain, unknownWitnessChain, witnessChain } from "./propagate.ts";
+import {
+  capabilityUnknownWitnessChain,
+  capabilityWitnessChain,
+  unknownWitnessChain,
+  witnessChain,
+} from "./propagate.ts";
 
 /**
  * Compare declared vs. observed effects for every declared function and
@@ -104,12 +109,20 @@ function diagnoseCapabilities(
     diagnostics.push(buildCapabilityEscalation(propagated, granted, excess, state, engine));
   }
   if (propagated.required.unknown) {
-    const chain = unknownWitnessChain(summary.id, state);
+    const chain = capabilityUnknownWitnessChain(summary.id, state);
+    const witness = chain[chain.length - 1];
+    const witnessSummary = witness ? state.get(witness)?.summary : undefined;
+    // Two different causes reach the same unknown, and saying the wrong one
+    // sends a reader hunting for a call that resolved perfectly well.
+    const cause =
+      witnessSummary?.boundary.kind === "declared"
+        ? `calls ${displayName(witnessSummary.id)}, a @boundary that declares no @capabilities`
+        : "reaches a call that could not be resolved";
     diagnostics.push({
       id: "AMB-W003",
       severity: "warning",
       category: "capabilities",
-      message: `${displayName(summary.id)} declares @capabilities but reaches a call that could not be resolved, so its capability requirement is not fully known`,
+      message: `${displayName(summary.id)} declares @capabilities but ${cause}, so its capability requirement is not fully known`,
       location: summary.location,
       contract: {
         declared: granted.map(formatCapability),
@@ -191,7 +204,9 @@ function diagnoseBoundary(
     ];
   }
   if (summary.boundary.kind !== "declared") return [];
-  if (summary.declared.kind === "declared") return [];
+  // An `@effects` that failed to parse is already AMB-E002's business; saying
+  // "no @effects" on top of it would name the wrong problem.
+  if (summary.declared.kind !== "none") return [];
 
   return [
     {

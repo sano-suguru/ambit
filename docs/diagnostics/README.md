@@ -67,8 +67,8 @@ Contract declared on a node that cannot carry one.
 **Severity:** error
 **Category:** effects
 
-A contract tag (`@effects`, `@capabilities`, `@budget`, `@entrypoint`) is
-written on a function-like node the analysis does not extract, so it has no
+A contract tag (`@effects`, `@capabilities`, `@budget`, `@entrypoint`,
+`@boundary`) is written on a function-like node the analysis does not extract, so it has no
 symbol to attach the contract to. The declaration is inert: nothing propagates
 it, nothing checks it, and it appears in no coverage figure. It is reported for
 the same reason a misspelled effect name is (AMB-E002) — a declaration that

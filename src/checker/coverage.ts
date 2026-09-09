@@ -42,6 +42,16 @@ export interface CoverageReport {
    * which is an internal diagnostic, not the target itself.
    */
   readonly functionUnknownRate: number;
+  /**
+   * Boundary functions as a fraction of extracted functions, reported next to
+   * {@link functionUnknownRate} because tagging a function `@boundary` moves
+   * it out of the unknown numerator while leaving it in the denominator.
+   * Without this figure beside it, declaring boundaries would read as an
+   * improving KPI (DESIGN.md §4.3: 「境界への移行は解析成功と区別して集計する」).
+   * The two rates together are the fraction of functions whose contract is
+   * not backed by a verified body.
+   */
+  readonly functionBoundaryRate: number;
   readonly callSitesTotal: number;
   readonly callSitesResolved: number;
   readonly callSitesStub: number;
@@ -67,6 +77,8 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
     if (state.get(summary.id)?.observed.unknown) unknownCount++;
   }
   const functionUnknownRate = functionsExtracted === 0 ? 0 : unknownCount / functionsExtracted;
+  const functionBoundaryRate =
+    functionsExtracted === 0 ? 0 : functionsBoundary / functionsExtracted;
 
   let callSitesResolved = 0;
   let callSitesStub = 0;
@@ -76,6 +88,12 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
   const nameFrequency = new Map<string, number>();
 
   for (const summary of summaries) {
+    // A boundary's body is excluded from propagation, so its call sites say
+    // nothing about how well the analysis resolves things. Counting them
+    // would make a declared hole look like unresolved analysis (and pad
+    // `topUnresolvedNames`, the "what to stub next" signal, with names no
+    // stub would help).
+    if (summary.boundary.kind === "declared") continue;
     for (const call of summary.calls) {
       if (call.kind === "resolved") {
         callSitesResolved++;
@@ -110,6 +128,7 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
     functionsSkipped,
     skippedByKind: skippedFunctions,
     functionUnknownRate,
+    functionBoundaryRate,
     callSitesTotal: callSitesResolved + callSitesStub + callSitesPure + callSitesUnresolved,
     callSitesResolved,
     callSitesStub,

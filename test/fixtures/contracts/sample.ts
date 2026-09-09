@@ -90,3 +90,30 @@ export function boundaryWithoutReason(): Promise<Response> {
 export function boundaryWithoutEffects(): Promise<Response> {
   return fetch("https://example.test");
 }
+
+/**
+ * A boundary that declares effects but not capabilities. Every call in a
+ * caller resolves, yet the caller's capability requirement is still unknown —
+ * the boundary declared nothing about it. The diagnostic has to name that
+ * cause rather than send the reader looking for an unresolved call.
+ * @boundary reason="vendor client, capabilities unmapped"
+ * @effects network
+ */
+export function boundaryWithoutCapabilities(): Promise<Response> {
+  return fetch("https://example.test");
+}
+
+/** @capabilities http:get:example.test */
+export function callsCapabilitylessBoundary(): Promise<Response> {
+  return boundaryWithoutCapabilities();
+}
+
+/**
+ * A boundary whose @effects does not parse. AMB-E002 already says what is
+ * wrong; AMB-E007's "no @effects" would name a different problem.
+ * @boundary reason="broken tag"
+ * @effects netwrok
+ */
+export function boundaryWithInvalidEffects(): Promise<Response> {
+  return fetch("https://example.test");
+}

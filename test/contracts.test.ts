@@ -189,10 +189,49 @@ describe("@boundary (DESIGN.md §4.6)", () => {
     expect(forFunction(diagnostics, "boundaryWithoutEffects")[0]?.id).toBe("AMB-E007");
   });
 
+  it("names the boundary, not a phantom unresolved call, when capabilities go unknown", async () => {
+    // Every call in the caller resolves; the requirement is unknown because
+    // the boundary declared nothing about capabilities. Saying "reaches a
+    // call that could not be resolved" would send a reader hunting.
+    const { diagnostics } = await analyze(FIXTURE_ROOT);
+    const [diagnostic] = forFunction(diagnostics, "callsCapabilitylessBoundary");
+    expect(diagnostic?.id).toBe("AMB-W003");
+    expect(diagnostic?.message).toContain(
+      "calls boundaryWithoutCapabilities, a @boundary that declares no @capabilities",
+    );
+  });
+
+  it("does not add AMB-E007 on top of an @effects that failed to parse", async () => {
+    const { diagnostics } = await analyze(FIXTURE_ROOT);
+    expect(forFunction(diagnostics, "boundaryWithInvalidEffects").map((d) => d.id)).toEqual([
+      "AMB-E002",
+    ]);
+  });
+
+  it("keeps a boundary's own call sites out of the resolution statistics", async () => {
+    // A boundary's body is not propagated, so its calls say nothing about how
+    // well analysis resolves — counting them would show a declared hole as
+    // unresolved analysis and pad the "what to stub next" signal.
+    const { coverage } = await analyze(FIXTURE_ROOT);
+    expect(coverage.callSitesUnresolved).toBe(0);
+    expect(coverage.topUnresolvedNames).toEqual([]);
+  });
+
+  it("reports the boundary rate beside the unknown rate", async () => {
+    // §4.3: tagging a function @boundary takes it out of the unknown
+    // numerator without its body ever being checked. Reported together so
+    // that move cannot read as an improving KPI.
+    const { coverage } = await analyze(FIXTURE_ROOT);
+    expect(coverage.functionBoundaryRate).toBeCloseTo(
+      coverage.functionsBoundary / coverage.functionsExtracted,
+    );
+    expect(coverage.functionsBoundary).toBeGreaterThan(0);
+  });
+
   it("counts boundaries apart from analysis successes", async () => {
     // §4.3: 「境界への移行は解析成功と区別して集計する」.
     const { coverage } = await analyze(FIXTURE_ROOT);
-    expect(coverage.functionsBoundary).toBe(3);
+    expect(coverage.functionsBoundary).toBe(5);
   });
 });
 

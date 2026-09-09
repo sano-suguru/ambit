@@ -46,6 +46,16 @@ export interface PropagatedFunction {
   readonly required: CapabilitySet;
   /** For a required capability this function does not declare itself, the immediate callee it came through. */
   readonly capabilityWitness: ReadonlyMap<string, SymbolId>;
+  /**
+   * The immediate callee an *unknown capability requirement* came through, if
+   * not direct. Tracked apart from {@link unknownWitness} because the two have
+   * different causes: effects go unknown at an unresolved call, while
+   * capabilities also go unknown at a perfectly resolved `@boundary` callee
+   * that declared no `@capabilities`. Reporting the second as "reaches a call
+   * that could not be resolved" would send a reader hunting for an unresolved
+   * call that does not exist.
+   */
+  readonly capabilityUnknownWitness?: SymbolId;
 }
 
 /**
@@ -177,6 +187,7 @@ function deriveState(
   const effectWitness = new Map<KnownEffect, SymbolId>();
   const capabilityWitness = new Map<string, SymbolId>();
   let unknownWitness: SymbolId | undefined;
+  let capabilityUnknownWitness: SymbolId | undefined;
 
   for (const call of summary.calls) {
     if (call.kind !== "resolved") continue;
@@ -202,6 +213,13 @@ function deriveState(
       const key = formatCapability(capability);
       if (!capabilityWitness.has(key)) capabilityWitness.set(key, call.callee);
     }
+    if (
+      capabilityContribution.unknown &&
+      !hasDirectUnresolved &&
+      capabilityUnknownWitness === undefined
+    ) {
+      capabilityUnknownWitness = call.callee;
+    }
   }
 
   return {
@@ -211,6 +229,7 @@ function deriveState(
     unknownWitness: hasDirectUnresolved ? undefined : unknownWitness,
     required,
     capabilityWitness,
+    capabilityUnknownWitness: hasDirectUnresolved ? undefined : capabilityUnknownWitness,
   };
 }
 
@@ -225,6 +244,23 @@ export function witnessChain(
   const visited = new Set<SymbolId>([current]);
   for (;;) {
     const next = state.get(current)?.effectWitness.get(effect);
+    if (next === undefined || visited.has(next)) return chain;
+    chain.push(next);
+    visited.add(next);
+    current = next;
+  }
+}
+
+/** Walk `capabilityUnknownWitness` from `start` to the function whose capability requirement first went unknown. */
+export function capabilityUnknownWitnessChain(
+  start: SymbolId,
+  state: ReadonlyMap<SymbolId, PropagatedFunction>,
+): readonly SymbolId[] {
+  const chain: SymbolId[] = [];
+  let current = start;
+  const visited = new Set<SymbolId>([current]);
+  for (;;) {
+    const next = state.get(current)?.capabilityUnknownWitness;
     if (next === undefined || visited.has(next)) return chain;
     chain.push(next);
     visited.add(next);
