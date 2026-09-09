@@ -572,6 +572,15 @@ Limits of what the adapter guarantees:
   inference (`hc`) sees `Response` rather than the handler's return shape.
 - **`timeMs` includes `decode`**, which runs inside the context: the time spent
   reading a request body counts against the budget.
+- **Only `app/**/route.ts`, registered through `ambitRoute`.** Next.js runs
+  code down several paths, and the adapter reaches one of them. Server Actions
+  (`"use server"`) are not route modules and have no registration call a `spec`
+  could ride on; `middleware.ts` runs on the Edge runtime and outside every
+  route module; the Pages Router (`pages/api/*`) has a different handler shape.
+  None of the three has an adapter, none establishes an Ambit context, and
+  `setUnscopedPolicy` decides what operations inside them do — `allow` by
+  default. Nothing reports a handler on those paths as unregistered, the same
+  way nothing reports an unwrapped Hono route.
 - **The Edge runtime is not enforced.** A Next.js route that sets
   `export const runtime = "edge"` leaves the Node.js runtime, and every hook
   Ambit installs is a Node.js hook: `installFsHook` and

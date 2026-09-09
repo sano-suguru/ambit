@@ -276,6 +276,23 @@ guarantees the Node.js runtime only (DESIGN.md §12「エッジランタイム�
 honest form for an Edge route today is to leave it unwrapped, so that nothing
 about it reads as enforced.
 
+**What the adapter covers, and what it does not.** `ambitRoute` reaches one
+thing: a Route Handler in `app/**/route.ts`, on the Node.js runtime, that was
+registered through it. These have no adapter, and a handler on any of them
+establishes no Ambit context at all — `setUnscopedPolicy` decides what its
+operations do, `allow` by default:
+
+| Next.js execution path | Covered |
+|---|---|
+| `app/**/route.ts` Route Handler, Node.js runtime, registered with `ambitRoute` | yes |
+| the same route with `export const runtime = "edge"` | no — no hook is installed there |
+| Server Actions (`"use server"`) | no — not a route module, no registration call to carry a `spec` |
+| `middleware.ts` | no — runs on the Edge runtime, outside every route module |
+| Pages Router (`pages/api/*`) | no — a different handler shape, and no adapter for it |
+
+A route module that Ambit does not cover is not broken by any of this; it is
+simply unenforced, exactly as it was before Ambit was added.
+
 At run time `withAmbit` puts that same set on the context, and four hooks check
 operations against it — `installFetchHook()`, `installFsHook()`,
 `installChildProcessHook()`, `installPgHook(pg)`. An ungranted operation throws
