@@ -58,7 +58,8 @@ convention and into an executable contract.
 Contracts are ordinary JSDoc — `@effects`, `@capabilities`, `@budget`,
 `@entrypoint`, and `@boundary reason="…"`, which stops analysis of a body and
 trusts its declared contract in its place. Runtime blocking comes from `withAmbit(...)`
-around an entrypoint plus `installFetchHook()`; with no active context the
+around an entrypoint plus `installFetchHook()` from `ambit/runtime`; with no
+active context the
 process-wide `setUnscopedPolicy` decides, defaulting to `allow`.
 
 Effects are inferred from bundled tables covering `fetch`, the Node.js builtins
@@ -72,7 +73,7 @@ DESIGN.md §12 and still open.
 
 **ESLint custom rules.** A lint rule fires on the AST node in front of it.
 Ambit's unit is the call graph: an `@effects pure` function that calls an
-undeclared helper that calls `fetch` is an error at the declaration, with the
+undeclared helper that calls `fetch` is an error on the pure function, with the
 path reported. Where a call cannot be resolved, Ambit reports `unknown`
 instead of passing it, so the frontier of the analysis stays visible rather
 than silently counting as safe.
@@ -112,15 +113,14 @@ the one that keeps the contract and rewrites the code. `ambit init` proposes
 
 ## Quick start
 
-Requires Node.js 24.
-
 ```sh
-git clone https://github.com/sano-suguru/ambit.git
-cd ambit && pnpm install
-node src/cli/main.ts check <dir>   # --coverage, --strict, --format json
+git clone https://github.com/sano-suguru/ambit.git && cd ambit && pnpm install && node src/cli/main.ts check <dir>
 ```
 
-`check` exits 0 when nothing was reported, 1 when an error was, and 2 when the
+Requires Node.js 24. `check` also takes `--coverage`, `--strict`, and
+`--format json`.
+
+`check` exits 0 when nothing was reported, 1 on an error, and 2 when the
 analysis itself could not run.
 
 To use Ambit in another project, build a tarball — it is not published to
@@ -145,10 +145,10 @@ in [docs/status.md](docs/status.md).
 ## Docs / License
 
 - [docs/DESIGN.md](docs/DESIGN.md) — the product specification, written in
-  Japanese; everything else in this repository is English.
+  Japanese; the other documents here are English.
 - [docs/diagnostics/](docs/diagnostics/README.md) — the diagnostic code ledger.
 - [docs/limitations.md](docs/limitations.md) — where the analysis is narrower
   than the model suggests.
 
-Licensed under [LICENSE](LICENSE). Ambit is one person's experiment: there is
-no support commitment and no release schedule yet.
+MIT licensed; see [LICENSE](LICENSE). Ambit is one person's experiment:
+no support commitment, no release schedule yet.
