@@ -353,6 +353,50 @@ describe("ambit check (CLI)", () => {
     expect(direct.some((d) => d.contract.operation.line !== d.location.line)).toBe(true);
   });
 
+  it("--format github emits one workflow command per diagnostic, carrying the whole path", async () => {
+    // DESIGN.md §6: CI integrates through the exit code and structured output,
+    // with no dedicated plugin. Expected values come from the CLI's own JSON
+    // run, not from written-out strings.
+    const json = await runCli(["check", PROPAGATION_FIXTURES, "--format", "json"]);
+    const github = await runCli(["check", PROPAGATION_FIXTURES, "--format", "github"]);
+    expect(github.exitCode).toBe(1);
+
+    const diagnostics = json.stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((record) => !record.kind);
+    const commands = github.stdout.split("\n").filter((line) => line.startsWith("::"));
+    expect(commands).toHaveLength(diagnostics.length);
+
+    for (const [index, diagnostic] of diagnostics.entries()) {
+      const command = commands[index] ?? "";
+      const expectedCommand = diagnostic.severity === "error" ? "error" : "warning";
+      expect(command.startsWith(`::${expectedCommand} `)).toBe(true);
+      expect(command).toContain(`title=${diagnostic.id}`);
+      expect(command).toContain(`line=${diagnostic.location.line}`);
+      // The annotation's path is resolved from the workspace root, not from
+      // the checked directory.
+      const file = path.relative(
+        process.cwd(),
+        path.join(PROPAGATION_FIXTURES, diagnostic.location.file),
+      );
+      expect(command).toContain(`file=${file}`);
+      expect(command).toContain(diagnostic.message);
+      for (const hop of diagnostic.contract?.via ?? []) {
+        const name = hop.symbol.split("#")[1];
+        expect(command).toContain(`%0A-> ${name} (${hop.file}:${hop.line})`);
+      }
+      const operation = diagnostic.contract?.operation;
+      if (operation) {
+        expect(command).toContain(
+          `%0Aoperation: ${operation.qualifiedName} (${operation.file}:${operation.line})`,
+        );
+      }
+    }
+  });
+
   it("every NDJSON diagnostic carries an engine identity", async () => {
     const { stdout } = await runCli(["check", PROPAGATION_FIXTURES, "--format", "json"]);
     const lines = stdout.trim().split("\n").filter(Boolean);

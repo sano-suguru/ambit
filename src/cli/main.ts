@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { CoverageReport } from "../checker/coverage.ts";
 import {
@@ -26,7 +27,7 @@ import { displayName, isEffectsContract } from "../core/index.ts";
  * from "the check itself could not run" (DESIGN.md §3.4 — never turn an
  * analysis failure into "no violations").
  */
-const USAGE = `Usage: ambit check <dir> [--format json] [--coverage] [--strict]
+const USAGE = `Usage: ambit check <dir> [--format json|github] [--coverage] [--strict]
        ambit init  <dir> [--format json] [--config]   propose @effects for undeclared functions
 `;
 
@@ -104,7 +105,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 
   for (const diagnostic of diagnostics) {
-    process.stdout.write(args.format === "json" ? formatJson(diagnostic) : formatText(diagnostic));
+    process.stdout.write(formatDiagnostic(diagnostic, args));
   }
 
   // Always report what was analyzed — a silent, empty result must never
@@ -130,7 +131,7 @@ export async function main(argv: readonly string[]): Promise<number> {
 interface Args {
   readonly command: string;
   readonly dir: string;
-  readonly format: "json" | "text";
+  readonly format: OutputFormat;
   readonly coverage: boolean;
   /** `--strict`: promote the `unknown` warnings to errors (DESIGN.md §4.2 rule 3). */
   readonly strict: boolean;
@@ -196,7 +197,7 @@ function configTarget(
 function parseArgs(argv: readonly string[]): Args {
   const [command = "check", ...rest] = argv;
   let dir = ".";
-  let format: "json" | "text" = "text";
+  let format: OutputFormat = "text";
   let coverage = false;
   let strict = false;
   let config = false;
@@ -205,7 +206,7 @@ function parseArgs(argv: readonly string[]): Args {
     const arg = rest[i];
     if (arg === "--format") {
       const value = rest[i + 1];
-      if (value !== "json" && value !== "text") {
+      if (!isOutputFormat(value)) {
         return {
           command,
           dir,
@@ -213,7 +214,7 @@ function parseArgs(argv: readonly string[]): Args {
           coverage,
           strict,
           config,
-          error: `--format expects "json" or "text", got ${value === undefined ? "nothing" : JSON.stringify(value)}`,
+          error: `--format expects ${OUTPUT_FORMATS.map((f) => JSON.stringify(f)).join(", ")}, got ${value === undefined ? "nothing" : JSON.stringify(value)}`,
         };
       }
       format = value;
@@ -234,6 +235,73 @@ function parseArgs(argv: readonly string[]): Args {
   }
 
   return { command, dir, format, coverage, strict, config };
+}
+
+/**
+ * `--format` values. `text` is for a human at a terminal, `json` is the NDJSON
+ * of DESIGN.md §5.1 for agents and tools, and `github` renders the same
+ * structured diagnostic as GitHub Actions workflow commands so a CI run
+ * annotates the offending lines — §6: 「CI は終了コードと構造化出力で統合する。
+ * 専用 CI プラグインを必須にしない」.
+ */
+const OUTPUT_FORMATS = ["text", "json", "github"] as const;
+
+type OutputFormat = (typeof OUTPUT_FORMATS)[number];
+
+function isOutputFormat(value: string | undefined): value is OutputFormat {
+  return OUTPUT_FORMATS.some((format) => format === value);
+}
+
+function formatDiagnostic(diagnostic: Diagnostic, args: Args): string {
+  if (args.format === "json") return formatJson(diagnostic);
+  if (args.format === "github") return formatGithub(diagnostic, args.dir);
+  return formatText(diagnostic);
+}
+
+const GITHUB_COMMAND: Readonly<Record<Diagnostic["severity"], string>> = {
+  error: "error",
+  warning: "warning",
+  info: "notice",
+};
+
+/**
+ * One GitHub Actions workflow command per diagnostic
+ * (`::error file=...,line=...::message`), which is what makes a failing check
+ * annotate the offending line in a pull request without installing anything —
+ * DESIGN.md §6's "専用 CI プラグインを必須にしない".
+ *
+ * The call path and the operation site are folded into the message with `%0A`
+ * so the annotation is self-sufficient: a reader on the diff sees every hop
+ * without opening the job log.
+ *
+ * `location.file` is relative to the directory that was checked, while an
+ * annotation is resolved from the workspace root, so the path is re-expressed
+ * relative to the working directory.
+ */
+function formatGithub(diagnostic: Diagnostic, rootDir: string): string {
+  const { location } = diagnostic;
+  const properties = [
+    `file=${githubProperty(workspacePath(rootDir, location.file))}`,
+    `line=${location.line}`,
+    `col=${location.col}`,
+    `title=${githubProperty(diagnostic.id)}`,
+  ].join(",");
+  const body = [diagnostic.message, ...viaPath(diagnostic)].join("\n");
+  return `::${GITHUB_COMMAND[diagnostic.severity]} ${properties}::${githubData(body)}\n`;
+}
+
+function workspacePath(rootDir: string, file: string): string {
+  return path.relative(process.cwd(), path.resolve(rootDir, file)).split(path.sep).join("/");
+}
+
+/** Workflow-command escaping for the message body. */
+function githubData(value: string): string {
+  return value.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+}
+
+/** Workflow-command escaping for a property value, where `:` and `,` also terminate. */
+function githubProperty(value: string): string {
+  return githubData(value).replaceAll(":", "%3A").replaceAll(",", "%2C");
 }
 
 function formatJson(diagnostic: Diagnostic): string {

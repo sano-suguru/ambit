@@ -755,6 +755,15 @@ Optional アクセスなどの型安全性は再実装しない。選択した T
 }
 ```
 
+`ambit check --format github` は同じ構造化診断を GitHub Actions のワークフロー
+コマンド（`::error file=...,line=...,col=...,title=<診断 ID>::<本文>`）として出力する。
+本文には診断メッセージに続けて呼び出し経路の各段と `contract.operation` を `%0A`
+区切りで畳み込み、注釈だけで経路が読める形にする。`severity` は
+`error` / `warning` / `info` をそれぞれ `error` / `warning` / `notice` に対応させ、
+`location.file` は検査対象ディレクトリ基準の相対パスなので、注釈が解決される
+ワークスペース基準に直して出す。§6 の「専用 CI プラグインを必須にしない」を
+満たすための出力形式であり、NDJSON の消費者には影響しない。
+
 `via` は関数の列であり、各要素の位置はその関数の宣言位置である。効果を起こす操作そのものの位置（`fetch(...)` の行）は `contract.operation` が持つ。読み手が診断だけで操作の行に到達できるようにするためで、`via` の意味は変えない。
 
 この例では修正対象の41行目が `/** @effects pure */` の20文字であると仮定する。位置は例示用で、実際のパッチは解析した元ファイルに基づいて生成する。契約を守る具体的パッチを生成できないため、緩和候補だけを表示している。元仕様の省略記号を含む擬似パッチを、適用可能な修正として出力しない。
@@ -788,7 +797,7 @@ Optional アクセスなどの型安全性は再実装しない。選択した T
 
 ```text
 ambit init      推論したエフェクトを JSDoc の修正候補として提案。--config で ambit.config.ts への追記を提案
-ambit check     静的検査。--format json / --coverage / --strict
+ambit check     静的検査。--format json / github / --coverage / --strict
 ambit run       ランタイム強制を有効にして実行（開発用）
 ambit agent     エージェントループ（7 章）
 ambit stubs     依存パッケージのスタブ生成・検索
@@ -798,7 +807,7 @@ ambit sbom      依存関係とエフェクト・ケイパビリティを SBOM �
 - 配布は `npm install -D @ambit/cli` と `npm install @ambit/runtime`。ネイティブバイナリの対応 OS / CPU と配布条件を公開する。
 - 本番では `@ambit/runtime` と必要なアダプタ・契約データを利用する。コンパイラや開発用 CLI を本番の必須依存にしない。
 - エディタは CLI と共通のチェッカーから診断・修正候補を取得する。旧 Language Service Plugin がネイティブ版でもそのまま動くことを前提にしない。採用方式を M4 までに検証する。
-- CI は終了コードと構造化出力で統合する。専用 CI プラグインを必須にしない。
+- CI は終了コードと構造化出力で統合する。専用 CI プラグインを必須にしない。GitHub Actions では `ambit check --format github` の出力がそのまま注釈になる（§5.1）。専用の Action やプラグインの導入は要求しない。
 - JSDoc 宣言自体は実行時挙動を変えない。ランタイムへの契約の受け渡しに必要な設定・手順は、フレームワークごとに明示する。
 
 ### 6.1 パッケージの責任
