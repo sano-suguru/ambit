@@ -191,7 +191,7 @@ describe("ambit check (CLI)", () => {
   it("--coverage counts a known-pure builtin call as pure, not unresolved", async () => {
     const { stdout } = await runCli(["check", BACKEND_SMOKE_FIXTURES, "--coverage"]);
     expect(stdout).toMatch(
-      /call-sites: total=\d+ resolved=\d+ stub=\d+ pure=[1-9]\d* unresolved=\d+/,
+      /call-sites: total=\d+ resolved=\d+ stub=\d+ pure=[1-9]\d* mutation=\d+ unresolved=\d+/,
     );
   });
 

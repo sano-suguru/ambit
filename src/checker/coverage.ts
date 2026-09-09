@@ -56,6 +56,13 @@ export interface CoverageReport {
   readonly callSitesResolved: number;
   readonly callSitesStub: number;
   readonly callSitesPure: number;
+  /**
+   * In-place mutation sites (DESIGN.md §4.2, 「ローカル変異と `pure`」).
+   * Counted apart from `callSitesPure` and `callSitesStub`: a local mutation
+   * carries no effect but is not the same evidence as a call proven pure, and
+   * an escaping one is a `state_write` that no stub table produced.
+   */
+  readonly callSitesMutation: number;
   readonly callSitesUnresolved: number;
   readonly unresolvedByReason: ReadonlyMap<UnresolvedReason, number>;
   readonly topUnresolvedNames: readonly { readonly name: string; readonly count: number }[];
@@ -83,6 +90,7 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
   let callSitesResolved = 0;
   let callSitesStub = 0;
   let callSitesPure = 0;
+  let callSitesMutation = 0;
   let callSitesUnresolved = 0;
   const unresolvedByReason = new Map<UnresolvedReason, number>();
   const nameFrequency = new Map<string, number>();
@@ -101,6 +109,8 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
         callSitesStub++;
       } else if (call.kind === "known-pure") {
         callSitesPure++;
+      } else if (call.kind === "mutation") {
+        callSitesMutation++;
       } else {
         callSitesUnresolved++;
         unresolvedByReason.set(call.reason, (unresolvedByReason.get(call.reason) ?? 0) + 1);
@@ -129,10 +139,12 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
     skippedByKind: skippedFunctions,
     functionUnknownRate,
     functionBoundaryRate,
-    callSitesTotal: callSitesResolved + callSitesStub + callSitesPure + callSitesUnresolved,
+    callSitesTotal:
+      callSitesResolved + callSitesStub + callSitesPure + callSitesMutation + callSitesUnresolved,
     callSitesResolved,
     callSitesStub,
     callSitesPure,
+    callSitesMutation,
     callSitesUnresolved,
     unresolvedByReason,
     topUnresolvedNames,

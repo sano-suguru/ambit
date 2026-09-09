@@ -144,6 +144,19 @@ export interface CallSite {
   readonly pureBuiltinName?: string;
   readonly callbackByReference?: true;
   /**
+   * Set when this site mutates a value in place (DESIGN.md §4.2, 「ローカル
+   * 変異と `pure`」) — a mutating builtin method, or an assignment / `++` /
+   * `delete` on a property. An assignment is not a call, but it propagates
+   * exactly like one, so it rides in the same array rather than in a parallel
+   * channel every consumer would have to remember to read. `escaping` is
+   * false only when the mutated value was allocated inside the function.
+   */
+  readonly mutation?: {
+    readonly escaping: boolean;
+    readonly qualifiedName?: string;
+    readonly unknownCallback?: true;
+  };
+  /**
    * What each argument was, statically, indexed by position — `undefined`
    * where nothing could be read. Present only when `calleeQualifiedName` is:
    * the arguments matter to a stub table keyed on that name, and to nothing

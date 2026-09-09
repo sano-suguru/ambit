@@ -208,7 +208,7 @@ function formatCoverageText(coverage: CoverageReport): string {
     `unknown-rate=${unknownPct}% (${Math.round(coverage.functionUnknownRate * coverage.functionsExtracted)}/${coverage.functionsExtracted} functions) boundary-rate=${boundaryPct}% (${coverage.functionsBoundary}/${coverage.functionsExtracted} functions)`,
     `entrypoints=${coverage.functionsEntrypoint} (without-capabilities=${coverage.entrypointsWithoutCapabilities})`,
     `skipped=${coverage.functionsSkipped} (${mapEntries(coverage.skippedByKind)})`,
-    `call-sites: total=${coverage.callSitesTotal} resolved=${coverage.callSitesResolved} stub=${coverage.callSitesStub} pure=${coverage.callSitesPure} unresolved=${coverage.callSitesUnresolved}`,
+    `call-sites: total=${coverage.callSitesTotal} resolved=${coverage.callSitesResolved} stub=${coverage.callSitesStub} pure=${coverage.callSitesPure} mutation=${coverage.callSitesMutation} unresolved=${coverage.callSitesUnresolved}`,
     `unresolved-by-reason: ${mapEntries(coverage.unresolvedByReason)}`,
   ];
   if (coverage.topUnresolvedNames.length > 0) {
@@ -233,6 +233,7 @@ function formatCoverageJson(coverage: CoverageReport): string {
     callSitesResolved: coverage.callSitesResolved,
     callSitesStub: coverage.callSitesStub,
     callSitesPure: coverage.callSitesPure,
+    callSitesMutation: coverage.callSitesMutation,
     callSitesUnresolved: coverage.callSitesUnresolved,
     unresolvedByReason: Object.fromEntries(coverage.unresolvedByReason),
     topUnresolvedNames: coverage.topUnresolvedNames,

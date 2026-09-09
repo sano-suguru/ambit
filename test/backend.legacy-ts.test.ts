@@ -269,6 +269,27 @@ describe("legacyTsBackend.extractProject (self-hosting)", () => {
       }),
     );
   });
+
+  it("classifies Ambit's own `calls.push(...)` as a local, non-escaping mutation", async () => {
+    // `collectCalls` builds `const calls: CallSite[] = []` and pushes into it
+    // from a nested `visit` closure — the exact shape DESIGN.md §4.2's
+    // locality rule is meant to accept, and one no fixture produced: the push
+    // is lexically inside a function nested in the summarized one. Before this
+    // rule it was `Array.push`, the single most frequent unresolved name in
+    // `check src --coverage`.
+    const { files } = await legacyTsBackend.extractProject(SRC_ROOT);
+    const collectCalls = files
+      .find((f) => f.filePath === "checker/backend/legacy-ts.ts")
+      ?.functions.find((fn) => fn.id === "checker/backend/legacy-ts.ts#collectCalls");
+    expect(collectCalls?.calls).toContainEqual(
+      expect.objectContaining({
+        mutation: expect.objectContaining({ escaping: false, qualifiedName: "Array.push" }),
+      }),
+    );
+    expect(collectCalls?.calls).not.toContainEqual(
+      expect.objectContaining({ mutation: expect.objectContaining({ escaping: true }) }),
+    );
+  });
 });
 
 describe("legacyTsBackend.extractProject (cross-module alias resolution)", () => {

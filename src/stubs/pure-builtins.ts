@@ -6,9 +6,11 @@
  * different namespace from `src/stubs/node-builtins.ts`'s module-specifier
  * keys (e.g. `"node:fs.readFileSync"`) — the two tables are never merged or
  * compared (`src/core/backend.ts`'s `CallSite.pureBuiltinName` doc comment).
- * Mutation and nondeterminism are outside Ambit's effect model for now
- * (DESIGN.md §12); this allowlist claims only "no `KnownEffect`", not "pure"
- * in a stricter sense.
+ * In-place mutation is a separate table, `src/stubs/mutating-builtins.ts`
+ * (DESIGN.md §4.2, 「ローカル変異と `pure`」): a mutator's effect depends on
+ * its receiver, so it cannot be answered by a name alone the way this table
+ * answers. Nondeterminism beyond `env` is still outside the model; this
+ * allowlist claims only "no `KnownEffect`", not "pure" in a stricter sense.
  *
  * This exists because `qualifiedNameOf` (`src/checker/backend/legacy-ts.ts`)
  * cannot produce a textual name for a builtin method reached through a local
@@ -32,10 +34,10 @@
  */
 const PURE_BUILTINS: ReadonlySet<string> = new Set([
   // Confirmed against `ambit check --coverage`'s top-unresolved-names on
-  // Ambit's own source (2026-09-08). Deliberately excludes observed
-  // mutating names — `Array.push`, `Array.sort` (in-place), `Map.set`,
-  // `Set.add` — even though they carry no `KnownEffect` either; a
-  // "pure" table that lists mutators would mislead the next reader.
+  // Ambit's own source (2026-09-08). Mutating names — `Array.push`,
+  // `Array.sort` (in-place), `Map.set`, `Set.add` — belong to
+  // `mutating-builtins.ts` instead; a "pure" table that listed mutators
+  // would mislead the next reader.
   "Set.has",
   "Map.get",
   "Map.has",

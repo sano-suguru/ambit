@@ -15,6 +15,7 @@ import type {
   UncarriedContract,
 } from "../core/index.ts";
 import {
+  callLeavesUnknown,
   excessCapabilities,
   excessEffects,
   formatCapability,
@@ -268,7 +269,7 @@ function capabilityUnknownCause(
     return `calls ${displayName(witnessSummary.id)}, a @boundary that declares no @capabilities`;
   }
   const { calls } = propagated.summary;
-  if (!calls.some((call) => call.kind === "unresolved")) {
+  if (!calls.some(callLeavesUnknown)) {
     const dynamic = calls.find((call) => call.kind === "stub" && call.capabilityTargetUnknown);
     if (dynamic?.kind === "stub") {
       return `calls ${dynamic.qualifiedName} with a target that is not a literal in the source, which only the runtime can match (DESIGN.md §4.4)`;

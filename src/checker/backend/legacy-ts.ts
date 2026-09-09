@@ -18,6 +18,7 @@ import type {
 } from "../../core/index.ts";
 import { symbolId } from "../../core/index.ts";
 import { constructorStubKey } from "../../stubs/constructors.ts";
+import { isMutatingBuiltin } from "../../stubs/mutating-builtins.ts";
 
 /**
  * `TsBackend` implementation on the legacy TypeScript Compiler API
@@ -860,11 +861,19 @@ function collectCalls(
 
   function visit(node: ts.Node): void {
     if (ts.isCallExpression(node)) {
-      calls.push(classifyCall(node, sourceFile, program, checker, declaredNodeToId, absoluteRoot));
+      calls.push(
+        classifyCall(node, sourceFile, program, checker, declaredNodeToId, absoluteRoot, decl),
+      );
     } else if (ts.isNewExpression(node)) {
       calls.push(
         classifyNewExpression(node, sourceFile, program, checker, declaredNodeToId, absoluteRoot),
       );
+    } else {
+      // Assignments are not calls, but they mutate exactly the same way a
+      // mutating builtin method does (DESIGN.md §4.2, 「ローカル変異と
+      // `pure`」), so they enter the same array.
+      const mutation = classifyAssignment(node, sourceFile, checker, absoluteRoot, decl);
+      if (mutation) calls.push(mutation);
     }
     ts.forEachChild(node, visit);
   }
@@ -1022,6 +1031,7 @@ function classifyCall(
   checker: ts.TypeChecker,
   declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
   absoluteRoot: string,
+  enclosing: FunctionLikeDeclaration,
 ): CallSite {
   const location = locationOf(absoluteRoot, sourceFile, node);
 
@@ -1163,13 +1173,36 @@ function classifyCall(
   // is checked against src/stubs/pure-builtins.ts's allowlist (a separate
   // namespace — see CallSite.pureBuiltinName), not against calleeQualifiedName.
   if (ambientReason === "builtin-method" && resolvedSymbol) {
-    const pureBuiltinName = checker.getFullyQualifiedName(resolvedSymbol);
-    if (pureBuiltinName) {
+    const builtinName = checker.getFullyQualifiedName(resolvedSymbol);
+    if (builtinName) {
+      const callbackByReference = hasOpaqueCallableArgument(node, checker) || undefined;
+      if (isMutatingBuiltin(builtinName) && ts.isPropertyAccessExpression(callee)) {
+        const escaping = !isLocallyOwnedMutationTarget(callee.expression, enclosing, checker);
+        // A local mutation carries no effect, so a callback the walk never
+        // enters is the only thing left that could — and that is plain
+        // `unknown`, not a mutation site (DESIGN.md §4.2 rule 4).
+        if (!escaping && callbackByReference) {
+          return {
+            location,
+            pureBuiltinName: builtinName,
+            unresolvedReason: ambientReason,
+            callbackByReference,
+          };
+        }
+        return {
+          location,
+          mutation: {
+            escaping,
+            qualifiedName: builtinName,
+            ...(escaping && callbackByReference ? { unknownCallback: true as const } : {}),
+          },
+        };
+      }
       return {
         location,
-        pureBuiltinName,
+        pureBuiltinName: builtinName,
         unresolvedReason: ambientReason,
-        callbackByReference: hasOpaqueCallableArgument(node, checker) || undefined,
+        callbackByReference,
       };
     }
   }
@@ -1260,6 +1293,207 @@ function objectLiteralReceiverTarget(
     return objectLiteralMemberTarget(member, checker, declaredNodeToId);
   }
   return undefined;
+}
+
+/**
+ * The assignment-shaped mutation at `node`, if any (DESIGN.md §4.2, 「ローカル
+ * 変異と `pure`」): `a.b = 1`, `a.b += 1`, `a.b++`, `delete a.b`, and a write
+ * to a binding declared outside `enclosing`.
+ *
+ * Reassigning a variable the function itself declared (`let i = 0; i++`) is
+ * not a mutation of anything: nothing outside can observe it, and it is not
+ * recorded as a site at all.
+ */
+function classifyAssignment(
+  node: ts.Node,
+  sourceFile: ts.SourceFile,
+  checker: ts.TypeChecker,
+  absoluteRoot: string,
+  enclosing: FunctionLikeDeclaration,
+): CallSite | undefined {
+  const target = assignmentTargetOf(node);
+  if (!target) return undefined;
+
+  // A destructuring assignment writes to several places at once; one escaping
+  // leaf makes the whole statement a `state_write` (DESIGN.md §4.2,
+  // 「ローカル判定の規則」).
+  const escaping = assignmentLeavesOf(target).some(
+    (leaf) => !isLocalAssignmentLeaf(leaf, enclosing, checker),
+  );
+  if (!escaping) return undefined;
+  return { location: locationOf(absoluteRoot, sourceFile, node), mutation: { escaping: true } };
+}
+
+/**
+ * Whether writing to one destructuring leaf stays inside `enclosing`. A bare
+ * identifier the function declared is its own local; anything else is decided
+ * by {@link isLocallyOwnedMutationTarget}.
+ */
+function isLocalAssignmentLeaf(
+  leaf: ts.Expression,
+  enclosing: FunctionLikeDeclaration,
+  checker: ts.TypeChecker,
+): boolean {
+  if (ts.isIdentifier(leaf)) {
+    const declaration = checker.getSymbolAtLocation(leaf)?.valueDeclaration;
+    return declaration !== undefined && isLexicallyInside(declaration, enclosing);
+  }
+  if (!ts.isPropertyAccessExpression(leaf) && !ts.isElementAccessExpression(leaf)) {
+    // Not a shape this analysis can place — over-approximate to escaping.
+    return false;
+  }
+  return isLocallyOwnedMutationTarget(leaf, enclosing, checker);
+}
+
+/**
+ * The individual places an assignment target writes to. A plain target is
+ * itself; a destructuring pattern (`[a.x, b] = xs`, `({ y: o.z } = v)`) is
+ * flattened to its leaves, so no write goes unexamined.
+ */
+function assignmentLeavesOf(target: ts.Expression): readonly ts.Expression[] {
+  if (ts.isArrayLiteralExpression(target)) {
+    return target.elements.flatMap((element) =>
+      ts.isOmittedExpression(element) ? [] : assignmentLeavesOf(stripAssignmentDefault(element)),
+    );
+  }
+  if (ts.isObjectLiteralExpression(target)) {
+    return target.properties.flatMap((property) => {
+      if (ts.isPropertyAssignment(property)) {
+        return assignmentLeavesOf(stripAssignmentDefault(property.initializer));
+      }
+      if (ts.isShorthandPropertyAssignment(property)) return [property.name];
+      // A spread target (`{...rest} = v`) writes to whatever follows it.
+      if (ts.isSpreadAssignment(property)) return assignmentLeavesOf(property.expression);
+      return [];
+    });
+  }
+  if (ts.isSpreadElement(target)) return assignmentLeavesOf(target.expression);
+  return [target];
+}
+
+/** `a.x = 1` in `[a.x = 1] = xs`: the default value is not part of the target. */
+function stripAssignmentDefault(node: ts.Expression): ts.Expression {
+  return ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+    ? node.left
+    : node;
+}
+
+/** The expression a mutating statement writes through, or `undefined` if `node` is not one. */
+function assignmentTargetOf(node: ts.Node): ts.Expression | undefined {
+  if (ts.isBinaryExpression(node) && isAssignmentOperator(node.operatorToken.kind)) {
+    return node.left;
+  }
+  if (
+    (ts.isPostfixUnaryExpression(node) || ts.isPrefixUnaryExpression(node)) &&
+    (node.operator === ts.SyntaxKind.PlusPlusToken ||
+      node.operator === ts.SyntaxKind.MinusMinusToken)
+  ) {
+    return node.operand;
+  }
+  if (ts.isDeleteExpression(node)) return node.expression;
+  return undefined;
+}
+
+function isAssignmentOperator(kind: ts.SyntaxKind): boolean {
+  return (
+    kind >= ts.SyntaxKind.FirstAssignment &&
+    kind <= ts.SyntaxKind.LastAssignment &&
+    kind !== ts.SyntaxKind.EqualsGreaterThanToken
+  );
+}
+
+/**
+ * Whether the value `target` writes through was allocated inside `enclosing`
+ * — the locality rule of DESIGN.md §4.2, 「ローカル判定の規則」, deliberately
+ * as narrow as §4.2 rule 7 and, like it, not a soundness claim: a fresh value
+ * handed to something else before being mutated still reads as local, because
+ * Ambit does no alias analysis.
+ *
+ * Local iff the root of the access chain is a fresh allocation itself, or an
+ * identifier bound by `const` inside `enclosing` to a fresh allocation.
+ * Everything else — a parameter (its declaration is lexically inside the
+ * function but the value is the caller's), `this`, a module-scope or outer
+ * binding, `let`/`var`, an unresolvable root — is escaping, over-approximated
+ * on purpose.
+ */
+function isLocallyOwnedMutationTarget(
+  target: ts.Expression,
+  enclosing: FunctionLikeDeclaration,
+  checker: ts.TypeChecker,
+): boolean {
+  const root = mutationRootOf(target);
+  if (isFreshAllocation(root)) return true;
+  if (root.kind === ts.SyntaxKind.ThisKeyword) return isThisOfNewOperand(root);
+  if (!ts.isIdentifier(root)) return false;
+
+  const declaration = checker.getSymbolAtLocation(root)?.valueDeclaration;
+  if (!declaration || !ts.isVariableDeclaration(declaration)) return false;
+  if ((ts.getCombinedNodeFlags(declaration) & ts.NodeFlags.Const) === 0) return false;
+  if (!declaration.initializer || !isFreshAllocation(declaration.initializer)) return false;
+  return isLexicallyInside(declaration, enclosing);
+}
+
+/**
+ * Whether `this` denotes an object nothing else holds yet: the function it
+ * binds to is the direct operand of a `NewExpression` (`new function () {
+ * this.x = 1 }`), or it is the constructor of a class with no `extends`
+ * clause. Any other `this` (a method's, a callback's, a derived
+ * constructor's, one the analysis cannot place) is escaping.
+ *
+ * The constructor case is not a convenience: with `erasableSyntaxOnly` there
+ * are no parameter properties, so `this.x = x` in a constructor is the only
+ * way to write a field, and calling it `state_write` would make `pure`
+ * unusable on every constructor in the language subset Ambit targets.
+ */
+function isThisOfNewOperand(node: ts.Node): boolean {
+  for (let current: ts.Node | undefined = node; current; current = current.parent) {
+    // Arrow functions do not bind `this`; keep walking out through them.
+    if (ts.isFunctionDeclaration(current) || ts.isFunctionExpression(current)) {
+      return current.parent !== undefined && ts.isNewExpression(current.parent);
+    }
+    // A base class's constructor allocated the object it is writing to, and
+    // the only way out is its own return. A derived one cannot claim that:
+    // `super(...)` ran first and may have handed `this` to something else.
+    if (ts.isConstructorDeclaration(current)) {
+      return ts.isClassLike(current.parent) && baseTypeExpressionOf(current.parent) === undefined;
+    }
+    if (ts.isClassLike(current) || ts.isSourceFile(current)) return false;
+  }
+  return false;
+}
+
+/** The base of a property/element access chain: `a` in `a.b[0].c`. */
+function mutationRootOf(target: ts.Expression): ts.Expression {
+  let current: ts.Expression = target;
+  for (;;) {
+    if (
+      ts.isPropertyAccessExpression(current) ||
+      ts.isElementAccessExpression(current) ||
+      ts.isNonNullExpression(current) ||
+      ts.isParenthesizedExpression(current) ||
+      ts.isAsExpression(current)
+    ) {
+      current = current.expression;
+      continue;
+    }
+    return current;
+  }
+}
+
+/** An expression that necessarily produces a value no one else holds yet. */
+function isFreshAllocation(node: ts.Node): boolean {
+  return (
+    ts.isArrayLiteralExpression(node) ||
+    ts.isObjectLiteralExpression(node) ||
+    ts.isNewExpression(node)
+  );
+}
+
+function isLexicallyInside(node: ts.Node, ancestor: ts.Node): boolean {
+  for (let current: ts.Node | undefined = node; current; current = current.parent) {
+    if (current === ancestor) return true;
+  }
+  return false;
 }
 
 /**

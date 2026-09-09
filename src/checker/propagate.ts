@@ -6,6 +6,7 @@ import type {
   SymbolId,
 } from "../core/index.ts";
 import {
+  callLeavesUnknown,
   capabilitySetsEqual,
   effectSetOf,
   effectSetsEqual,
@@ -112,7 +113,7 @@ function directCapabilities(summary: FunctionSummary): CapabilitySet {
   let set: CapabilitySet = emptyCapabilitySet();
   let unknown = false;
   for (const call of summary.calls) {
-    if (call.kind === "unresolved") {
+    if (callLeavesUnknown(call)) {
       unknown = true;
       continue;
     }
@@ -133,7 +134,13 @@ function directEffects(summary: FunctionSummary): EffectSet {
     .filter((call) => call.kind === "stub")
     .flatMap((call) => call.effects);
   let set = effectSetOf(...stubEffects);
-  if (summary.calls.some((call) => call.kind === "unresolved")) {
+  // A mutation whose receiver is reachable from outside the function is a
+  // direct `state_write` (DESIGN.md §4.2, 「ローカル変異と `pure`」); a local
+  // one is recorded as a site but contributes nothing.
+  if (summary.calls.some((call) => call.kind === "mutation" && call.escaping)) {
+    set = unionEffectSets(set, effectSetOf("state_write"));
+  }
+  if (summary.calls.some(callLeavesUnknown)) {
     set = unionEffectSets(set, unknownEffectSet());
   }
   return set;
@@ -206,7 +213,7 @@ function deriveState(
   if (summary.boundary.kind === "declared") return boundaryState(summary);
 
   const direct = directEffects(summary);
-  const hasDirectUnresolved = summary.calls.some((call) => call.kind === "unresolved");
+  const hasDirectUnresolved = summary.calls.some(callLeavesUnknown);
 
   let merged: EffectSet = direct;
   const directRequired = directCapabilities(summary);

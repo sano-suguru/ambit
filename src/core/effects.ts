@@ -13,6 +13,10 @@ export const KNOWN_EFFECTS = [
   "db_write",
   "fs_read",
   "fs_write",
+  // Mutation of a value reachable from outside the function (DESIGN.md
+  // §4.2, 「ローカル変異と `pure`」). Mutating a value the function itself
+  // allocated is not this effect — it is not observable to a caller.
+  "state_write",
   "llm",
   "env",
   "process",

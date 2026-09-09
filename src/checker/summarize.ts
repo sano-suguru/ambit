@@ -123,6 +123,15 @@ export function parseEffectsTag(text: string): EffectSet | undefined {
 }
 
 function toCall(site: CallSite): Call {
+  if (site.mutation) {
+    return {
+      kind: "mutation",
+      location: site.location,
+      escaping: site.mutation.escaping,
+      ...(site.mutation.qualifiedName ? { qualifiedName: site.mutation.qualifiedName } : {}),
+      ...(site.mutation.unknownCallback ? { unknownCallback: true as const } : {}),
+    };
+  }
   if (site.resolvedCallee) {
     return { kind: "resolved", location: site.location, callee: site.resolvedCallee };
   }

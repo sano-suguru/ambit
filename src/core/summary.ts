@@ -69,7 +69,40 @@ export interface UnresolvedCall {
   readonly qualifiedName?: string;
 }
 
-export type Call = ResolvedCall | StubCall | KnownPureCall | UnresolvedCall;
+/**
+ * A site that changes a value in place (DESIGN.md §4.2, 「ローカル変異と
+ * `pure`」) — a mutating builtin method (`src/stubs/mutating-builtins.ts`)
+ * or an assignment / `++` / `delete` targeting a property.
+ *
+ * `escaping` is the whole decision: `false` means the mutated value was
+ * allocated inside the function, so no caller can observe the change and the
+ * site carries no effect; `true` means the root is a parameter, `this`, a
+ * module-scope binding, or something the analysis could not pin down, and the
+ * site carries `state_write`. The undecidable case is over-approximated to
+ * `true`, matching the `db_read`/`db_write` rule in §4.2.
+ *
+ * `unknownCallback` is a mutator handed a callback by reference
+ * (`xs.sort(cmp)`): the mutation is known, the callback's own effects are not
+ * (§4.2 rule 4), so the site is both `state_write` and `unknown`.
+ */
+export interface MutationCall {
+  readonly kind: "mutation";
+  readonly location: SourceLocation;
+  readonly escaping: boolean;
+  readonly qualifiedName?: string;
+  readonly unknownCallback?: true;
+}
+
+export type Call = ResolvedCall | StubCall | KnownPureCall | UnresolvedCall | MutationCall;
+
+/**
+ * Whether a call site leaves the caller's effect set incomplete — an
+ * unresolved call, or a mutator whose callback was passed by reference.
+ * Both mean "there may be more effects here than are listed".
+ */
+export function callLeavesUnknown(call: Call): boolean {
+  return call.kind === "unresolved" || (call.kind === "mutation" && call.unknownCallback === true);
+}
 
 /**
  * Whether a function declared `@effects`, and what.
