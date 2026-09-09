@@ -1,4 +1,5 @@
-import { withAmbit } from "ambit/runtime";
+import { ambitHandler } from "ambit/runtime/hono";
+import type { Context } from "hono";
 import { pluralize, summaryLine } from "../domain/format.ts";
 import { auditSize, auditTrail, classifyRisk, record } from "../lib/index.ts";
 
@@ -13,9 +14,10 @@ export async function listAudit(limit: number): Promise<readonly string[]> {
   return rows.map((row) => summaryLine(row.action, row.id.length));
 }
 
-export const LIST_AUDIT = withAmbit(
+export const LIST_AUDIT = ambitHandler(
   { capabilities: ["db:read:audit"], budget: { timeMs: 1500 } },
   listAudit,
+  (c: Context) => [Number(c.req.query("limit") ?? "20")] as const,
 );
 
 /**
@@ -30,9 +32,13 @@ export async function writeAudit(id: string, action: string): Promise<string> {
   return `${total} ${pluralize(total, "entry", "entries")}`;
 }
 
-export const WRITE_AUDIT = withAmbit(
+export const WRITE_AUDIT = ambitHandler(
   { capabilities: ["db:write:audit"], budget: { timeMs: 1000, onExceed: "warn" } },
   writeAudit,
+  async (c: Context) => {
+    const body = await c.req.json<{ readonly id: string; readonly action: string }>();
+    return [body.id, body.action] as const;
+  },
 );
 
 /**
@@ -46,10 +52,11 @@ export async function reviewAudit(limit: number): Promise<string> {
   return classifyRisk(rows.map((row) => row.action).join(", "));
 }
 
-export const REVIEW_AUDIT = withAmbit(
+export const REVIEW_AUDIT = ambitHandler(
   {
     capabilities: ["db:read:audit"],
     budget: { timeMs: 5000, llmCalls: 1, onExceed: "throw" },
   },
   reviewAudit,
+  (c: Context) => [Number(c.req.query("limit") ?? "50")] as const,
 );

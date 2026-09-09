@@ -1,4 +1,5 @@
-import { withAmbit } from "ambit/runtime";
+import { ambitHandler } from "ambit/runtime/hono";
+import type { Context } from "hono";
 import type { CreateOrderInput } from "../domain/model.ts";
 import { subtotal, taxFor } from "../domain/tax.ts";
 import { validateOrder } from "../domain/validate.ts";
@@ -24,9 +25,10 @@ export async function createOrder(input: CreateOrderInput): Promise<CreatedOrder
   return { status: 201, totalCents };
 }
 
-export const POST = withAmbit(
+export const POST = ambitHandler(
   { capabilities: ["db:write:orders"], budget: { timeMs: 800, onExceed: "throw" } },
   createOrder,
+  async (c: Context) => [await c.req.json<CreateOrderInput>()] as const,
 );
 
 /**
@@ -43,7 +45,8 @@ export async function listOrderTotals(customerId: string): Promise<readonly numb
   return result.rows.map((row) => row.total_cents);
 }
 
-export const GET = withAmbit(
+export const GET = ambitHandler(
   { capabilities: ["db:read:orders"], budget: { timeMs: 500 } },
   listOrderTotals,
+  (c: Context) => [c.req.param("customerId") ?? ""] as const,
 );

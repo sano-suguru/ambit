@@ -22,3 +22,14 @@ declare module "ambit/runtime" {
     handler: (...args: Args) => Result,
   ): (...args: Args) => Result;
 }
+
+declare module "ambit/runtime/hono" {
+  import type { AmbitSpec } from "ambit/runtime";
+  import type { Context } from "hono";
+
+  export function ambitHandler<Args extends readonly unknown[], Result>(
+    spec: AmbitSpec,
+    handler: (...args: Args) => Result | Promise<Result>,
+    decode: (c: Context) => readonly [...Args] | Promise<readonly [...Args]>,
+  ): (c: Context) => Promise<Response>;
+}

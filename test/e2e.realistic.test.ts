@@ -14,11 +14,11 @@ import { applyEdits } from "./support/apply-edits.ts";
  * barrel file, and pure domain logic. The six accidents are the ones a coding
  * agent actually causes: a side effect added to a `pure` function (`fetch`, a
  * database query, an LLM call), a network call reached through a barrel file, a
- * literal URL outside the granted capability, and a `withAmbit` capability list
+ * literal URL outside the granted capability, and a `ambitHandler` capability list
  * that drifts from the handler's JSDoc.
  *
- * The fixture depends on nothing installed: `pg`, `@prisma/client`, `openai`
- * and `ambit/runtime` are declared under `types/` and the tsconfig sets
+ * The fixture depends on nothing installed: `pg`, `@prisma/client`, `openai`,
+ * `hono` and `ambit/runtime` are declared under `types/` and the tsconfig sets
  * `types: []`, so a scratch copy outside the repository resolves exactly the
  * same way. Every accident is applied to such a copy as a textual patch, which
  * is what an agent's edit actually looks like — one baseline, six edits, not
@@ -289,7 +289,7 @@ export async function formatCents(cents: number): Promise<string> {
         },
       ],
       (result) => {
-        const diagnostic = at(result, "AMB-E009", "src/routes/users.ts", 18);
+        const diagnostic = at(result, "AMB-E009", "src/routes/users.ts", 19);
         expect(diagnostic?.message).toContain("http:get:elsewhere.example");
         // §5.3: no fabricated patch — widening the grant and changing the URL
         // are both plausible and Ambit cannot tell which was meant.
@@ -342,7 +342,7 @@ export async function formatCents(cents: number): Promise<string> {
     );
   }, 60_000);
 
-  it("accident 6: a withAmbit list that disagrees with the handler's @capabilities is AMB-E010", async () => {
+  it("accident 6: an ambitHandler list that disagrees with the handler's @capabilities is AMB-E010", async () => {
     await withVariant(
       [
         {
@@ -353,7 +353,7 @@ export async function formatCents(cents: number): Promise<string> {
         },
       ],
       (result) => {
-        const diagnostic = at(result, "AMB-E010", "src/routes/orders.ts", 27);
+        const diagnostic = at(result, "AMB-E010", "src/routes/orders.ts", 28);
         expect(diagnostic?.message).toContain("db:write:users");
         expect(diagnostic?.message).toContain("createOrder");
         expect(diagnostic?.fixes).toEqual([]);
@@ -374,7 +374,7 @@ export async function formatCents(cents: number): Promise<string> {
         },
       ],
       (result) => {
-        expect(at(result, "AMB-E010", "src/routes/orders.ts", 27)).toBeDefined();
+        expect(at(result, "AMB-E010", "src/routes/orders.ts", 28)).toBeDefined();
         expect(result.exitCode).toBe(1);
       },
     );
@@ -385,13 +385,15 @@ export async function formatCents(cents: number): Promise<string> {
       [
         {
           file: "src/routes/orders.ts",
-          find: `export const GET = withAmbit(
-  { capabilities: ["db:read:orders"], budget: { timeMs: 500 } },
-  listOrderTotals,
-);`,
+          find: '{ capabilities: ["db:read:orders"], budget: { timeMs: 500 } },',
+          replace: "{ capabilities: readCaps, budget: { timeMs: 500 } },",
+        },
+        {
+          file: "src/routes/orders.ts",
+          find: "export const GET = ambitHandler(",
           replace: `const readCaps = ["db:read:orders"];
 
-export const GET = withAmbit({ capabilities: readCaps, budget: { timeMs: 500 } }, listOrderTotals);`,
+export const GET = ambitHandler(`,
         },
       ],
       (result) => {
@@ -410,14 +412,10 @@ export const GET = withAmbit({ capabilities: readCaps, budget: { timeMs: 500 } }
       [
         {
           file: "src/routes/orders.ts",
-          find: `export const GET = withAmbit(
-  { capabilities: ["db:read:orders"], budget: { timeMs: 500 } },
-  listOrderTotals,
-);`,
-          replace: `export const GET = withAmbit(
-  { capabilities: ["db:read:orders"], budget: { timeMs: 500 } },
-  findOrderTotals,
-);`,
+          find: `  listOrderTotals,
+  (c: Context) => [c.req.param("customerId") ?? ""] as const,`,
+          replace: `  findOrderTotals,
+  (c: Context) => [c.req.param("customerId") ?? ""] as const,`,
         },
         {
           file: "src/routes/orders.ts",

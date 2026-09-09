@@ -2,7 +2,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { legacyTsBackend } from "../src/checker/backend/legacy-ts.ts";
 import { computeCoverage } from "../src/checker/coverage.ts";
-import { diagnose } from "../src/checker/diagnose.ts";
+import { diagnose, diagnoseRuntimeWrappers } from "../src/checker/diagnose.ts";
 import { propagate } from "../src/checker/propagate.ts";
 import { summarizeExtractedFiles } from "../src/checker/summarize.ts";
 import type { Diagnostic } from "../src/core/index.ts";
@@ -15,6 +15,7 @@ import {
 } from "../src/core/index.ts";
 
 const FIXTURE_ROOT = path.join(import.meta.dirname, "fixtures", "contracts");
+const WRAPPER_ROOT = path.join(import.meta.dirname, "fixtures", "wrappers");
 const ENGINE = { name: "test", version: "0" };
 
 async function analyze(root: string) {
@@ -25,7 +26,17 @@ async function analyze(root: string) {
     project,
     summaries,
     state,
-    diagnostics: diagnose(state, ENGINE),
+    diagnostics: [
+      ...diagnose(state, ENGINE),
+      // The same two passes the CLI runs (`src/cli/main.ts`); a helper that
+      // omitted the wrapper pass would report "no mismatch" for a fixture the
+      // CLI fails.
+      ...diagnoseRuntimeWrappers(
+        project.files.flatMap((file) => file.runtimeWrappers),
+        state,
+        ENGINE,
+      ),
+    ],
     coverage: computeCoverage({
       filesAnalyzed: project.files.length,
       skippedFunctions: project.skippedFunctions,
@@ -249,5 +260,45 @@ describe("@budget (DESIGN.md §4.5)", () => {
       kind: "declared",
       budget: { timeMs: 500, costUsd: 0.01, llmCalls: 2, onExceed: "warn" },
     });
+  });
+});
+
+describe("contract-to-handler agreement (DESIGN.md §4.4「契約とハンドラの対応付け（決定）」)", () => {
+  /**
+   * §4.4 chose explicit registration, which leaves the capability set written
+   * twice — in the JSDoc and in the `spec`. The duplication does not go away,
+   * so the source-level agreement check has to reach the adapter's
+   * registrations as well as a hand-written `withAmbit`, or choosing that
+   *方式 would have quietly dropped a check.
+   */
+  it("catches a hand-written withAmbit that drifts from the handler's @capabilities", async () => {
+    const { diagnostics } = await analyze(WRAPPER_ROOT);
+    const found = diagnostics.filter((d) => d.id === "AMB-E010" && d.message.includes("drifting "));
+    expect(found).toHaveLength(1);
+    expect(found[0]?.message).toContain("withAmbit grants [db:write:orders]");
+  });
+
+  it("catches an ambitHandler registration that drifts the same way", async () => {
+    const { diagnostics } = await analyze(WRAPPER_ROOT);
+    const found = diagnostics.filter(
+      (d) => d.id === "AMB-E010" && d.message.includes("driftingByAdapter"),
+    );
+    expect(found).toHaveLength(1);
+    // The diagnostic names the call the source wrote, not the other form.
+    expect(found[0]?.message).toContain("ambitHandler grants [db:write:orders]");
+  });
+
+  it("stays quiet when the adapter's registration agrees with the JSDoc", async () => {
+    const { diagnostics } = await analyze(WRAPPER_ROOT);
+    expect(diagnostics.filter((d) => d.message.includes("agreeing"))).toEqual([]);
+  });
+
+  it("reports an adapter registration it cannot compare as AMB-W004 rather than passing it", async () => {
+    const { diagnostics } = await analyze(WRAPPER_ROOT);
+    const found = diagnostics.filter((d) => d.id === "AMB-W004");
+    expect(found).toHaveLength(1);
+    expect(found[0]?.message).toContain("ambitHandler here was not compared");
+    expect(found[0]?.message).toContain("not a literal array of strings");
+    expect(found[0]?.severity).toBe("warning");
   });
 });

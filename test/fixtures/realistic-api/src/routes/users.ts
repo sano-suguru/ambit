@@ -1,4 +1,5 @@
-import { withAmbit } from "ambit/runtime";
+import { ambitHandler } from "ambit/runtime/hono";
+import type { Context } from "hono";
 import { validateEmail } from "../domain/validate.ts";
 import { fetchRate, listUsers, prisma, summarize } from "../lib/index.ts";
 
@@ -20,12 +21,13 @@ export async function summarizeUsers(currency: string): Promise<readonly UserSum
   return users.map((user) => ({ email: user.email, blurb }));
 }
 
-export const SUMMARY = withAmbit(
+export const SUMMARY = ambitHandler(
   {
     capabilities: ["db:read:users", "http:get:api.example.com"],
     budget: { timeMs: 3000, llmCalls: 1, onExceed: "throw" },
   },
   summarizeUsers,
+  (c: Context) => [c.req.query("currency") ?? "USD"] as const,
 );
 
 /**
@@ -41,7 +43,8 @@ export async function getUser(email: string): Promise<UserSummary | undefined> {
   return { email: user.email, blurb: user.name };
 }
 
-export const USER = withAmbit(
+export const USER = ambitHandler(
   { capabilities: ["db:read:users"], budget: { timeMs: 400 } },
   getUser,
+  (c: Context) => [c.req.param("email") ?? ""] as const,
 );
