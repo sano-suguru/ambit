@@ -208,6 +208,30 @@ describe("summarizeExtractedFiles", () => {
     ]);
   });
 
+  it("treats String.slice as known-pure, the twin of the already-listed Array.slice", () => {
+    // Added to the allowlist after `check src --coverage` surfaced it 8 times;
+    // non-mutating, and listing `Array.slice` without it was an accident.
+    const files: ExtractedFile[] = [
+      {
+        runtimeWrappers: [],
+        filePath: "f.ts",
+        functions: [
+          {
+            id: "f.ts#fn" as never,
+            location: LOC,
+            declarationStart: LOC,
+            jsDoc: undefined,
+            calls: [{ location: LOC, pureBuiltinName: "String.slice" }],
+          },
+        ],
+      },
+    ];
+    const [summary] = summarizeExtractedFiles(files);
+    expect(summary?.calls).toEqual([
+      { kind: "known-pure", location: LOC, qualifiedName: "String.slice" },
+    ]);
+  });
+
   it("refuses known-pure for an allowlisted method whose callback is passed by reference", () => {
     const files: ExtractedFile[] = [
       {

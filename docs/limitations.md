@@ -308,8 +308,8 @@ files=19 functions=163 declared=4
 unknown-rate=68.7% (112/163 functions) boundary-rate=0.0% (0/163 functions)
 entrypoints=0 (without-capabilities=0)
 skipped=74 (callback-argument=66, nested-function=8)
-call-sites: total=851 resolved=243 stub=3 pure=236 unresolved=369
-unresolved-by-reason: builtin-method=139, external-module=221, unresolved-symbol=8, callback-parameter=1
+call-sites: total=851 resolved=243 stub=3 pure=244 unresolved=361
+unresolved-by-reason: builtin-method=131, external-module=221, unresolved-symbol=8, callback-parameter=1
 top-unresolved-names: Array.push=50, typescript.isIdentifier=17, Map.set=13, ...
 ```
 

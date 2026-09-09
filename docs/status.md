@@ -14,7 +14,7 @@ row.
 ## Baseline commands
 
 ```sh
-pnpm test                     # 226 tests, 17 files — pass
+pnpm test                     # 227 tests, 17 files — pass
 pnpm exec tsc --noEmit        # pass
 ./node_modules/.bin/biome ci .  # pass
 node src/cli/main.ts check src --coverage   # exit 0
@@ -36,8 +36,8 @@ runs `pnpm exec biome ci .` in GitHub Actions, where no such wrapper exists.
 | functions with a declared `@effects` | 4 |
 | `unknown` rate | 68.7% (112/163) |
 | `boundary` rate | 0.0% (0/163) |
-| call sites | 851 — resolved 243, stub 3, known-pure 236, unresolved 369 |
-| unresolved by reason | `builtin-method` 139, `external-module` 221, `unresolved-symbol` 8, `callback-parameter` 1 |
+| call sites | 851 — resolved 243, stub 3, known-pure 244, unresolved 361 |
+| unresolved by reason | `builtin-method` 131, `external-module` 221, `unresolved-symbol` 8, `callback-parameter` 1 |
 | skipped function-like nodes | 74 (`callback-argument` 66, `nested-function` 8) |
 | exit code | 0 |
 
@@ -48,13 +48,19 @@ target that has been met: DESIGN.md §10's goal is 30% for an *adopting team*
 after three months, which no one has done.
 
 It went **up** from 63.2% (86/136), measured before the client stubs and the
-capability work. Two causes, neither of them an analysis regression: the
-denominator grew by 27 functions (two new stub modules, plus the connection
-layer's new helpers), and those new helpers use `Array.push`, `Map.set`, and
-`String.slice`, none of which the pure-builtin allowlist lists — the first two
-because DESIGN.md §12 leaves local mutation outside the effect model, the third
-because it had not surfaced in a measurement before. The allowlist was not
-widened to move this number.
+capability work. That is not an analysis regression. The denominator grew by 27
+functions (two new stub modules, plus the connection layer's new helpers), and
+those helpers use `Array.push` and `Map.set`, which the pure-builtin allowlist
+deliberately excludes: DESIGN.md §12 leaves local mutation outside the effect
+model, and this work did not decide it.
+
+`String.slice`, which the same measurement surfaced at 8 occurrences, **was**
+added to the allowlist afterwards — a missing non-mutating entry, and the exact
+twin of the already-listed `Array.slice`. Its effect is visible only at the call
+level: 8 sites moved from unresolved to known-pure (`builtin-method` 139 → 131,
+known-pure 236 → 244). The function-level rate stayed at 68.7% (112/163),
+because no function had `String.slice` as its *only* unresolved call. Nothing
+else was added to the allowlist.
 
 ## Adopting-team-equivalent code (`check test/fixtures/realistic-api --coverage`)
 

@@ -58,6 +58,11 @@ const PURE_BUILTINS: ReadonlySet<string> = new Set([
   "ReadonlyArray.find",
   "String.trim",
   "String.split",
+  // Surfaced at 8 occurrences by `check src --coverage` on 2026-09-09, which is
+  // this table's own admission rule. Non-mutating, and the exact twin of
+  // `Array.slice` above; listing one without the other was an accident of what
+  // an earlier measurement happened to show.
+  "String.slice",
   "String.includes",
   "String.startsWith",
   "String.localeCompare",
