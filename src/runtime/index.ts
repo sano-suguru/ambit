@@ -1,9 +1,10 @@
-import type { Budget } from "../core/index.ts";
-import { parseCapability } from "../core/index.ts";
+import type { BudgetInput } from "../core/index.ts";
+import { DEFAULT_ON_EXCEED, parseCapability } from "../core/index.ts";
 import type { AmbitContext } from "./context.ts";
 import { currentContext, runInContext } from "./context.ts";
 import { requireCapability } from "./enforce.ts";
 
+export type { BudgetInput, OnExceed } from "../core/index.ts";
 export { installChildProcessHook, spawnCapability } from "./child-process.ts";
 export type { AmbitContext, AuditEntry, UnscopedPolicy } from "./context.ts";
 export { currentContext } from "./context.ts";
@@ -40,7 +41,12 @@ export { installPgHook, pgCapabilities } from "./pg.ts";
 export interface AmbitSpec {
   /** The entrypoint's `@capabilities`, as written (`db:read:users`). */
   readonly capabilities?: readonly string[];
-  readonly budget?: Budget;
+  /**
+   * The entrypoint's `@budget`, as written — `onExceed` may be omitted, and
+   * `{ timeMs: 500 }` is a complete spec. The default is resolved here, once,
+   * so the context an adapter reads always carries a settled policy.
+   */
+  readonly budget?: BudgetInput;
 }
 
 export class AmbitBudgetError extends Error {
@@ -71,18 +77,23 @@ export function withAmbit<Args extends readonly unknown[], Result>(
     return capability;
   });
 
+  // Resolved once, at wrap time: neither depends on the arguments, and the
+  // context must carry a settled `onExceed` so an adapter reading it does not
+  // have to know the default.
+  const timeMs = spec.budget?.timeMs;
+  const onExceed = spec.budget?.onExceed ?? DEFAULT_ON_EXCEED;
+  const budget = spec.budget ? { ...spec.budget, onExceed } : undefined;
+
   return async (...args: Args): Promise<Result> => {
     const controller = new AbortController();
     const context: AmbitContext = {
       capabilities,
-      ...(spec.budget ? { budget: spec.budget } : {}),
+      ...(budget ? { budget } : {}),
       startedAt: Date.now(),
       signal: controller.signal,
       audit: [],
     };
 
-    const timeMs = spec.budget?.timeMs;
-    const onExceed = spec.budget?.onExceed ?? "throw";
     let timer: NodeJS.Timeout | undefined;
     if (timeMs !== undefined && onExceed === "abort") {
       timer = setTimeout(() => controller.abort(new AmbitBudgetError(exceeded(timeMs))), timeMs);

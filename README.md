@@ -58,8 +58,8 @@ installFetchHook();
  * @capabilities http:get:api.example.com
  * @budget timeMs=500 costUsd=0.01
  */
-async function refreshRates(): Promise<void> {
-  await fetch("https://api.example.com/rates");
+async function refreshRates(currency: string): Promise<void> {
+  await fetch(`https://api.example.com/rates?base=${currency}`);
   // await fetch("https://elsewhere.example/steal"); // AMB-E009 if this line is added
 }
 

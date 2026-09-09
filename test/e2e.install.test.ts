@@ -193,6 +193,7 @@ app.onError((error, c) => c.json({ error: error.name }, 500));
  * @entrypoint
  * @capabilities http:get:api.example.test
  * @effects network
+ * @budget timeMs=5000
  */
 async function refreshRates(host: string): Promise<{ readonly host: string }> {
   await fetch(\`https://\${host}/rates\`);
@@ -202,7 +203,10 @@ async function refreshRates(host: string): Promise<{ readonly host: string }> {
 app.get(
   "/rates",
   ambitHandler(
-    { capabilities: ["http:get:api.example.test"] },
+    // \`onExceed\` omitted on purpose: \`{ timeMs }\` alone has to be a
+    // complete spec against the installed types, and the \`@budget\` above
+    // omits it too, so the two agree once both are defaulted (AMB-E011).
+    { capabilities: ["http:get:api.example.test"], budget: { timeMs: 5000 } },
     refreshRates,
     (c) => [c.req.query("host") ?? ""] as const,
   ),
@@ -245,6 +249,61 @@ console.log("DENIED:" + JSON.stringify(await denied.json()));
     const executed = await run("node", ["--experimental-strip-types", "adapter.ts"], consumer);
     expect(executed.stderr).toBe("");
     expect(executed.stdout.trim()).toBe('DENIED:{"error":"AmbitCapabilityError"}');
+  }, 120_000);
+
+  it("type-checks the README's own examples against the installed package", async () => {
+    // The claim is README's, so README is the input: copying the examples into
+    // this file would let the copy drift from the document silently, which is
+    // the failure this test exists to remove.
+    const readme = await fs.readFile(new URL("../README.md", import.meta.url), "utf8");
+    const examples = [...readme.matchAll(/```ts\n([\s\S]*?)```/g)]
+      .map((match) => match[1] ?? "")
+      .filter((source) => source.includes('from "ambit/'));
+
+    // The examples are one program across two blocks — the adapter block calls
+    // `refreshRates`, which the block above it declares — so they are checked
+    // concatenated, in document order, rather than one at a time.
+    const program = examples.join("\n");
+
+    // A run that extracted nothing must never look like a clean run
+    // (DESIGN.md §3.4): an empty program type-checks. Both registration paths
+    // README documents have to be in what was extracted.
+    expect(examples.length).toBeGreaterThan(0);
+    expect(program).toContain("withAmbit(");
+    expect(program).toContain("ambitHandler(");
+
+    // Outside `src/`, for the reason the adapter test is: the uninstall test
+    // type-checks `src/` after the package is gone.
+    await fs.writeFile(path.join(consumer, "readme.ts"), program);
+    await fs.writeFile(
+      path.join(consumer, "tsconfig.readme.json"),
+      `${JSON.stringify(
+        {
+          compilerOptions: {
+            target: "ES2023",
+            module: "NodeNext",
+            moduleResolution: "nodenext",
+            lib: ["ES2023", "DOM"],
+            strict: true,
+            noEmit: true,
+            skipLibCheck: true,
+          },
+          include: ["readme.ts"],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    // Type-checked, not executed: the claim is that the examples compile
+    // against the real package's types. `api.example.com` is a real domain,
+    // and running them would trade a verified claim for a network dependency.
+    const typecheck = await run(
+      path.join("node_modules", ".bin", "tsc"),
+      ["--noEmit", "-p", "tsconfig.readme.json"],
+      consumer,
+    );
+    expect(typecheck.exitCode, typecheck.stdout).toBe(0);
   }, 120_000);
 
   it("uninstalls cleanly, leaving the consumer's own code untouched and valid", async () => {

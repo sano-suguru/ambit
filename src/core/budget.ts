@@ -1,13 +1,31 @@
 /**
+ * A budget as an author writes it: a `withAmbit` / `ambitHandler` spec, or the
+ * `spec.budget` literal a backend extracts from one.
+ *
+ * Distinct from {@link Budget}, which is a budget after the default has been
+ * applied. Keeping the two apart is what lets `{ timeMs: 500 }` be a valid
+ * spec while every consumer of a parsed `@budget` can still read `onExceed`
+ * without re-defaulting it.
+ */
+export interface BudgetInput {
+  readonly timeMs?: number;
+  readonly costUsd?: number;
+  readonly llmCalls?: number;
+  /** Omittable; an omitted policy is {@link DEFAULT_ON_EXCEED} (`throw`). */
+  readonly onExceed?: OnExceed;
+}
+
+/**
  * A per-invocation budget (DESIGN.md §4.5). Budgets are 宣言・計測・遮断,
  * never a static guarantee: the checker's job here is to make sure the
  * declaration itself is well-formed and to carry it to the runtime, not to
  * prove the limit holds.
  */
-export interface Budget {
-  readonly timeMs?: number;
-  readonly costUsd?: number;
-  readonly llmCalls?: number;
+export interface Budget extends BudgetInput {
+  /**
+   * Resolved, never absent: {@link parseBudgetTag} writes the default into a
+   * tag that omits it, and `withAmbit` does the same to a spec that omits it.
+   */
   readonly onExceed: OnExceed;
 }
 

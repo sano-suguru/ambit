@@ -1,4 +1,4 @@
-import type { OnExceed } from "./budget.ts";
+import type { BudgetInput } from "./budget.ts";
 import type { SourceLocation } from "./location.ts";
 import type { SymbolId } from "./symbol-id.ts";
 
@@ -264,26 +264,20 @@ export interface RuntimeWrapper {
 }
 
 /**
- * A `spec.budget` the source fixes.
+ * A `spec.budget` the source fixes, in the shape the source wrote it
+ * ({@link BudgetInput}).
  *
  * `absent` is a spec that writes no budget at all, which the handler's JSDoc
  * can agree or disagree with; it is not the same as the field being missing,
  * which means the source did not fix the budget and nothing can be compared.
  *
- * `onExceed` stays optional here because the spec may omit it. Both sides
- * default it to `throw` before they are compared — `parseBudgetTag` already
- * writes the default into a parsed `@budget`, so the JSDoc side has no absent
- * state to compare an absent spec key against.
+ * Both sides are defaulted to `throw` before they are compared —
+ * `parseBudgetTag` already writes the default into a parsed `@budget`, so the
+ * JSDoc side has no absent state to compare an absent spec key against.
  */
 export type WrapperBudget =
   | { readonly kind: "absent" }
-  | {
-      readonly kind: "literal";
-      readonly timeMs?: number;
-      readonly costUsd?: number;
-      readonly llmCalls?: number;
-      readonly onExceed?: OnExceed;
-    };
+  | ({ readonly kind: "literal" } & BudgetInput);
 
 export interface ExtractedFile {
   readonly filePath: string;
