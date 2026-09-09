@@ -265,6 +265,17 @@ export function register(): void {
 from the caller rather than importing it, so it is left out above to keep the
 snippet dependency-free.
 
+**A route on the Edge runtime is not enforced.** `export const runtime = "edge"`
+takes the route off Node.js, and every hook Ambit installs is a Node.js one —
+`node:fs` and `node:child_process` do not exist there, and the `register()`
+above deliberately installs nothing when `NEXT_RUNTIME` is not `nodejs`, so
+**no capability is checked** on such a route: nothing is intercepting the
+operations. Nothing else about `ambitRoute` on Edge is claimed either — no test
+runs there, so whether the context is established at all is unverified. Phase 1
+guarantees the Node.js runtime only (DESIGN.md §12「エッジランタイム」), and the
+honest form for an Edge route today is to leave it unwrapped, so that nothing
+about it reads as enforced.
+
 At run time `withAmbit` puts that same set on the context, and four hooks check
 operations against it — `installFetchHook()`, `installFsHook()`,
 `installChildProcessHook()`, `installPgHook(pg)`. An ungranted operation throws

@@ -572,6 +572,17 @@ Limits of what the adapter guarantees:
   inference (`hc`) sees `Response` rather than the handler's return shape.
 - **`timeMs` includes `decode`**, which runs inside the context: the time spent
   reading a request body counts against the budget.
+- **The Edge runtime is not enforced.** A Next.js route that sets
+  `export const runtime = "edge"` leaves the Node.js runtime, and every hook
+  Ambit installs is a Node.js hook: `installFsHook` and
+  `installChildProcessHook` wrap `node:fs` and `node:child_process`, which do
+  not exist there, and the `register()` README documents installs nothing
+  unless `process.env.NEXT_RUNTIME === "nodejs"`. **No capability is checked on
+  an Edge route.** Nothing further about `ambitRoute` there is claimed either —
+  no test runs on the Edge runtime, so whether the context is established at
+  all is unverified. DESIGN.md §12「エッジランタイム」 guarantees the Node.js
+  runtime only in Phase 1. Leaving an Edge route unwrapped is the honest form:
+  a registration that reads as enforced and is not would be worse than none.
 - **A file that imports `ambit/runtime/<framework>` does not type-check after
   `npm remove ambit`.** P5 (DESIGN.md §2, 「いつでも撤退できる」) guarantees that
   the JSDoc contracts survive removal — they are comments on ordinary

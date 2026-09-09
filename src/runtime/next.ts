@@ -23,10 +23,10 @@ import { withAmbit } from "./index.ts";
  * running on the Node.js runtime. It establishes no context for, and enforces
  * nothing in:
  *
- * - a route that sets `export const runtime = "edge"` — the Edge runtime has
- *   no `node:async_hooks`-backed context this adapter can rely on and none of
- *   the hooks (`installFetchHook` and friends) are installed there, so a
- *   handler wrapped by `ambitRoute` on Edge is unenforced. DESIGN.md §12
+ * - a route that sets `export const runtime = "edge"` — the hooks
+ *   (`installFetchHook` and friends) are Node.js hooks and are not installed
+ *   there, so no capability is checked on such a route. Nothing else about
+ *   `ambitRoute` on Edge is claimed either: no test runs there. DESIGN.md §12
  *   「エッジランタイム」: Phase 1 guarantees Node.js only.
  * - Server Actions (`"use server"`), which are not route modules and have no
  *   registration call to attach a spec to.
