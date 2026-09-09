@@ -36,12 +36,12 @@ export interface PropagatedFunction {
    * undeclared one contributes what its own body was inferred to need — so a
    * grant checks through an undeclared middle function.
    *
-   * Nothing produces a capability requirement directly yet. §4.4's static
-   * side ("リテラル URL や既知クライアントなど静的に判定できる違反") needs
-   * the connector layer to surface a stub call's literal arguments, which it
-   * does not do; until then every requirement is inherited from a declaration
-   * somewhere below, and the check that runs is the 縮小則 between a caller's
-   * grant and a callee's declaration.
+   * A requirement arises in two ways. It is inherited from a callee's
+   * declaration — the 縮小則 between a caller's grant and a callee's
+   * declaration — or it is produced directly, by a bundled operation whose
+   * target the source fixes: a literal URL's host (§4.4's static half,
+   * `src/stubs/http-capabilities.ts`). The same operation with a target the
+   * source does not fix contributes `unknown` instead, never nothing.
    */
   readonly required: CapabilitySet;
   /** For a required capability this function does not declare itself, the immediate callee it came through. */
@@ -100,6 +100,32 @@ export function propagate(
   }
 
   return state;
+}
+
+/**
+ * The capabilities a function's own body requires before anything is
+ * propagated into it: what its bundled-operation call sites fix statically,
+ * plus `unknown` when one of them has a target the source does not fix, or
+ * when a call could not be resolved at all.
+ */
+function directCapabilities(summary: FunctionSummary): CapabilitySet {
+  let set: CapabilitySet = emptyCapabilitySet();
+  let unknown = false;
+  for (const call of summary.calls) {
+    if (call.kind === "unresolved") {
+      unknown = true;
+      continue;
+    }
+    if (call.kind !== "stub") continue;
+    if (call.requiredCapability) {
+      set = unionCapabilitySets(set, {
+        capabilities: [call.requiredCapability],
+        unknown: false,
+      });
+    }
+    if (call.capabilityTargetUnknown) unknown = true;
+  }
+  return unknown ? { capabilities: set.capabilities, unknown: true } : set;
 }
 
 function directEffects(summary: FunctionSummary): EffectSet {
@@ -183,7 +209,12 @@ function deriveState(
   const hasDirectUnresolved = summary.calls.some((call) => call.kind === "unresolved");
 
   let merged: EffectSet = direct;
-  let required: CapabilitySet = hasDirectUnresolved ? unknownCapabilitySet() : emptyCapabilitySet();
+  const directRequired = directCapabilities(summary);
+  // A capability requirement can go unknown right here — an unresolved call,
+  // or a bundled operation whose target the source does not fix — in which
+  // case there is no callee to name as the witness.
+  const hasDirectCapabilityUnknown = directRequired.unknown;
+  let required: CapabilitySet = directRequired;
   const effectWitness = new Map<KnownEffect, SymbolId>();
   const capabilityWitness = new Map<string, SymbolId>();
   let unknownWitness: SymbolId | undefined;
@@ -215,7 +246,7 @@ function deriveState(
     }
     if (
       capabilityContribution.unknown &&
-      !hasDirectUnresolved &&
+      !hasDirectCapabilityUnknown &&
       capabilityUnknownWitness === undefined
     ) {
       capabilityUnknownWitness = call.callee;
@@ -229,7 +260,7 @@ function deriveState(
     unknownWitness: hasDirectUnresolved ? undefined : unknownWitness,
     required,
     capabilityWitness,
-    capabilityUnknownWitness: hasDirectUnresolved ? undefined : capabilityUnknownWitness,
+    capabilityUnknownWitness: hasDirectCapabilityUnknown ? undefined : capabilityUnknownWitness,
   };
 }
 

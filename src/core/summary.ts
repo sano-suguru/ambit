@@ -1,6 +1,6 @@
 import type { UnresolvedReason } from "./backend.ts";
 import type { Budget } from "./budget.ts";
-import type { CapabilitySet } from "./capability.ts";
+import type { Capability, CapabilitySet } from "./capability.ts";
 import type { EffectSet, KnownEffect } from "./effects.ts";
 import type { SourceLocation } from "./location.ts";
 import type { SymbolId } from "./symbol-id.ts";
@@ -28,6 +28,19 @@ export interface StubCall {
   readonly location: SourceLocation;
   readonly effects: readonly KnownEffect[];
   readonly qualifiedName: string;
+  /**
+   * The capability this call requires, when the stub tables know of a target
+   * and the source fixes it — a literal URL's host (DESIGN.md §4.4's static
+   * half). Absent when the operation has no target this layer claims to know.
+   */
+  readonly requiredCapability?: Capability;
+  /**
+   * Set when the operation *has* a target the runtime will match but the
+   * source does not fix it (a URL built at runtime). Distinct from having no
+   * requirement at all: the caller's capability requirement is then not fully
+   * known, which is `AMB-W003`, not silence.
+   */
+  readonly capabilityTargetUnknown?: true;
 }
 
 /**

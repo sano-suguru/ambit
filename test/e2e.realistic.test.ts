@@ -274,6 +274,70 @@ export async function formatCents(cents: number): Promise<string> {
     );
   }, 60_000);
 
+  it("accident 4: a literal URL outside the granted target is AMB-E009 at the call site", async () => {
+    await withVariant(
+      [
+        {
+          file: "src/routes/users.ts",
+          find: "  const users = await listUsers();",
+          replace: `  const users = await listUsers();
+  await fetch("https://elsewhere.example/steal");`,
+        },
+      ],
+      (result) => {
+        const diagnostic = at(result, "AMB-E009", "src/routes/users.ts", 18);
+        expect(diagnostic?.message).toContain("http:get:elsewhere.example");
+        // §5.3: no fabricated patch — widening the grant and changing the URL
+        // are both plausible and Ambit cannot tell which was meant.
+        expect(diagnostic?.fixes).toEqual([]);
+        expect(result.exitCode).toBe(1);
+      },
+    );
+  }, 60_000);
+
+  it("accident 4: a granted literal URL is not reported", async () => {
+    // The other half of the same claim: the check has to be about the target,
+    // not about `fetch` appearing in an entrypoint at all.
+    await withVariant(
+      [
+        {
+          file: "src/routes/users.ts",
+          find: "  const users = await listUsers();",
+          replace: `  const users = await listUsers();
+  await fetch("https://api.example.com/ping");`,
+        },
+      ],
+      (result) => {
+        expect(errors(result)).toEqual([]);
+        expect(result.exitCode).toBe(0);
+      },
+    );
+  }, 60_000);
+
+  it("accident 4: a URL the source does not fix stays a warning, and says why", async () => {
+    await withVariant(
+      [
+        {
+          file: "src/routes/users.ts",
+          find: "  const users = await listUsers();",
+          replace: `  const users = await listUsers();
+  await fetch(currency);`,
+        },
+      ],
+      (result) => {
+        const warning = result.diagnostics.find(
+          (d) => d.id === "AMB-W003" && d.location.file === "src/routes/users.ts",
+        );
+        expect(warning?.message).toContain("not a literal in the source");
+        expect(warning?.message).toContain("only the runtime can match");
+        // A dynamic URL is the runtime's job (§4.4), so the static check must
+        // not fail the build over it.
+        expect(errors(result)).toEqual([]);
+        expect(result.exitCode).toBe(0);
+      },
+    );
+  }, 60_000);
+
   it("round-trips `ambit init`: every proposal applies and `check` stays clean", async () => {
     const dir = await scratchCopy();
     try {

@@ -25,6 +25,7 @@ import {
   lookupConstructorEffect,
 } from "../stubs/constructors.ts";
 import { lookupClientEffects } from "../stubs/data-clients.ts";
+import { lookupHttpCapability } from "../stubs/http-capabilities.ts";
 import { lookupStubEffect } from "../stubs/node-builtins.ts";
 import { isKnownPureBuiltin } from "../stubs/pure-builtins.ts";
 
@@ -134,11 +135,14 @@ function toCall(site: CallSite): Call {
     }
     const effects = stubEffectsFor(site.calleeQualifiedName, site.literalArguments);
     if (effects) {
+      const required = lookupHttpCapability(site.calleeQualifiedName, site.literalArguments);
       return {
         kind: "stub",
         location: site.location,
         effects,
         qualifiedName: site.calleeQualifiedName,
+        ...(required?.capability ? { requiredCapability: required.capability } : {}),
+        ...(required?.targetUnknown ? { capabilityTargetUnknown: true as const } : {}),
       };
     }
     // A named call that didn't resolve to a project function and doesn't

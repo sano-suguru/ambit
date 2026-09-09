@@ -83,7 +83,15 @@ describe("summarizeExtractedFiles", () => {
     ];
     const [summary] = summarizeExtractedFiles(files);
     expect(summary?.calls).toEqual([
-      { kind: "stub", location: LOC, effects: ["network"], qualifiedName: "fetch" },
+      {
+        kind: "stub",
+        location: LOC,
+        effects: ["network"],
+        qualifiedName: "fetch",
+        // A `fetch` whose URL the source does not fix has a target the runtime
+        // will match and the checker cannot — that is not "requires nothing".
+        capabilityTargetUnknown: true,
+      },
     ]);
   });
 
@@ -104,7 +112,13 @@ describe("summarizeExtractedFiles", () => {
     ];
     const [summary] = summarizeExtractedFiles(files);
     expect(summary?.calls).toEqual([
-      { kind: "stub", location: LOC, effects: ["network"], qualifiedName: "undici.fetch" },
+      {
+        kind: "stub",
+        location: LOC,
+        effects: ["network"],
+        qualifiedName: "undici.fetch",
+        capabilityTargetUnknown: true,
+      },
     ]);
   });
 

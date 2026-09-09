@@ -5,9 +5,11 @@ import type {
   DiagnosticEngine,
   DiagnosticFix,
   FixEdit,
+  FunctionSummary,
   KnownEffect,
   SkippedFunctionKind,
   SourceLocation,
+  StubCall,
   SymbolId,
   UncarriedContract,
 } from "../core/index.ts";
@@ -188,19 +190,45 @@ function diagnoseCapabilities(
   const excess = excessCapabilities(granted, propagated.required.capabilities);
   const diagnostics: Diagnostic[] = [];
 
-  if (excess.length > 0) {
-    diagnostics.push(buildCapabilityEscalation(propagated, granted, excess, state, engine));
+  // DESIGN.md §4.4's static half: a target this function's own body fixes in
+  // the source — a literal URL's host — is checked against the grant here, at
+  // the call site, rather than folded into the declaration-to-declaration
+  // escalation below. The two are different findings: one names a line to
+  // change, the other names a callee whose contract is too wide.
+  const literalViolations = summary.calls.filter(
+    (call) =>
+      call.kind === "stub" &&
+      call.requiredCapability !== undefined &&
+      excessCapabilities(granted, [call.requiredCapability]).length > 0,
+  );
+  for (const call of literalViolations) {
+    if (call.kind !== "stub" || !call.requiredCapability) continue;
+    diagnostics.push(buildLiteralTargetViolation(propagated, granted, call, engine));
+  }
+
+  const reportedLiterally = new Set(
+    literalViolations.map((call) =>
+      call.kind === "stub" && call.requiredCapability
+        ? formatCapability(call.requiredCapability)
+        : "",
+    ),
+  );
+  const inheritedExcess = excess.filter(
+    (capability) => !reportedLiterally.has(formatCapability(capability)),
+  );
+
+  if (inheritedExcess.length > 0) {
+    diagnostics.push(
+      buildCapabilityEscalation(propagated, granted, inheritedExcess, state, engine),
+    );
   }
   if (propagated.required.unknown) {
     const chain = capabilityUnknownWitnessChain(summary.id, state);
     const witness = chain[chain.length - 1];
     const witnessSummary = witness ? state.get(witness)?.summary : undefined;
-    // Two different causes reach the same unknown, and saying the wrong one
+    // Three different causes reach the same unknown, and saying the wrong one
     // sends a reader hunting for a call that resolved perfectly well.
-    const cause =
-      witnessSummary?.boundary.kind === "declared"
-        ? `calls ${displayName(witnessSummary.id)}, a @boundary that declares no @capabilities`
-        : "reaches a call that could not be resolved";
+    const cause = capabilityUnknownCause(propagated, witnessSummary);
     diagnostics.push({
       id: "AMB-W003",
       severity: "warning",
@@ -219,6 +247,75 @@ function diagnoseCapabilities(
     });
   }
   return diagnostics;
+}
+
+/**
+ * Why a declared capability set is not fully known. A `@boundary` callee that
+ * declared nothing, an operation whose target the source does not fix, and a
+ * call that could not be resolved are three different situations with three
+ * different fixes; naming the wrong one wastes the reader's time.
+ *
+ * A direct unresolved call wins over a dynamic target: it is the wider hole
+ * (an unresolved callee could require anything), and the witness chain is
+ * empty for both, so nothing else would say it.
+ */
+function capabilityUnknownCause(
+  propagated: PropagatedFunction,
+  witnessSummary: FunctionSummary | undefined,
+): string {
+  if (witnessSummary?.boundary.kind === "declared") {
+    return `calls ${displayName(witnessSummary.id)}, a @boundary that declares no @capabilities`;
+  }
+  const { calls } = propagated.summary;
+  if (!calls.some((call) => call.kind === "unresolved")) {
+    const dynamic = calls.find((call) => call.kind === "stub" && call.capabilityTargetUnknown);
+    if (dynamic?.kind === "stub") {
+      return `calls ${dynamic.qualifiedName} with a target that is not a literal in the source, which only the runtime can match (DESIGN.md §4.4)`;
+    }
+  }
+  return "reaches a call that could not be resolved";
+}
+
+/**
+ * DESIGN.md §4.4's static half: an operation whose target the source fixes —
+ * a literal URL — reaching outside what the function was granted.
+ *
+ * Reported at the call site rather than at the declaration, because that is
+ * the line to change, and separately from `AMB-E005`, because the finding is
+ * different: nothing declared this requirement, the code performs it directly.
+ *
+ * No fix candidate. The two possible patches are widening the grant and
+ * changing the URL, and Ambit cannot tell which the author meant; §5.3 forbids
+ * inventing one for the sake of ranking, and widening a capability silently is
+ * exactly the expansion of authority the tag exists to catch.
+ */
+function buildLiteralTargetViolation(
+  propagated: PropagatedFunction,
+  granted: readonly Capability[],
+  call: StubCall,
+  engine: DiagnosticEngine,
+): Diagnostic {
+  const { summary } = propagated;
+  const required = call.requiredCapability;
+  const requiredText = required ? formatCapability(required) : "";
+  const grantedList = granted.map(formatCapability);
+
+  return {
+    id: "AMB-E009",
+    severity: "error",
+    category: "capabilities",
+    message: `${displayName(summary.id)} grants [${grantedList.join(", ")}] but ${call.qualifiedName} here targets ${requiredText}`,
+    location: call.location,
+    contract: {
+      declared: grantedList,
+      required: propagated.required.capabilities.map(formatCapability),
+      excess: [requiredText],
+      via: [],
+    },
+    fixes: [],
+    docs: "docs/diagnostics/README.md#amb-e009",
+    engine,
+  };
 }
 
 function buildCapabilityEscalation(
