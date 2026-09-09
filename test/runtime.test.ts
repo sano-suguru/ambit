@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import fsPromises from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseBudgetTag } from "../src/core/index.ts";
 import {
@@ -5,7 +9,9 @@ import {
   AmbitCapabilityError,
   currentContext,
   fetchCapability,
+  fsCapabilities,
   installFetchHook,
+  installFsHook,
   requireCapability,
   setUnscopedPolicy,
   withAmbit,
@@ -197,5 +203,130 @@ describe("budget enforcement (DESIGN.md §4.5)", () => {
     const budget = parseBudgetTag("costUsd=0.001 llmCalls=1");
     const handler = withAmbit({ ...(budget ? { budget } : {}) }, async () => "done");
     await expect(handler()).resolves.toBe("done");
+  });
+});
+
+/**
+ * `node:fs`, `node:child_process` and `pg` hooks (DESIGN.md §4.4 (a)–(c)).
+ *
+ * In-process and therefore property-access-form only, which is exactly what
+ * §4.4's "graph-internal install" row promises: these files `import fs from
+ * "node:fs"`, so they see the patched member. The real-file, real-child-
+ * process and real-socket versions live in `test/e2e.runtime.test.ts`.
+ *
+ * The fs hook is installed and restored inside each test rather than in a
+ * `beforeEach`: Node's own module loader reads files through the public
+ * `fs.readFileSync`, so leaving it installed across a `deny` policy would
+ * block Vitest's own module loading.
+ */
+describe("installFsHook (DESIGN.md §4.4 (b))", () => {
+  const here = fileURLToPath(import.meta.url);
+
+  it("derives fs:read / fs:write from the resolved absolute path", () => {
+    expect(fsCapabilities({ reads: [0] }, ["relative/file.txt"])).toEqual([
+      `fs:read:${path.resolve("relative/file.txt")}`,
+    ]);
+    expect(fsCapabilities({ reads: [0], writes: [1] }, ["/a/from", "/a/to"])).toEqual([
+      "fs:read:/a/from",
+      "fs:write:/a/to",
+    ]);
+    // A file descriptor names no path; the check happened at `open`.
+    expect(fsCapabilities({ reads: [0] }, [7])).toEqual([]);
+  });
+
+  it("reads a granted file and records the check in the audit trail", async () => {
+    const restore = installFsHook();
+    try {
+      const handler = withAmbit({ capabilities: [`fs:read:${here}`] }, async () => {
+        const bytes = fs.readFileSync(here).length;
+        return { bytes, audit: [...(currentContext()?.audit ?? [])] };
+      });
+      const { bytes, audit } = await handler();
+      expect(bytes).toBeGreaterThan(0);
+      expect(audit).toContainEqual({
+        capability: `fs:read:${here}`,
+        allowed: true,
+        reason: "granted",
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  it("blocks an ungranted read, write and open, each in its own family", async () => {
+    const restore = installFsHook();
+    try {
+      const handler = withAmbit({ capabilities: [] }, async () => {
+        const results: string[] = [];
+        // sync: throws
+        try {
+          fs.readFileSync(here);
+          results.push("sync:reached");
+        } catch (error) {
+          results.push(`sync:${(error as Error).name}`);
+        }
+        // sync, and `false` would be a lie: "not there" is not "not allowed".
+        try {
+          fs.existsSync(here);
+          results.push("exists:reached");
+        } catch (error) {
+          results.push(`exists:${(error as Error).name}`);
+        }
+        // callback: the error arrives through the callback
+        results.push(
+          await new Promise<string>((resolve) =>
+            fs.readFile(here, (error) => resolve(`cb:${error?.name ?? "reached"}`)),
+          ),
+        );
+        // promises: rejects
+        results.push(
+          await fsPromises
+            .writeFile(`${here}.should-not-exist`, "x")
+            .then(() => "promise:reached")
+            .catch((error: Error) => `promise:${error.name}`),
+        );
+        // `open` decides direction from its flags
+        results.push(
+          await new Promise<string>((resolve) =>
+            fs.open(here, "w", (error) => resolve(`open:${error?.name ?? "reached"}`)),
+          ),
+        );
+        return { results, audit: [...(currentContext()?.audit ?? [])] };
+      });
+
+      const { results, audit } = await handler();
+      expect(results).toEqual([
+        "sync:AmbitCapabilityError",
+        "exists:AmbitCapabilityError",
+        "cb:AmbitCapabilityError",
+        "promise:AmbitCapabilityError",
+        "open:AmbitCapabilityError",
+      ]);
+      expect(audit.every((entry) => !entry.allowed)).toBe(true);
+      expect(audit).toContainEqual({
+        capability: `fs:write:${here}.should-not-exist`,
+        allowed: false,
+        reason: "denied",
+      });
+      expect(fs.existsSync(`${here}.should-not-exist`)).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it("restores every patched member (P5: 撤退できること)", async () => {
+    const before = { readFileSync: fs.readFileSync, readFile: fs.readFile, open: fs.open };
+    const beforePromise = fsPromises.readFile;
+    const restore = installFsHook();
+    expect(fs.readFileSync).not.toBe(before.readFileSync);
+    restore();
+    expect(fs.readFileSync).toBe(before.readFileSync);
+    expect(fs.readFile).toBe(before.readFile);
+    expect(fs.open).toBe(before.open);
+    expect(fsPromises.readFile).toBe(beforePromise);
+
+    // And the original behaviour is back: an empty grant no longer blocks.
+    const handler = withAmbit({ capabilities: [] }, async () => fs.readFileSync(here).length);
+    expect(await handler()).toBeGreaterThan(0);
   });
 });

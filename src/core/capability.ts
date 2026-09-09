@@ -39,8 +39,18 @@ export function formatCapability(capability: Capability): string {
 }
 
 const SEGMENT = /^[A-Za-z0-9_.*?[\]{}@/-]+$/;
-/** `target` may hold a colon of its own (`http:get:localhost:8080`), so it has a wider character set. */
-const TARGET_SEGMENT = /^[A-Za-z0-9_.*?[\]{}@/:-]+$/;
+/**
+ * `target` names a host, a filesystem path, or a command, so it is defined by
+ * exclusion rather than by an allowlist (DESIGN.md §4.4 (b)): anything but a
+ * comma — the `@capabilities` list separator — and control characters. That
+ * admits the colon of `http:get:localhost:8080` and the spaces, `+`, `~` and
+ * `%` that real paths contain.
+ *
+ * Widening only fails closed: a mistyped tag becomes a target that matches
+ * nothing, which surfaces as a denial, never as a broader grant.
+ */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: excluding control characters is the point.
+const TARGET_SEGMENT = /^[^,\u0000-\u001f\u007f]+$/;
 
 /**
  * Parse one `<resource>:<action>:<target>` token. `undefined` when the token

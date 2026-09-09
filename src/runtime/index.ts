@@ -1,10 +1,19 @@
-import type { Budget, Capability } from "../core/index.ts";
-import { capabilityCovers, formatCapability, parseCapability } from "../core/index.ts";
-import type { AmbitContext, AuditEntry, UnscopedPolicy } from "./context.ts";
+import type { Budget } from "../core/index.ts";
+import { parseCapability } from "../core/index.ts";
+import type { AmbitContext } from "./context.ts";
 import { currentContext, runInContext } from "./context.ts";
+import { requireCapability } from "./enforce.ts";
 
 export type { AmbitContext, AuditEntry, UnscopedPolicy } from "./context.ts";
 export { currentContext } from "./context.ts";
+export {
+  AmbitCapabilityError,
+  checkCapabilities,
+  checkCapability,
+  requireCapability,
+  setUnscopedPolicy,
+} from "./enforce.ts";
+export { fsCapabilities, installFsHook } from "./fs.ts";
 
 /**
  * Runtime enforcement for an entrypoint (DESIGN.md §4.4, §4.5).
@@ -12,9 +21,11 @@ export { currentContext } from "./context.ts";
  * Deliberately narrow, and the narrowness is the point: this enforces what it
  * can actually check and says nothing about the rest. What is enforced today:
  *
- * - **capabilities**, for `globalThis.fetch` only, once {@link installFetchHook}
- *   has been called. Every other operation is unhooked and therefore
- *   unenforced — a database client, `node:fs`, `child_process`, an LLM SDK.
+ * - **capabilities**, for `globalThis.fetch` ({@link installFetchHook}),
+ *   `node:fs` and `node:fs/promises` ({@link installFsHook}) — each once
+ *   its hook has been installed. Every other operation is unhooked and
+ *   therefore unenforced: `node:child_process`, every DB client, every LLM
+ *   SDK.
  * - **`timeMs`**, checked when the handler settles (`throw`/`warn`) or via an
  *   `AbortSignal` (`abort`).
  *
@@ -29,36 +40,11 @@ export interface AmbitSpec {
   readonly budget?: Budget;
 }
 
-export class AmbitCapabilityError extends Error {
-  readonly capability: string;
-  constructor(capability: string, granted: readonly Capability[]) {
-    const grantedList = granted.map(formatCapability).join(", ") || "(none)";
-    super(`capability ${capability} is not granted by this entrypoint (granted: ${grantedList})`);
-    this.name = "AmbitCapabilityError";
-    this.capability = capability;
-  }
-}
-
 export class AmbitBudgetError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "AmbitBudgetError";
   }
-}
-
-let unscopedPolicy: UnscopedPolicy = "allow";
-
-/**
- * Set the process-wide `runtime.unscoped` policy (DESIGN.md §4.4).
- *
- * Process-wide and not per-entrypoint on purpose. The policy only applies
- * where there is *no* context, so a per-entrypoint override would be read
- * only by concurrent work running outside every entrypoint — which makes it a
- * mutable global that unrelated calls observe changing mid-flight, not a
- * setting scoped to anything. Set it once at startup.
- */
-export function setUnscopedPolicy(policy: UnscopedPolicy): void {
-  unscopedPolicy = policy;
 }
 
 /**
@@ -123,46 +109,13 @@ function exceeded(timeMs: number, elapsed?: number): string {
 }
 
 /**
- * Check one capability against the active entrypoint context, throwing
- * {@link AmbitCapabilityError} when it is not granted. Exported so an adapter
- * for an unhooked client can perform the same check.
- *
- * With no active context the `runtime.unscoped` policy decides (§4.4).
- */
-export function requireCapability(required: string): void {
-  const context = currentContext();
-  if (!context) {
-    if (unscopedPolicy === "deny") {
-      throw new AmbitCapabilityError(required, []);
-    }
-    if (unscopedPolicy === "warn") {
-      process.emitWarning(
-        `capability ${required} used outside any @entrypoint context`,
-        "AmbitUnscoped",
-      );
-    }
-    return;
-  }
-
-  const parsed = parseCapability(required);
-  const allowed =
-    parsed !== undefined && context.capabilities.some((grant) => capabilityCovers(grant, parsed));
-  const entry: AuditEntry = {
-    capability: required,
-    allowed,
-    reason: allowed ? "granted" : "denied",
-  };
-  context.audit.push(entry);
-  if (!allowed) throw new AmbitCapabilityError(required, context.capabilities);
-}
-
-/**
  * Wrap `globalThis.fetch` so every request is checked against the active
  * entrypoint's capabilities as `http:<method>:<host>`.
  *
- * This is the only operation the bundled runtime blocks. DESIGN.md §4.4 lists
- * a much longer hook plan (`node:fs`, `child_process`, DB clients, LLM SDKs);
- * none of those are hooked, and calling them is neither checked nor recorded.
+ * One of two hooks so far; see {@link installFsHook} for the other.
+ * DESIGN.md §4.4's remaining targets — `node:child_process`, the DB clients,
+ * and the LLM SDKs — are not hooked, and calling them is neither checked nor
+ * recorded.
  *
  * Returns a function that restores the original `fetch`, so a test — or a
  * consumer backing Ambit out (P5) — can undo it.

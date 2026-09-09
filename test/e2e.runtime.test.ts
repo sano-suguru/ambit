@@ -111,17 +111,76 @@ try {
     expect(seen.slice(before)).toEqual([]);
   }, 60_000);
 
-  it("leaves unhooked operations unenforced, and does not pretend otherwise", async () => {
-    // node:fs is on §4.4's hook plan but is not hooked. A test that asserted
-    // it was blocked would be asserting a guarantee Ambit does not make.
+  it("blocks an ungranted read of a real file, and leaves the file unread", async () => {
+    // The inverse of what this file asserted before `installFsHook` existed:
+    // `node:fs` was on §4.4's plan and unhooked, so the honest test was that
+    // it went through. It is hooked now, so the honest test is that it does
+    // not.
+    const secret = path.join(consumer, "secret.txt");
+    const allowed = path.join(consumer, "allowed.txt");
+    await fs.writeFile(secret, "classified");
+    await fs.writeFile(allowed, "public");
+
     const { stdout } = await runScript(`
-import { withAmbit, installFetchHook } from "ambit/runtime";
-import { existsSync } from "node:fs";
-installFetchHook();
-const handler = withAmbit({ capabilities: [] }, async () => existsSync(process.cwd()));
-console.log("FS:" + (await handler()));
+import nodeFs from "node:fs";
+import { withAmbit, installFsHook, AmbitCapabilityError } from "ambit/runtime";
+installFsHook();
+const handler = withAmbit({ capabilities: ["fs:read:${allowed}"] }, async () => {
+  const ok = nodeFs.readFileSync("${allowed}", "utf8");
+  try {
+    nodeFs.readFileSync("${secret}", "utf8");
+    return ok + "|REACHED";
+  } catch (error) {
+    return ok + "|" + (error instanceof AmbitCapabilityError ? "BLOCKED:" + error.capability : "OTHER");
+  }
+});
+console.log("RESULT:" + (await handler()));
 `);
-    expect(stdout.trim()).toBe("FS:true");
+    expect(stdout.trim()).toBe(`RESULT:public|BLOCKED:fs:read:${secret}`);
+  }, 60_000);
+
+  it("blocks an ungranted write, so the file is never created", async () => {
+    const target = path.join(consumer, "must-not-exist.txt");
+    const { stdout } = await runScript(`
+import nodeFs from "node:fs";
+import { withAmbit, installFsHook } from "ambit/runtime";
+installFsHook();
+const handler = withAmbit({ capabilities: [] }, async () =>
+  nodeFs.promises.writeFile("${target}", "x").then(() => "REACHED", (e) => e.name),
+);
+console.log("RESULT:" + (await handler()));
+`);
+    expect(stdout.trim()).toBe("RESULT:AmbitCapabilityError");
+    // The decisive assertion, as with the server never seeing the request.
+    await expect(fs.stat(target)).rejects.toThrow();
+  }, 60_000);
+
+  it("covers named ESM imports when installed from a preload (§4.4 (a))", async () => {
+    // §4.4 (a) claims the covered set depends on install order, not on the
+    // mechanism. This is the preload row: `import { readFileSync }` — a
+    // binding a graph-internal install cannot reach — is checked here.
+    const secret = path.join(consumer, "preload-secret.txt");
+    await fs.writeFile(secret, "classified");
+    const preload = path.join(consumer, "ambit-preload.mjs");
+    await fs.writeFile(
+      preload,
+      'import { installFsHook, setUnscopedPolicy } from "ambit/runtime";\ninstallFsHook();\n',
+    );
+    const script = path.join(consumer, "named-import.mjs");
+    await fs.writeFile(
+      script,
+      `import { readFileSync } from "node:fs";
+import { withAmbit } from "ambit/runtime";
+const handler = withAmbit({ capabilities: [] }, async () => {
+  try { readFileSync("${secret}", "utf8"); return "REACHED"; } catch (e) { return e.name; }
+});
+console.log("RESULT:" + (await handler()));
+`,
+    );
+    const { stdout } = await execFileAsync("node", ["--import", preload, script], {
+      cwd: consumer,
+    }).catch((error: { stdout?: string }) => ({ stdout: error.stdout ?? "" }));
+    expect(stdout.trim()).toBe("RESULT:AmbitCapabilityError");
   }, 60_000);
 
   it("cancels an in-flight request when a timeMs budget aborts", async () => {
