@@ -372,10 +372,13 @@ the one that keeps the contract and rewrites the code.
 - **A database target names the database, not the table.** Ambit does not read
   table names out of SQL, and a shell spawn names the shell, not the program
   inside the command string.
-- **One framework adapter (Hono).** A route registered without it establishes
-  no context, and `setUnscopedPolicy("allow" | "warn" | "deny")` decides what
-  its operations do — `allow` by default, so adopting the runtime does not
-  break code that has no contracts yet.
+- **Two framework adapters (Hono, and Next.js App Router Route Handlers on the
+  Node.js runtime).** Express, BullMQ and the rest have none, and neither do
+  Next.js Server Actions, `middleware.ts`, the Pages Router, or any route on
+  the Edge runtime. A route registered without an adapter establishes no
+  context, and `setUnscopedPolicy("allow" | "warn" | "deny")` decides what its
+  operations do — `allow` by default, so adopting the runtime does not break
+  code that has no contracts yet.
 
 [docs/limitations.md](docs/limitations.md) has the rest, in detail.
 

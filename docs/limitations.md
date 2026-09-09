@@ -537,17 +537,25 @@ parsed, validated, and carried on the context for an adapter to use.
 
 ## Framework adapters
 
-One adapter exists: `ambitHandler` from `ambit/runtime/hono`. Express,
-Next.js, BullMQ and the rest have none, and a handler they register
-establishes no Ambit context.
+Two adapters exist: `ambitHandler` from `ambit/runtime/hono` and `ambitRoute`
+from `ambit/runtime/next`. Express, BullMQ, `worker_threads` and the rest have
+none, and a handler they register establishes no Ambit context.
 
-| | |
-|---|---|
-| Framework | Hono — verified against `hono@4` and `@hono/node-server@1` in `test/e2e.runtime.test.ts` and `test/e2e.install.test.ts` |
-| Declared as | a devDependency here and a type-only import; the published package depends on neither |
-| Enforced | the capability set and `@budget` of the route it registers, for the handler and its `decode` |
+Both are declared the same way: a devDependency here and a type-only import,
+so the published package depends on neither `hono` nor `next`. Both enforce the
+same thing — the capability set and `@budget` of the route they register, for
+the handler and its `decode`.
 
-Limits of what the adapter guarantees:
+| Adapter | Verified against | By |
+|---|---|---|
+| `ambit/runtime/hono` — `ambitHandler` | `hono@4`, `@hono/node-server@1` | `test/runtime.hono.test.ts` in process, `test/e2e.runtime.test.ts` through a real server and a real socket, `test/e2e.install.test.ts` through the installed package |
+| `ambit/runtime/next` — `ambitRoute` | `next@16`, Node.js runtime only | `test/runtime.next.test.ts` — the exported Route Handler called directly with a real `NextRequest`, which is what Next.js does with it; `test/e2e.next-app.test.ts` for an `app/**/route.ts` project through `ambit check`; `test/e2e.install.test.ts` type-checks README's route and `instrumentation.ts` snippets against the installed package |
+
+What the Next.js row does **not** claim: no test starts a `next` server
+process, so the adapter is verified as a Route Handler function, not as a
+running Next.js application. Nothing is verified on the Edge runtime.
+
+Limits of what the adapters guarantee:
 
 - **Only the route it registers.** `app.get(path, handler)` written without
   `ambitHandler` establishes no context, so operations inside it are decided by

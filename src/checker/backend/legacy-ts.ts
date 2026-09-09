@@ -811,11 +811,15 @@ function isFunctionValuedProperty(member: ts.ClassElement): member is ts.Propert
  * local `as` alias or a re-export chain does not hide one, and a `withAmbit`
  * of one's own from somewhere else is not mistaken for it.
  *
- * The framework adapter is here because DESIGN.md §4.4 chose explicit
- * registration, which leaves the contract written twice; the source-level
- * agreement check has to reach the adapter's registrations or the choice would
- * cost a check without saying so. Both take `(spec, handler, …)` in the same
- * two positions, which is what makes one extraction serve both.
+ * The framework adapters are here because DESIGN.md §4.4 chose explicit
+ * registration: a literal `spec` beside a same-file handler *is* that
+ * handler's `@capabilities` and `@budget`（§4.4「二重宣言を消す（決定:
+ * 2026-09-10）」）, so a registration this pass cannot see would take the
+ * declaration with it — and where a project does write the JSDoc tag as well,
+ * the agreement check (`AMB-E010` / `AMB-E011`) has to reach the registration
+ * or the duplication would go uncompared. All three take `(spec, handler, …)`
+ * in the same two positions, which is what makes one extraction serve them
+ * all; an adapter that reordered them would silently stop being read.
  */
 const RUNTIME_WRAPPER_NAMES: ReadonlyMap<string, string> = new Map([
   ["ambit/runtime.withAmbit", "withAmbit"],
