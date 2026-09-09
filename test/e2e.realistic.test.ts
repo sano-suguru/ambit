@@ -290,7 +290,7 @@ export async function formatCents(cents: number): Promise<string> {
         },
       ],
       (result) => {
-        const diagnostic = at(result, "AMB-E009", "src/routes/users.ts", 19);
+        const diagnostic = at(result, "AMB-E009", "src/routes/users.ts", 17);
         expect(diagnostic?.message).toContain("http:get:elsewhere.example");
         // §5.3: no fabricated patch — widening the grant and changing the URL
         // are both plausible and Ambit cannot tell which was meant.
@@ -344,8 +344,17 @@ export async function formatCents(cents: number): Promise<string> {
   }, 60_000);
 
   it("accident 6: an ambitHandler list that disagrees with the handler's @capabilities is AMB-E010", async () => {
+    // The pair only exists when both halves are written — a literal spec on its
+    // own *is* the declaration (DESIGN.md §4.4), so the first patch puts the
+    // tag back and the second drifts the spec away from it.
     await withVariant(
       [
+        {
+          file: "src/routes/orders.ts",
+          find: " * @effects db_write",
+          replace: ` * @capabilities db:write:orders
+ * @effects db_write`,
+        },
         {
           file: "src/routes/orders.ts",
           find: '{ capabilities: ["db:write:orders"], budget: { timeMs: 800, onExceed: "throw" } },',
@@ -354,7 +363,7 @@ export async function formatCents(cents: number): Promise<string> {
         },
       ],
       (result) => {
-        const diagnostic = at(result, "AMB-E010", "src/routes/orders.ts", 28);
+        const diagnostic = at(result, "AMB-E010", "src/routes/orders.ts", 27);
         expect(diagnostic?.message).toContain("db:write:users");
         expect(diagnostic?.message).toContain("createOrder");
         expect(diagnostic?.fixes).toEqual([]);
@@ -370,12 +379,13 @@ export async function formatCents(cents: number): Promise<string> {
       [
         {
           file: "src/routes/orders.ts",
-          find: " * @capabilities db:write:orders",
-          replace: " * @capabilities db:write:orders, db:write:users",
+          find: " * @effects db_write",
+          replace: ` * @capabilities db:write:orders, db:write:users
+ * @effects db_write`,
         },
       ],
       (result) => {
-        expect(at(result, "AMB-E010", "src/routes/orders.ts", 28)).toBeDefined();
+        expect(at(result, "AMB-E010", "src/routes/orders.ts", 27)).toBeDefined();
         expect(result.exitCode).toBe(1);
       },
     );
@@ -416,13 +426,19 @@ export const GET = ambitHandler(`,
       [
         {
           file: "src/routes/orders.ts",
+          find: " * @effects db_write",
+          replace: ` * @budget timeMs=800 onExceed=throw
+ * @effects db_write`,
+        },
+        {
+          file: "src/routes/orders.ts",
           find: '{ capabilities: ["db:write:orders"], budget: { timeMs: 800, onExceed: "throw" } },',
           replace:
             '{ capabilities: ["db:write:orders"], budget: { timeMs: 5000, onExceed: "throw" } },',
         },
       ],
       (result) => {
-        const diagnostic = at(result, "AMB-E011", "src/routes/orders.ts", 28);
+        const diagnostic = at(result, "AMB-E011", "src/routes/orders.ts", 27);
         expect(diagnostic?.message).toContain("timeMs=5000");
         expect(diagnostic?.message).toContain("timeMs=800");
         expect(diagnostic?.message).toContain("createOrder");

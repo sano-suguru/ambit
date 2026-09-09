@@ -12,9 +12,7 @@ export interface CreatedOrder {
 
 /**
  * @entrypoint
- * @capabilities db:write:orders
  * @effects db_write
- * @budget timeMs=800 onExceed=throw
  */
 export async function createOrder(input: CreateOrderInput): Promise<CreatedOrder> {
   const issues = validateOrder(input);
@@ -33,9 +31,7 @@ export const POST = ambitHandler(
 
 /**
  * @entrypoint
- * @capabilities db:read:orders
  * @effects db_read
- * @budget timeMs=500
  */
 export async function listOrderTotals(customerId: string): Promise<readonly number[]> {
   const result = await pool.query<{ readonly total_cents: number }>(

@@ -10,9 +10,7 @@ export interface UserSummary {
 
 /**
  * @entrypoint
- * @capabilities db:read:users, http:get:api.example.com
  * @effects db_read, llm, network
- * @budget timeMs=3000 llmCalls=1 onExceed=throw
  */
 export async function summarizeUsers(currency: string): Promise<readonly UserSummary[]> {
   const users = await listUsers();
@@ -32,9 +30,7 @@ export const SUMMARY = ambitHandler(
 
 /**
  * @entrypoint
- * @capabilities db:read:users
  * @effects db_read
- * @budget timeMs=400
  */
 export async function getUser(email: string): Promise<UserSummary | undefined> {
   if (validateEmail(email)) return undefined;

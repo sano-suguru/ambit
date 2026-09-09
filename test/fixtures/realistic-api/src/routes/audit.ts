@@ -5,9 +5,7 @@ import { auditSize, auditTrail, classifyRisk, record } from "../lib/index.ts";
 
 /**
  * @entrypoint
- * @capabilities db:read:audit
  * @effects db_read
- * @budget timeMs=1500
  */
 export async function listAudit(limit: number): Promise<readonly string[]> {
   const rows = await auditTrail(limit);
@@ -22,9 +20,7 @@ export const LIST_AUDIT = ambitHandler(
 
 /**
  * @entrypoint
- * @capabilities db:write:audit
  * @effects db_write
- * @budget timeMs=1000 onExceed=warn
  */
 export async function writeAudit(id: string, action: string): Promise<string> {
   await record(id, action);
@@ -43,9 +39,7 @@ export const WRITE_AUDIT = ambitHandler(
 
 /**
  * @entrypoint
- * @capabilities db:read:audit
  * @effects db_read, llm
- * @budget timeMs=5000 llmCalls=1 onExceed=throw
  */
 export async function reviewAudit(limit: number): Promise<string> {
   const rows = await auditTrail(limit);
