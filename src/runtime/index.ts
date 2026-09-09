@@ -15,6 +15,7 @@ export {
   setUnscopedPolicy,
 } from "./enforce.ts";
 export { fsCapabilities, installFsHook } from "./fs.ts";
+export { installPgHook, pgCapabilities } from "./pg.ts";
 
 /**
  * Runtime enforcement for an entrypoint (DESIGN.md §4.4, §4.5).
@@ -24,9 +25,10 @@ export { fsCapabilities, installFsHook } from "./fs.ts";
  *
  * - **capabilities**, for `globalThis.fetch` ({@link installFetchHook}),
  *   `node:fs` and `node:fs/promises` ({@link installFsHook}),
- *   `node:child_process` ({@link installChildProcessHook}) — each once its
- *   hook has been installed. Every other operation is unhooked and therefore
- *   unenforced: every DB client and every LLM SDK.
+ *   `node:child_process` ({@link installChildProcessHook}), and the `pg`
+ *   client ({@link installPgHook}) — each once its hook has been installed.
+ *   Every other operation is unhooked and therefore unenforced: `mysql2`,
+ *   `@prisma/client`, `drizzle-orm`, `mongodb`, and every LLM SDK.
  * - **`timeMs`**, checked when the handler settles (`throw`/`warn`) or via an
  *   `AbortSignal` (`abort`).
  *
@@ -113,10 +115,10 @@ function exceeded(timeMs: number, elapsed?: number): string {
  * Wrap `globalThis.fetch` so every request is checked against the active
  * entrypoint's capabilities as `http:<method>:<host>`.
  *
- * One of three hooks; see {@link installFsHook} and
- * {@link installChildProcessHook} for the rest.
- * DESIGN.md §4.4's remaining targets — the DB clients and the LLM SDKs — are
- * not hooked, and calling
+ * One of four hooks; see {@link installFsHook},
+ * {@link installChildProcessHook} and {@link installPgHook} for the rest.
+ * DESIGN.md §4.4's remaining targets — `mysql2`, `@prisma/client`,
+ * `drizzle-orm`, `mongodb`, and the LLM SDKs — are not hooked, and calling
  * them is neither checked nor recorded.
  *
  * Returns a function that restores the original `fetch`, so a test — or a

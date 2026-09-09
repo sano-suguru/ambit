@@ -14,6 +14,8 @@ import {
   installChildProcessHook,
   installFetchHook,
   installFsHook,
+  installPgHook,
+  pgCapabilities,
   requireCapability,
   setUnscopedPolicy,
   spawnCapability,
@@ -397,5 +399,105 @@ describe("installChildProcessHook (DESIGN.md §4.4 (b))", () => {
       childProcess.execFileSync("/bin/echo", ["back"]).toString().trim(),
     );
     expect(await handler()).toBe("back");
+  });
+});
+
+describe("installPgHook (DESIGN.md §4.4 (c))", () => {
+  /** A `pg` stand-in with the two prototypes the hook patches. */
+  function fakePg(statements: string[]) {
+    class Pool {
+      readonly options: Record<string, unknown>;
+      constructor(options: Record<string, unknown>) {
+        this.options = options;
+      }
+      async query(statement: unknown): Promise<{ rows: readonly unknown[] }> {
+        statements.push(typeof statement === "string" ? statement : "(non-string)");
+        return { rows: [] };
+      }
+    }
+    class Client extends Pool {}
+    return { Pool, Client };
+  }
+
+  it("takes the direction from the statement and the target from the database", () => {
+    const pool = { options: { connectionString: "postgres://u@localhost:5432/app" } };
+    expect(pgCapabilities(pool, ["SELECT 1"]).capabilities).toEqual(["db:read:app"]);
+    expect(pgCapabilities(pool, ["INSERT INTO t VALUES (1)"]).capabilities).toEqual([
+      "db:write:app",
+    ]);
+    // Not decidable — both directions, and the message says why.
+    const opaque = pgCapabilities(pool, [{ values: [] }]);
+    expect(opaque.capabilities).toEqual(["db:read:app", "db:write:app"]);
+    expect(opaque.detail).toContain("not decidable");
+    // No database anywhere in the configuration.
+    expect(pgCapabilities({}, ["SELECT 1"]).capabilities).toEqual(["db:read:unknown"]);
+  });
+
+  it("blocks a write the grant does not cover, and never reaches the client", async () => {
+    const statements: string[] = [];
+    const pg = fakePg(statements);
+    const restore = installPgHook(pg);
+    try {
+      const pool = new pg.Pool({ connectionString: "postgres://u@localhost:5432/app" });
+      const handler = withAmbit({ capabilities: ["db:read:app"] }, async () => {
+        await pool.query("SELECT 1");
+        return pool
+          .query("INSERT INTO orders VALUES (1)")
+          .then(() => "reached")
+          .catch((error: Error) => error.message);
+      });
+      const message = await handler();
+      expect(message).toContain("db:write:app");
+      expect(statements).toEqual(["SELECT 1"]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("says the target is a database, not a table, when a table grant fails", async () => {
+    const pg = fakePg([]);
+    const restore = installPgHook(pg);
+    try {
+      // The shape a reader is most likely to get wrong: `db:read:users` reads
+      // like a table grant, and §4.4 (c) says the runtime target is the
+      // database. The message has to say so rather than leave it inferred.
+      const pool = new pg.Pool({ database: "app" });
+      const handler = withAmbit({ capabilities: ["db:read:users"] }, async () =>
+        pool.query("SELECT 1"),
+      );
+      await expect(handler()).rejects.toThrow(/not a table/);
+    } finally {
+      restore();
+    }
+  });
+
+  it("denies outside any entrypoint context when the policy says deny", async () => {
+    const statements: string[] = [];
+    const pg = fakePg(statements);
+    const restore = installPgHook(pg);
+    setUnscopedPolicy("deny");
+    try {
+      const pool = new pg.Pool({ database: "app" });
+      await expect(pool.query("SELECT 1")).rejects.toThrow(AmbitCapabilityError);
+      expect(statements).toEqual([]);
+    } finally {
+      setUnscopedPolicy("allow");
+      restore();
+    }
+  });
+
+  it("restores both prototypes (P5: 撤退できること)", async () => {
+    const statements: string[] = [];
+    const pg = fakePg(statements);
+    const before = pg.Pool.prototype.query;
+    const restore = installPgHook(pg);
+    expect(pg.Pool.prototype.query).not.toBe(before);
+    restore();
+    expect(pg.Pool.prototype.query).toBe(before);
+
+    const pool = new pg.Pool({ database: "app" });
+    const handler = withAmbit({ capabilities: [] }, async () => pool.query("SELECT 1"));
+    await handler();
+    expect(statements).toEqual(["SELECT 1"]);
   });
 });

@@ -4,5 +4,6 @@ export * from "./capability.ts";
 export * from "./diagnostic.ts";
 export * from "./effects.ts";
 export * from "./location.ts";
+export * from "./sql.ts";
 export * from "./summary.ts";
 export * from "./symbol-id.ts";

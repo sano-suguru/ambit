@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -52,9 +53,14 @@ describe("runtime enforcement against a real server, through the installed packa
       `${JSON.stringify({ name: "ambit-rt-consumer", version: "1.0.0", private: true, type: "module" }, null, 2)}\n`,
     );
 
-    await execFileAsync("npm", ["install", "--no-audit", "--no-fund", await packedTarball()], {
-      cwd: consumer,
-    });
+    // `pg` is installed for real: DESIGN.md §4.4 (c) chose it because
+    // `Pool.prototype.query` is a stable patch point, and a hand-written
+    // double would not prove that the real package still has that shape.
+    await execFileAsync(
+      "npm",
+      ["install", "--no-audit", "--no-fund", await packedTarball(), "pg@8"],
+      { cwd: consumer },
+    );
   }, 300_000);
 
   afterAll(async () => {
@@ -205,6 +211,43 @@ console.log("RESULT:" + (await handler()));
 `);
     expect(stdout.trim()).toBe("RESULT:ambit|BLOCKED:proc:spawn:/bin/sh");
     await expect(fs.stat(marker)).rejects.toThrow();
+  }, 60_000);
+
+  it("blocks an ungranted pg query before the client opens a connection", async () => {
+    // The `pg` equivalent of "the server never saw the request": a listener
+    // on a real port records every connection, and a blocked query must
+    // produce none. The allowed query is expected to fail on the wire — this
+    // listener speaks no Postgres — which is why only the connection count is
+    // asserted.
+    const connections: number[] = [];
+    const listener = net.createServer((socket) => {
+      connections.push(1);
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
+    const dbPort = (listener.address() as AddressInfo).port;
+    try {
+      const { stdout } = await runScript(`
+import pg from "pg";
+import { withAmbit, installPgHook, AmbitCapabilityError } from "ambit/runtime";
+installPgHook(pg);
+const pool = new pg.Pool({ connectionString: "postgres://u:p@127.0.0.1:${dbPort}/app" });
+const handler = withAmbit({ capabilities: ["db:read:app"] }, async () => {
+  try {
+    await pool.query("INSERT INTO orders (id) VALUES (1)");
+    return "REACHED";
+  } catch (error) {
+    return error instanceof AmbitCapabilityError ? "BLOCKED:" + error.capability : "OTHER:" + error.message;
+  }
+});
+console.log("RESULT:" + (await handler()));
+process.exit(0);
+`);
+      expect(stdout.trim()).toBe("RESULT:BLOCKED:db:write:app");
+      expect(connections).toEqual([]);
+    } finally {
+      await new Promise<void>((resolve) => listener.close(() => resolve()));
+    }
   }, 60_000);
 
   it("denies outside every entrypoint context when the policy is deny (§4.4)", async () => {

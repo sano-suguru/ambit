@@ -1,4 +1,5 @@
 import type { KnownEffect, LiteralArgument } from "../core/index.ts";
+import { sqlStatementDirection } from "../core/index.ts";
 
 /**
  * Effect table for database and LLM client methods — the `db_read`,
@@ -38,24 +39,6 @@ interface ClientMethodRule {
  * layer exists to prevent (DESIGN.md §3.4).
  */
 const READ_AND_WRITE: readonly KnownEffect[] = ["db_read", "db_write"];
-
-/** Leading SQL keywords that only read. `WITH` is deliberately absent: a CTE can wrap an `INSERT`. */
-const READ_KEYWORDS: ReadonlySet<string> = new Set(["select", "show", "explain", "describe"]);
-
-const WRITE_KEYWORDS: ReadonlySet<string> = new Set([
-  "insert",
-  "update",
-  "delete",
-  "replace",
-  "merge",
-  "upsert",
-  "create",
-  "drop",
-  "alter",
-  "truncate",
-  "grant",
-  "revoke",
-]);
 
 /**
  * Methods whose effect is decided by a SQL statement argument, and which
@@ -135,20 +118,19 @@ export function lookupClientEffects(
 }
 
 /**
- * The direction of one SQL statement, from its leading keyword.
- *
- * A template literal's static head is enough: the keyword that decides the
- * direction is written before any substitution, or it is not statically
- * present at all — and then the answer is both.
+ * The direction of one SQL statement, as effects. The keyword rule itself is
+ * `src/core/sql.ts`, shared with the runtime `pg` hook so the checker and the
+ * running process cannot disagree about the same statement (DESIGN.md §4.4).
  */
 function sqlStatementEffects(argument: LiteralArgument | undefined): readonly KnownEffect[] {
-  const text = argument?.text;
-  if (text === undefined) return READ_AND_WRITE;
-  const keyword = /^[\s(]*([a-z]+)/i.exec(text)?.[1]?.toLowerCase();
-  if (keyword === undefined) return READ_AND_WRITE;
-  if (READ_KEYWORDS.has(keyword)) return ["db_read"];
-  if (WRITE_KEYWORDS.has(keyword)) return ["db_write"];
-  return READ_AND_WRITE;
+  switch (sqlStatementDirection(argument?.text)) {
+    case "read":
+      return ["db_read"];
+    case "write":
+      return ["db_write"];
+    default:
+      return READ_AND_WRITE;
+  }
 }
 
 function patternMatches(pattern: string, qualifiedName: string): boolean {
