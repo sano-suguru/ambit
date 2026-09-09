@@ -301,6 +301,21 @@ describe("legacyTsBackend.extractProject (cross-module alias resolution)", () =>
     );
   });
 
+  it("qualifies a builtin re-exported through a barrel by the module that owns it, not by the barrel", async () => {
+    // Without following the re-export chain this is
+    // `./index.ts.readFileSync`, which no stub table can match — so a `pure`
+    // function calling it reported `unknown` instead of `fs_read`.
+    const { files } = await legacyTsBackend.extractProject(CROSS_MODULE_ROOT);
+    const fn = findFn(files, "barrel-builtin-import.ts#pureCallsBarrelImportedBuiltin");
+    expect(fn?.calls.some((c) => c.calleeQualifiedName === "node:fs.readFileSync")).toBe(true);
+  });
+
+  it("follows a re-export chain more than one hop deep", async () => {
+    const { files } = await legacyTsBackend.extractProject(CROSS_MODULE_ROOT);
+    const fn = findFn(files, "deep-barrel-import.ts#callsTwiceReExportedBuiltin");
+    expect(fn?.calls.some((c) => c.calleeQualifiedName === "node:fs.readFileSync")).toBe(true);
+  });
+
   it("classifies a named import of a builtin not in the stub table as external-module, qualified by module specifier", async () => {
     const { files } = await legacyTsBackend.extractProject(CROSS_MODULE_ROOT);
     const fn = findFn(files, "builtin-named-import.ts#callsBuiltinNamedImport");

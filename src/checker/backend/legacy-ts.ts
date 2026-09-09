@@ -1414,28 +1414,113 @@ function literalArgumentOf(argument: ts.Expression): LiteralArgument | undefined
 }
 
 /**
- * `"<module specifier>.<imported name>"` for an identifier bound by a named
- * import (`import { readFileSync } from "node:fs"`), using the *imported*
- * name (`propertyName`) rather than a local `as` alias (`import {
- * readFileSync as rf } ...` still yields `"node:fs.readFileSync"`, not
- * `"node:fs.rf"` — the stub table is keyed on the module's own export
- * names). `undefined` for anything that isn't a named import of a
- * string-literal module specifier (namespace/default imports are handled by
- * `moduleSpecifierOf` via the property-access branch above).
+ * `"<module specifier>.<exported name>"` for an identifier bound by a named
+ * import, following the re-export chain to the module that actually owns the
+ * binding.
+ *
+ * The imported name is used rather than a local `as` alias (`import {
+ * readFileSync as rf } ...` still yields `"node:fs.readFileSync"` — the stub
+ * table is keyed on the module's own export names).
+ *
+ * The chain matters for a barrel file: `import { readFileSync } from
+ * "./lib/index.ts"` with the barrel re-exporting `"node:fs"` has to name
+ * `node:fs.readFileSync`, not `./lib/index.ts.readFileSync`, or the bundled
+ * effect table misses it. {@link deepestPackageHop} explains which hop wins,
+ * and why the deepest one is not always right.
+ *
+ * `undefined` for anything that isn't a named import of a string-literal
+ * module specifier (namespace/default imports are handled by
+ * `moduleSpecifierOf` and `defaultImportSpecifierOf`).
  */
 function namedImportQualifiedNameOf(
   checker: ts.TypeChecker,
   expr: ts.Identifier,
 ): string | undefined {
   const symbol = checker.getSymbolAtLocation(expr);
-  const decl = symbol?.declarations?.[0];
-  if (!decl || !ts.isImportSpecifier(decl)) return undefined;
-  const importDecl = decl.parent.parent.parent;
-  if (!ts.isImportDeclaration(importDecl) || !ts.isStringLiteral(importDecl.moduleSpecifier)) {
-    return undefined;
+  if (!symbol) return undefined;
+  const hops = reExportHopsOf(checker, symbol);
+  const hop = deepestPackageHop(hops);
+  return hop === undefined ? undefined : `${hop.specifier}.${hop.name}`;
+}
+
+/** One `from "<specifier>"` an alias chain passes through, with the name exported there. */
+interface ReExportHop {
+  readonly specifier: string;
+  readonly name: string;
+}
+
+/**
+ * Every `from "<specifier>"` between an identifier's binding and the
+ * declaration behind it, outermost first. Stops at the first declaration that
+ * is not an import/export specifier — that is where the binding is really
+ * declared — and on a cycle, which a malformed re-export can produce.
+ */
+function reExportHopsOf(checker: ts.TypeChecker, symbol: ts.Symbol): readonly ReExportHop[] {
+  const hops: ReExportHop[] = [];
+  const seen = new Set<ts.Symbol>();
+  let current: ts.Symbol | undefined = symbol;
+
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const hop = reExportHopOf(current.declarations?.[0]);
+    if (hop) hops.push(hop);
+    // Only an alias has an immediate target; asking a non-alias asserts.
+    if ((current.flags & ts.SymbolFlags.Alias) === 0) break;
+    current = checker.getImmediateAliasedSymbol(current);
   }
-  const importedName = decl.propertyName?.text ?? decl.name.text;
-  return `${importDecl.moduleSpecifier.text}.${importedName}`;
+  return hops;
+}
+
+function reExportHopOf(decl: ts.Declaration | undefined): ReExportHop | undefined {
+  if (!decl) return undefined;
+  if (ts.isImportSpecifier(decl)) {
+    const importDecl = decl.parent.parent.parent;
+    if (!ts.isImportDeclaration(importDecl) || !ts.isStringLiteral(importDecl.moduleSpecifier)) {
+      return undefined;
+    }
+    return {
+      specifier: importDecl.moduleSpecifier.text,
+      name: decl.propertyName?.text ?? decl.name.text,
+    };
+  }
+  // `export { x } from "m"`. A local re-export (`export { x }`, no `from`) has
+  // no specifier of its own and contributes no hop — the chain walks past it
+  // to whatever declares `x`.
+  if (ts.isExportSpecifier(decl)) {
+    const exportDecl = decl.parent.parent;
+    if (
+      !ts.isExportDeclaration(exportDecl) ||
+      !exportDecl.moduleSpecifier ||
+      !ts.isStringLiteral(exportDecl.moduleSpecifier)
+    ) {
+      return undefined;
+    }
+    return {
+      specifier: exportDecl.moduleSpecifier.text,
+      name: decl.propertyName?.text ?? decl.name.text,
+    };
+  }
+  return undefined;
+}
+
+/**
+ * Which hop names the binding for stub-matching purposes: the deepest one with
+ * a *bare* specifier, and otherwise the first.
+ *
+ * Deepest is not simply right. A package's own types re-export internally
+ * (`export { helper } from "./internal.js"` inside `node_modules/pkg`), and the
+ * deepest hop there is a path inside the package, which means nothing outside
+ * it — `pkg.helper` is the name. A bare specifier, by contrast, always names a
+ * package or a Node.js builtin, which is exactly what the bundled tables are
+ * keyed on, so the deepest bare specifier is the one that crossed the last
+ * real boundary.
+ */
+function deepestPackageHop(hops: readonly ReExportHop[]): ReExportHop | undefined {
+  for (let i = hops.length - 1; i >= 0; i--) {
+    const hop = hops[i];
+    if (hop && !hop.specifier.startsWith(".")) return hop;
+  }
+  return hops[0];
 }
 
 function moduleSpecifierOf(checker: ts.TypeChecker, expr: ts.Expression): string | undefined {
