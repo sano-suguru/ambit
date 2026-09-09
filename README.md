@@ -56,10 +56,9 @@ import { withAmbit } from "ambit/runtime";
  * @capabilities http:get:api.example.com
  * @budget timeMs=500 costUsd=0.01
  */
-async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<void> {
   await fetch("https://api.example.com/rates");   // granted
   await fetch("https://elsewhere.example/steal"); // AMB-E009 at check time
-  return new Response("ok");
 }
 
 export const GET = withAmbit(
@@ -73,8 +72,9 @@ granted target, and compares the literal array in `withAmbit` with the
 handler's `@capabilities`. `withAmbit` enforces the same set while the code
 runs — with `installFetchHook()` installed, a `fetch` to an ungranted host
 throws before reaching the socket, and `timeMs` is measured against the wall
-clock. Outside any entrypoint the default is to allow, so adopting the runtime
-does not break code that has no contracts yet.
+clock. Outside any entrypoint `setUnscopedPolicy("allow" | "warn" | "deny")`
+decides, defaulting to `allow`, so adopting the runtime does not break code
+that has no contracts yet.
 
 | | Static check | Runtime block | Audit only | Unsupported |
 |---|---|---|---|---|
