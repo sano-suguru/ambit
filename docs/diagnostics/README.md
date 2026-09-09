@@ -275,7 +275,7 @@ A handler whose `@capabilities` failed to parse is skipped here: `AMB-E004`
 already reports that tag, and comparing against a declaration Ambit rejected
 would name the wrong problem.
 
-The budget half of the same duplication is `AMB-E011`, reported separately:
+The budget half of the same rule is `AMB-E011`, reported separately:
 each half is fixed by the source on its own, so a spec may write one as a
 literal and build the other at runtime.
 
