@@ -134,7 +134,8 @@ function capabilityContributionOf(
   calleeSummary: FunctionSummary,
   calleeState: PropagatedFunction,
 ): CapabilitySet {
-  if (calleeSummary.capabilities.kind === "declared") return calleeSummary.capabilities.capabilities;
+  if (calleeSummary.capabilities.kind === "declared")
+    return calleeSummary.capabilities.capabilities;
   return calleeState.required;
 }
 
@@ -151,8 +152,7 @@ function capabilityContributionOf(
 function boundaryState(summary: FunctionSummary): PropagatedFunction {
   return {
     summary,
-    observed:
-      summary.declared.kind === "declared" ? summary.declared.effects : unknownEffectSet(),
+    observed: summary.declared.kind === "declared" ? summary.declared.effects : unknownEffectSet(),
     effectWitness: new Map(),
     required:
       summary.capabilities.kind === "declared"
@@ -173,9 +173,7 @@ function deriveState(
   const hasDirectUnresolved = summary.calls.some((call) => call.kind === "unresolved");
 
   let merged: EffectSet = direct;
-  let required: CapabilitySet = hasDirectUnresolved
-    ? unknownCapabilitySet()
-    : emptyCapabilitySet();
+  let required: CapabilitySet = hasDirectUnresolved ? unknownCapabilitySet() : emptyCapabilitySet();
   const effectWitness = new Map<KnownEffect, SymbolId>();
   const capabilityWitness = new Map<string, SymbolId>();
   let unknownWitness: SymbolId | undefined;

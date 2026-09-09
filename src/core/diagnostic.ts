@@ -1,4 +1,3 @@
-import type { Capability } from "./capability.ts";
 import type { KnownEffect } from "./effects.ts";
 import type { SourceLocation } from "./location.ts";
 import type { SymbolId } from "./symbol-id.ts";

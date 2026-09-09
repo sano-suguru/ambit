@@ -53,7 +53,10 @@ export async function main(argv: readonly string[]): Promise<number> {
     const state = propagate(summaries);
     const engine = { name: legacyTsBackend.name, version: legacyTsBackend.version };
     diagnostics = applyStrict(
-      [...diagnose(state, engine), ...diagnoseUncarriedContracts(project.uncarriedContracts, engine)],
+      [
+        ...diagnose(state, engine),
+        ...diagnoseUncarriedContracts(project.uncarriedContracts, engine),
+      ],
       args.strict,
     );
     coverage = computeCoverage({
@@ -109,10 +112,7 @@ const KNOWN_FLAGS = new Set(["--format", "--coverage", "--strict"]);
  */
 const STRICT_PROMOTED_IDS: ReadonlySet<string> = new Set(["AMB-W001", "AMB-W003"]);
 
-function applyStrict(
-  diagnostics: readonly Diagnostic[],
-  strict: boolean,
-): readonly Diagnostic[] {
+function applyStrict(diagnostics: readonly Diagnostic[], strict: boolean): readonly Diagnostic[] {
   if (!strict) return diagnostics;
   return diagnostics.map((diagnostic) =>
     STRICT_PROMOTED_IDS.has(diagnostic.id)

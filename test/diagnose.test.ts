@@ -6,7 +6,7 @@ import { diagnose } from "../src/checker/diagnose.ts";
 import { propagate } from "../src/checker/propagate.ts";
 import { summarizeExtractedFiles } from "../src/checker/summarize.ts";
 import type { Diagnostic } from "../src/core/index.ts";
-import { NO_OTHER_CONTRACTS, observedEffects } from "./support/summary.ts";
+import { observedEffects } from "./support/summary.ts";
 
 const FIXTURE_ROOT = path.join(import.meta.dirname, "fixtures", "propagation");
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "..");

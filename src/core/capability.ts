@@ -109,7 +109,8 @@ export function excessCapabilities(
 export function unionCapabilitySets(a: CapabilitySet, b: CapabilitySet): CapabilitySet {
   const merged = [...a.capabilities];
   for (const capability of b.capabilities) {
-    if (!merged.some((existing) => capabilitiesEqual(existing, capability))) merged.push(capability);
+    if (!merged.some((existing) => capabilitiesEqual(existing, capability)))
+      merged.push(capability);
   }
   return { capabilities: merged, unknown: a.unknown || b.unknown };
 }
