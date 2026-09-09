@@ -56,8 +56,8 @@ Out of scope is what nothing asks for:
 - abstractions for hypothetical future requirements
 - refactoring unrelated to the change at hand
 - new languages, runtimes, or backends without a concrete need
-- treating the native TypeScript backend as adopted before its §3.5
-  validation gate passes
+- reopening the §3.5 backend decision without one of the conditions §3.5
+  itself lists having been met
 - assigning performance numbers to a backend that has not been run
 
 The last two are not size limits but honesty limits; they hold at any
@@ -93,8 +93,17 @@ record is one line: an issue, or a §12 bullet. Never an essay.
 `src/core/` and `src/stubs/` MUST NOT import `typescript`. The only file
 allowed to import it is `src/checker/backend/legacy-ts.ts` —
 `test/architecture.test.ts` enforces this boundary. `legacy-ts.ts` is the
-current connection-layer implementation, not an adopted product backend;
-treat it as disposable until §3.5 validation is done.
+**adopted** product backend: `docs/DESIGN.md` §3.5「既定バックエンド（決定）」
+chose it over native TypeScript 7 on compatibility grounds, with the
+measurements in `docs/status.md`. Changing the default now requires an RFC
+(§9), and the boundary above is what makes that reviewable — do not weaken it
+because the backend is settled.
+
+What any backend must satisfy is `test/backend.conformance.test.ts`, asserted
+against the `TsBackend` interface rather than against a compiler. One entry
+there is load-bearing rather than descriptive: `ExtractedFile.functions` ids
+must be unique per file, because `propagate`'s fixed point does not terminate
+otherwise.
 
 Compiler-specific objects, types, and internal IDs MUST NOT leak outside
 the connection layer — not into diagnostics, persisted formats, or public
@@ -110,7 +119,7 @@ path — a plan built on a guess here can look complete and fix nothing.
 
 Node.js 24 (pnpm 12, single package — no workspaces; splitting into
 `@ambit/*` packages waits until npm publish is in view), TypeScript
-5.9.3, Vitest 4, Biome.
+6.0.3, Vitest 4, Biome.
 
 Non-obvious constraints:
 
@@ -133,11 +142,34 @@ Non-obvious constraints:
 - `@types/node`'s major tracks the supported Active LTS major (currently
   24.x). Do not bump it ahead of `engines` — a newer major would type
   APIs that do not exist on the runtime Ambit claims to support.
-- `typescript` is pinned to `5.9.3` on purpose: it is the comparison
-  backend behind `src/checker/backend/legacy-ts.ts`, not merely
-  unmaintained (`docs/DESIGN.md` §3.1, Appendix A.1). It also currently
-  doubles as the build-time compiler for `tsc --noEmit` — see §12 for
-  why that pairing is provisional.
+- `typescript` is pinned to `6.0.3`, and the number has a rule behind it:
+  **the newest stable release of the JS-implementation line that leaves
+  `pnpm test`, `tsc --noEmit`, `biome ci`, and `check src` / `check
+  realistic-api` counts unchanged.** 6.0.3 was measured against that rule and
+  changed nothing (`docs/status.md`, M0.5). It is the analysis engine behind
+  `src/checker/backend/legacy-ts.ts`, adopted by `docs/DESIGN.md` §3.5, and it
+  doubles as the build-time compiler for `tsc --noEmit` — see §12 for why that
+  pairing is provisional. 7.x is a different engine (Go), not a newer version
+  of this one.
+- `tsconfig.json` must name `"types": ["node"]`. TypeScript 6 stopped
+  including `node_modules/@types/*` automatically; without the line, every
+  `node:` import and Node global in this repository is an error. The same line
+  is in the four fixture tsconfigs whose sources use Node builtins
+  (`backend-smoke`, `cross-module`, `init`, `propagation`).
+  `test/fixtures/realistic-api` deliberately declares `"types": []` — it must
+  type-check with nothing installed — so do not add it there.
+- Never add a second TypeScript to `package.json`, under an alias or
+  otherwise. `typescript@7` also declares `bin: { tsc }`, so the two collide
+  on `node_modules/.bin/tsc` and `pnpm exec tsc` silently changes compiler —
+  observed, and recorded in `docs/status.md` under M0.5 gate 5. The M0.5
+  comparison compiler lives in `.m05-native/` (gitignored), installed by
+  `node scripts/m05-native-install.ts`; `test/architecture.test.ts` keeps it
+  out of `src/` and out of the published package.
+- `scripts/` holds the M0.5 measurement procedures. It is linted and
+  formatted by Biome but is outside `tsconfig.json`'s `include` and outside
+  `package.json`'s `files`: the native probes load a compiler that is not
+  installed by default, so they cannot be type-checked, and nothing there
+  is shipped or run by `ambit check`.
 
 ## Verification
 

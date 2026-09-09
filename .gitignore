@@ -5,3 +5,5 @@ dist/
 .vscode/
 coverage/
 docs/goals/
+.m05-corpus/
+.m05-native/

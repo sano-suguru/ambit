@@ -97,7 +97,7 @@ describe("distribution: pack, install into a clean project, uninstall", () => {
     // that only works from a clone is not a distribution.
     const installed = await run(
       "npm",
-      ["install", "--no-audit", "--no-fund", "-D", tarball, "typescript@5.9.3", "hono@4"],
+      ["install", "--no-audit", "--no-fund", "-D", tarball, "typescript@6.0.3", "hono@4"],
       consumer,
     );
     expect(installed.exitCode, installed.stderr).toBe(0);

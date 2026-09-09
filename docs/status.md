@@ -7,17 +7,30 @@ records *implementation status*, not design — the specification itself is
 Measured on 2026-09-09, Node.js v24.20.0, macOS (darwin arm64), Apple M1,
 8 cores, 16 GiB. Every number below was run, not estimated.
 
-**Verdict: not a release candidate.** M0.5 has not been run at all, M1 has no
-incremental path, and M2–M4 are partial. The details are per row.
+**Verdict: not a release candidate.** M0.5 is now complete — all five gates
+ran, and the default backend is decided (DESIGN.md §3.5「既定バックエンド
+（決定）」: the legacy TypeScript Compiler API). M1 still has no incremental
+path, and M2–M4 are partial. The details are per row.
 
 ## Baseline commands
 
 ```sh
-pnpm test                     # 305 tests, 20 files — pass
+pnpm test                     # 335 tests, 21 files — pass
 pnpm exec tsc --noEmit        # pass
 ./node_modules/.bin/biome ci .  # pass
 node src/cli/main.ts check src --coverage   # exit 0
 node src/cli/main.ts check test/fixtures/realistic-api --coverage   # exit 0
+```
+
+The M0.5 comparison is a separate, manual procedure — it spawns a Go engine and
+takes wall-clock measurements, neither of which belongs in CI:
+
+```sh
+node scripts/m05-native-install.ts                  # into .m05-native/ (gitignored)
+node scripts/m05-corpus.ts .m05-corpus 300          # the 300-file scale corpus
+node scripts/m05-backend-compare.ts --corpus <dir> --runs 5
+node scripts/m05-update-correctness.ts
+node scripts/m05-probe/native-primitives.ts test/fixtures/backend-conformance
 ```
 
 `pnpm exec biome ci .` returns 1 in one local shell because of a
@@ -28,22 +41,36 @@ runs `pnpm exec biome ci .` in GitHub Actions, where no such wrapper exists.
 
 ## Ambit's own source (`check src --coverage`)
 
-| Figure | After the runtime hooks | After the Hono adapter | Before `ambit.config.ts` | After `ambit.config.ts` |
+| Figure | After the Hono adapter | Before `ambit.config.ts` | After `ambit.config.ts` | After M0.5 |
 |---|---|---|---|---|
-| files analyzed | 26 | 27 | 27 | 29 |
-| functions extracted | 193 | 194 | 202 | 236 |
-| functions with a declared `@effects` | 4 | 4 | 4 | 4 (jsdoc 4, config 0) |
-| `unknown` rate | 64.2% (124/193) | 64.4% (125/194) | 63.4% (128/202) | **65.7% (155/236)** |
-| `boundary` rate | 0.0% (0/193) | 0.0% (0/194) | 0.0% (0/202) | 0.0% (0/236) |
-| call sites | 997 — resolved 298, stub 3, known-pure 257, mutation 94, unresolved 345 | 1003 — resolved 299, stub 3, known-pure 258, mutation 94, unresolved 349 | 1035 — resolved 315, stub 3, known-pure 260, mutation 93, unresolved 364 | 1278 — resolved 404, stub 8, known-pure 327, mutation 110, unresolved 429 |
-| unresolved by reason | `builtin-method` 68, `external-module` 264, `unresolved-symbol` 11, `callback-parameter` 2 | `builtin-method` 68, `external-module` 265, `unresolved-symbol` 12, `callback-parameter` 4 | `builtin-method` 72, `external-module` 276, `unresolved-symbol` 12, `callback-parameter` 4 | `builtin-method` 102, `external-module` 307, `dynamic-import` 1, `unresolved-symbol` 15, `callback-parameter` 4 |
-| skipped function-like nodes | 88 (`callback-argument` 74, `nested-function` 14) | 90 (`callback-argument` 75, `nested-function` 15) | 91 (`callback-argument` 76, `nested-function` 15) | 109 (`callback-argument` 91, `object-literal-method` 3, `nested-function` 15) |
+| files analyzed | 27 | 27 | 29 | 29 |
+| functions extracted | 194 | 202 | 236 | 238 |
+| functions with a declared `@effects` | 4 | 4 | 4 (jsdoc 4, config 0) | 4 (jsdoc 4, config 0) |
+| `unknown` rate | 64.4% (125/194) | 63.4% (128/202) | 65.7% (155/236) | **66.0% (157/238)** |
+| `boundary` rate | 0.0% (0/194) | 0.0% (0/202) | 0.0% (0/236) | 0.0% (0/238) |
+| call sites | 1003 — resolved 299, stub 3, known-pure 258, mutation 94, unresolved 349 | 1035 — resolved 315, stub 3, known-pure 260, mutation 93, unresolved 364 | 1278 — resolved 404, stub 8, known-pure 327, mutation 110, unresolved 429 | 1287 — resolved 406, stub 8, known-pure 327, mutation 110, unresolved 436 |
+| unresolved by reason | `builtin-method` 68, `external-module` 265, `unresolved-symbol` 12, `callback-parameter` 4 | `builtin-method` 72, `external-module` 276, `unresolved-symbol` 12, `callback-parameter` 4 | `builtin-method` 102, `external-module` 307, `dynamic-import` 1, `unresolved-symbol` 15, `callback-parameter` 4 | `builtin-method` 102, `external-module` 314, `dynamic-import` 1, `unresolved-symbol` 15, `callback-parameter` 4 |
+| skipped function-like nodes | 90 (`callback-argument` 75, `nested-function` 15) | 91 (`callback-argument` 76, `nested-function` 15) | 109 (`callback-argument` 91, `object-literal-method` 3, `nested-function` 15) | 109 (`callback-argument` 91, `object-literal-method` 3, `nested-function` 15) |
 | exit code | 0 | 0 | 0 | 0 |
 
-The two earliest columns (before and after DESIGN.md §4.2's local-mutation
-rule: 19/163 and 21/176) are dropped from the table to keep it readable; the
-paragraphs below still describe that change, and its numbers are in the git
-history of this file.
+The "After M0.5" column is the current tree. It moved by two functions and
+nothing else: `unwrapNonNullAssertions` and `implementationDeclarationOf`, both
+added to `src/checker/backend/legacy-ts.ts` by the M0.5 fixes below, both
+undeclared, both calling the `typescript` API (`external-module` 307 → 314).
+The rate is a per-function ratio, so two more unknown connection-layer helpers
+cost 0.3 points; no resolution got worse. Measured against commit `a39898c` in
+the same session, by the same command, in a `git worktree` of that commit:
+236 functions / 65.7% / 1278 call sites there, 238 / 66.0% / 1287 here.
+
+`skippedFunctions` gained no `bodyless-declaration` entries because `src/`
+contains no overload signature, `abstract` member, or `.ts`-file `declare`. That
+is why the fix is invisible in this table and visible only in
+`test/fixtures/backend-conformance`.
+
+The three earliest columns (before and after DESIGN.md §4.2's local-mutation
+rule: 19/163 and 21/176, and "after the runtime hooks": 64.2%, 124/193) are
+dropped from the table to keep it readable; the paragraphs below still describe
+those changes, and their numbers are in the git history of this file.
 
 The last column is `src/` with `ambit.config.ts` implemented, measured on
 2026-09-09 with `node src/cli/main.ts check src --coverage`. The
@@ -199,6 +226,12 @@ of `unknown` in the fixture.
 | `check src` after changing one contract comment | 0.81 s |
 | `check src`, five consecutive runs, 2026-09-09 (21 files, 176 functions) | 0.90 / 0.77 / 0.92 / 0.78 / 0.78 s |
 | `check src`, five consecutive runs, 2026-09-09 after `ambit.config.ts` (29 files, 236 functions) | 1.35 / 0.94 / 0.87 / 0.93 / 0.98 s |
+| `check src`, five consecutive runs, 2026-09-09 after M0.5 (29 files, 238 functions) | 1.24 / 0.88 / 1.17 / 0.99 / 1.02 s |
+
+The backend's share of that is now measured separately (the M0.5 section
+above): 426 ms of program construction plus 110 ms of walking, on the same
+tree. The rest is Ambit's own summarizing, propagation and diagnostics, plus
+Node's type stripping of the whole source tree on every start.
 
 The re-check costs the same as the first check because **nothing is cached**.
 DESIGN.md §6.2's resident/incremental path is not implemented, so "初回検査"
@@ -221,6 +254,342 @@ That is machine load, not a change in the analysis, and neither range is
 recorded as a figure for this build. A comparable measurement needs a quiescent
 machine, and §3.5's performance gate has not run either way.
 
+## M0.5 — the backend comparison, measured
+
+Every number here was run on 2026-09-09, Node.js v24.20.0, macOS (darwin
+arm64), Apple M1, 8 cores, 16 GiB, from this repository. The procedure is
+`scripts/m05-backend-compare.ts`, `scripts/m05-update-correctness.ts`,
+`scripts/m05-corpus.ts` and `scripts/m05-probe/native-primitives.ts`; the
+decision they led to is DESIGN.md §3.5「既定バックエンド（決定）」.
+
+Two things in this section were corrected after first being written, and both
+corrections are kept in place rather than edited out: gate 2's cause (it is
+TypeScript 6's behaviour, not the Go port's) and the version on the legacy side
+(5.9.3 was a scaffolding default; 6.0.3 was measured and adopted). Each is
+recorded where it belongs below.
+
+**The candidates.** `typescript` through the Compiler API, as
+`src/checker/backend/legacy-ts.ts` uses it — the comparison ran against 5.9.3,
+which is what the repository was pinned to, and 6.0.3 was measured afterwards
+(see "The version within the adopted line" below) and adopted. And `typescript`
+7.0.2 — npm's `latest` — through `typescript/unstable/sync`, a JavaScript
+client talking to a Go engine in a child process. Oxc was not carried forward from
+Appendix A: it is a parser, and §3.5 gate 4 forbids comparing parsing against
+type-aware analysis. Nothing was measured for a backend that did not run.
+
+**Appendix A.2's blocker is gone.** It recorded the Go engine failing at
+`/proc/self/exe` before initializing. That was environment-specific: the same
+distributed 7.0.2 starts on this machine, opens a project, and answers symbol,
+type and JSDoc queries. Everything below is therefore a first measurement, not
+a repetition — and Linux was **not** re-verified here.
+
+### Gate 1 — API conformance
+
+`test/backend.conformance.test.ts` (28 tests, in `pnpm test`) is the permanent
+half. It asserts against the `TsBackend` interface rather than against a
+compiler, so a second implementation is judged by the same assertions, and it
+covers the shapes §3.5 names that `test/backend.legacy-ts.test.ts` did not:
+generic, overload, union, `any` vs. the non-null assertion, recursion, JSDoc
+tag *locations*, and Unicode positions. Aliased import, re-export and callback
+were already covered there and are not duplicated.
+
+**It found a release-blocking defect in the current tree, and the defect is
+backend-independent.** An overload set is several declarations under one
+declaration path, and all of them were extracted. Two consequences:
+
+- `propagate` keyed its state by `SymbolId` and iterated the summaries array.
+  Two entries sharing an id overwrite each other every pass, so `changed` never
+  goes false. `ambit check` on a file with an overloaded function whose
+  implementation contains any call **does not terminate** — verified by
+  `timeout 15 node src/cli/main.ts check <dir>` returning 124 on a seven-line
+  fixture (two signatures, an implementation calling `fetch`, and one caller),
+  and by `test/backend.conformance.test.ts`'s fixed-point test. An overload set
+  whose implementation calls nothing does not hang, which is why `src/` never
+  showed it.
+- A call to an overloaded function resolved to `declarations[0]`, the first
+  bodyless *signature*. A bodyless declaration infers an empty effect set, so a
+  caller of an overloaded `fetch` wrapper read as `pure`. For an overload set
+  with no implementation at all (`declare function`), that was the only outcome.
+
+Fixed: only the implementation is extracted (`bodyless-declaration` is a new
+`SkippedFunctionKind`), calls resolve to the implementation, an overload set
+with no implementation is `overload-without-body`, and a contract written on a
+bodyless signature is AMB-E003 instead of being silently dropped. The rule is
+DESIGN.md §4.1「オーバーロードと本体のない宣言（決定）」;
+`ExtractedFile.functions` now states id-uniqueness as a backend requirement,
+because `propagate`'s termination argument rests on it.
+
+A second, smaller defect the same suite found: `f!()` reported
+`unresolved-symbol` where `f?.()` reported `callback-parameter`, because the
+`NonNullExpression` wrapper hid the parameter declaration. DESIGN.md §12
+requires `as any` and `!` to be told apart, and this told them apart in the
+wrong direction — `!` was costing more information than the cast. Fixed by
+unwrapping the assertion before resolving the callee; `(f as any)()` still
+reports `any-typed`, and the conformance suite now pins both.
+
+**Native, on the same fixtures.** `node scripts/m05-probe/native-primitives.ts
+test/fixtures/backend-{smoke,conformance}` — no blocker, but not free either:
+
+| Primitive Ambit needs | 7.0.2 |
+|---|---|
+| `getSymbolAtLocation`, `getAliasedSymbol`, `getTypeAtLocation`, `getResolvedSignature`, `getShorthandAssignmentValueSymbol`, `getImmediateAliasedSymbol` | present, with batch overloads |
+| `isSourceFileDefaultLibrary` / `isSourceFileFromExternalLibrary` | present |
+| JSDoc tag **locations** | present — `getJSDocTags(node)` returns AST nodes with `pos`/`end`, and `getLineAndCharacterOfPosition` documents UTF-16 code units. Verified: `@effects fs_read` on `recursion.ts#leafReadsFile` at line 5, cols 5–22 — the same range `test/backend.conformance.test.ts` asserts for legacy |
+| Unicode positions | correct. On the astral line of `unicode.ts`, native reported character 25, where UTF-16 says 25, UTF-8 bytes say 29 and code points say 23 |
+| overload declaration structure | identical — `widen` reports 3 declarations, `sig,sig,impl`, and `getJSDocTags` reads the tag off a bodyless signature |
+| `getFullyQualifiedName` | **absent.** `pureBuiltinName` (`"Set.has"`) and the `builtin-method` / `external-module` split depend on it. Reconstructable from the symbol parent chain — `Set -> has` was verified for a default-lib method — but only one shape was checked |
+| `ts.isGetAccessor` / `isSetAccessor` / `isClassLike` | renamed, not missing: `isGetAccessorDeclaration`, `isSetAccessorDeclaration`, `isClassLikeDeclaration` |
+| `ts.forEachChild` as a module export | absent; it is a method on `Node` instead |
+
+### Gate 2 — existing-code compatibility
+
+**This is the gate native failed.** TypeScript 7.0.2 does not include
+`node_modules/@types/*` automatically; 5.9.3 does. Isolated by bisecting a
+tsconfig down to `{}` and back up: every configuration fails on 7.0.2 until
+`"types": ["node"]` is named explicitly. It is not a pnpm artifact — a clean
+`npm install @types/node@24` in a scratch directory reproduces it — and it is
+not about `node:` specifiers: unprefixed `path`, and the `process` and `Buffer`
+globals, fail the same way. A package that ships its own `.d.ts` (`hono@4`)
+resolves on both.
+
+Measured on this repository, same `tsconfig.json`, both compilers invoked by
+explicit path:
+
+| | 5.9.3 | 7.0.2 |
+|---|---|---|
+| `tsc --noEmit` on `src/` + `test/` | 0 errors | **198 errors**, all TS2591 |
+| calls resolved in `src/` (gate-4 probe) | 1,212 of 1,213 | 1,143 of 1,213 |
+| of which classified `external` | 325 | 267 |
+
+The 69-call gap is what the analysis loses, not just what the type checker
+complains about: 58 of the 69 are `external`, which is where the stub table
+matches `node:fs` and friends to known effects. Those calls become `unknown`.
+
+**This gate was first written up as the reason native lost. That was wrong, and
+the correction matters more than the original finding.** The behaviour is not a
+property of the Go port — it is TypeScript 6's. `typescript@6.0.3`, the
+JavaScript implementation, does exactly the same thing:
+
+| | 5.9.3 | 6.0.3 | 7.0.2 |
+|---|---|---|---|
+| `node:path` import, no `types` field | OK | TS2591 | TS2591 |
+| the same, with `"types": ["node"]` | OK | OK | OK |
+| `tsc --noEmit` on this repository | 0 errors | 198 errors → 0 with the line | 198 errors |
+
+So it could not be counted against the native engine, and DESIGN.md §3.5
+withdraws it as a reason. The decision itself did not change; its stated basis
+did. The lesson is narrower than the finding: a difference measured against one
+version of one implementation is not yet a property of that implementation.
+
+The tsconfig surface differs by version in both directions, and 6.0.3 sits
+between as the deprecation bridge (each row run through all three compilers on
+the same file):
+
+| tsconfig option | 5.9.3 | 6.0.3 | 7.0.2 |
+|---|---|---|---|
+| `esModuleInterop` | accepted | accepted | accepted |
+| `baseUrl`, `downlevelIteration` | accepted | TS5101 "deprecated and will stop functioning in TypeScript 7" | TS5102 "has been removed" |
+| `importsNotUsedAsValues` | accepted | accepted | TS5023 "unknown compiler option" |
+| `stableTypeOrdering` | TS5023 "unknown" | accepted | accepted |
+| `deduplicatePackages` | TS5023 "unknown" | TS5023 "unknown" | accepted |
+
+The last two rows are a cost of the decision, not a point in its favour: a
+tsconfig naming `deduplicatePackages` is one that Ambit's analyzer refuses to
+start on. DESIGN.md §12「TypeScript 版間の互換性」holds it.
+
+### Gate 3 — update correctness
+
+`node scripts/m05-update-correctness.ts`. One change at a time in a throwaway
+copy of `test/fixtures/backend-conformance`, checked at the backend level. This
+is not M1's resident checker and does not implement one.
+
+| Change | legacy | native, told (`fileChanges`) | native, not told |
+|---|---|---|---|
+| function body — a new `fetch` call appears | reported | reported | **stale** |
+| contract comment only — `@effects fs_read` → `network` | reported | reported | **stale** |
+| export — `leafReadsFile` stops being exported | reported | reported | **stale** |
+| re-query latency | 214 / 264 / 272 ms | 1.0 / 1.0 / 1.9 ms | — |
+
+Both are correct when told. The asymmetry is what happens when they are not:
+`ambit check` builds a fresh `ts.Program` every run, so the legacy path cannot
+go stale — and cannot go fast, which is exactly what §6.2 exists to fix. The
+native snapshot answers from its previous state and **reports no error while
+doing so**; a contract-comment change simply does not exist. Adopting it means
+owning file-change tracking correctly on pain of turning a violation into a
+clean run, which DESIGN.md §3.4 forbids.
+
+`ambit.config.ts` and stub changes are not in the table on purpose. Both are
+read by Ambit and never by a compiler (`src/checker/config.ts`, `src/stubs/*`),
+so the two backends receive identical bytes through identical code. Measuring
+them per backend would report one number twice.
+`test/e2e.config.test.ts` already covers that a config change changes the
+diagnostics.
+
+### Gate 4 — performance and memory
+
+`node scripts/m05-backend-compare.ts --corpus <dir> --runs 5`. Both probes do
+the same semantic work — walk every project-local file, read every function's
+JSDoc tags, and for every call resolve the callee to a symbol, follow an import
+alias, take the declaration and classify its source file. Ambit's own
+classification is left out of *both* sides, because it is plain JavaScript that
+does not vary by backend. Each measurement is its own Node process, and the two
+backends are interleaved run by run.
+
+Every reported figure is the median of 5 runs; all five are printed by the
+script.
+
+Re-run after adopting 6.0.3, so the legacy column is the shipped version:
+
+| Corpus | Backend | Startup | Extract | Total | Peak RSS (node + child) |
+|---|---|---|---|---|---|
+| `.m05-corpus`, 301 files / 1,799 calls | legacy 6.0.3 | 411 ms | 39 ms | **450 ms** | 346 + 0 MiB |
+| | native 7.0.2 | 55 ms | 104 ms | **159 ms** | 103 + 107 MiB |
+| `test/fixtures/realistic-api`, 19 files / 92 calls | legacy 6.0.3 | 118 ms | 26 ms | **145 ms** | 189 + 0 MiB |
+| | native 7.0.2 | 21 ms | 18 ms | **39 ms** | 89 + 44 MiB |
+| `src`, 35 files / 1,213 calls | legacy 6.0.3 | 426 ms | 110 ms | **535 ms** | 356 + 0 MiB |
+| | native 7.0.2 | 54 ms | 103 ms | **154 ms** | 100 + 136 MiB |
+
+All three corpora now produce byte-identical counts on both backends —
+301/1500/300/1799/1799/600/300/899, 19/71/64/92/92/31/0/61 and
+35/346/4/1213/1212/485/325/402 — which is what makes them comparable at all,
+and the script refuses to present a ratio when they do not. `src` was *not*
+comparable in the first run of this gate (native resolved 1,143 against
+legacy's 1,212); naming `"types": ["node"]` in `tsconfig.json`, which
+adopting 6.0.3 required anyway, closed that. `.m05-corpus` names it for the
+same reason: without it, gate 4 re-measures gate 2 instead of measuring speed.
+
+**How stable these are.** The table is one quiet-machine session. Re-running
+the same command later the same day, on a busier machine and with the Go binary
+cold from a fresh install, gave legacy 471 ms and native 201 ms on
+`.m05-corpus` — 3% and 28% above the recorded medians. The spread is real and
+worth knowing before quoting a ratio to two figures; it does not move any gate,
+since the allowances are 10 s and 1 GiB. Note also that the first run of a
+freshly installed native engine is an outlier (505 ms total, against a 201 ms
+median for that same session): the 23 MB binary has to be paged in.
+
+Native's IPC, from the API's own `getTimingInfo()`: 3,008 requests and 3.3 MiB
+received for the 301-file corpus, 173 requests and 1.2 MiB for
+`realistic-api`, 1,416 requests and 7.3 MiB for `src`. Transport time was
+53 ms of the 159 ms total (33%), 12 ms of 39 ms (30%) and 37 ms of 154 ms
+(24%) — under, but not far under, the 50% line §3.5 set for calling transport a
+dominant factor.
+
+**Against the allowances set before measuring (DESIGN.md §3.5):**
+
+| Allowance | legacy 6.0.3 | native 7.0.2 |
+|---|---|---|
+| 30-file first check ≤ 3 s | 145 ms ✓ | 39 ms ✓ |
+| 300-file first check ≤ 10 s | 450 ms ✓ | 159 ms ✓ |
+| re-query after one file ≤ 500 ms | 214–272 ms ✓ | 1.0–1.9 ms ✓ |
+| peak RSS (parent + child) ≤ 1 GiB | 346 MiB ✓ | 210 MiB ✓ |
+| transport not the dominant factor | n/a | 24–33% ✓ |
+
+Both pass everything. Native is 2.8×–3.7× faster and uses less total memory,
+and none of that speed is required by any allowance — which is the point of
+having set them first.
+
+The product-level number is separate and unchanged in kind: `ambit check src`
+still costs the same on a re-check as on a first check, because nothing is
+cached (§6.2). The 214–272 ms above is the backend half of that; the rest is
+Ambit's own analysis and diagnostics.
+
+### Gate 5 — distribution and maintenance
+
+| | legacy (`typescript`, JS implementation) | native (`typescript` 7.0.2, Go) |
+|---|---|---|
+| Install size | 23 MB (5.9.3), one pure-JS package | 3.5 MB JS + 26 MB platform package (a 23 MB `tsc` binary) |
+| Platform packages | none | 20 `optionalDependencies`, pinned to the exact version |
+| OS / CPU | wherever Node runs | win32, darwin, linux, aix, freebsd, netbsd, openbsd, sunos across x64/arm64/arm/loong64/mips64el/ppc64/riscv64/s390x. The linux-x64 binary is **statically linked** (verified with `file`), so musl/Alpine needs no separate build |
+| Processes | none | one Go child per `API` instance |
+| Missing binary | n/a | clear failure: `Unable to resolve @typescript/typescript-darwin-arm64. Either your platform is unsupported, or you are missing the package on disk.` |
+| Engine crash mid-session | n/a | opaque: killing the child makes the next call throw `EBADF: bad file descriptor, write`. Ambit would have to translate that into a diagnostic, or an engine death reads as a generic I/O error |
+| API stability | stable and public since TS 1.x | all 12 entry points are `unstable/*`; `next` publishes daily dev builds |
+| `node_modules/.bin/tsc` | `tsc` | also `tsc` — **they collide** |
+
+The last row was observed, not predicted. Installing 7.0.2 as a devDependency —
+even under the alias `typescript-native` — made `pnpm exec tsc --version` report
+7.0.2, and the repository's own type check produced the 198 errors in gate 2.
+That is DESIGN.md §12「ビルド用コンパイラと解析エンジンの分離」happening in
+practice: one `bin` name, two compilers, and the verification command silently
+changes meaning. The alias was removed. The comparison compiler now lives in
+`.m05-native/` (gitignored), installed by `node scripts/m05-native-install.ts`,
+outside this package's dependency tree; `test/architecture.test.ts` asserts that
+`src/` cannot reach it and that `dependencies` stays exactly `["typescript"]`.
+
+### The version within the adopted line
+
+The comparison above was framed as "legacy vs native" and took 5.9.3 as given.
+It was not given: `git log` shows it entering at the first commit
+(`2d98301 chore: project scaffolding`) and never revisited, and Appendix A
+records it as 「比較用 alias で導入」 — the *representative of the old API*,
+never a considered product choice. One side of a decision about which analyzer
+to ship had no recorded reason behind its version number.
+
+`typescript` 6.0.3 (2026-04-16) is a stable release of the same JavaScript
+implementation — `bin: { tsc, tsserver }`, no `exports` map, no platform
+packages, `engines: node >= 14.17`, the same shape as 5.9.3. It is not the Go
+port. npm's `dist-tags` hide this: `beta` still points at `6.0.0-beta` from
+February, five months older than 6.0.3, so `npm view typescript dist-tags`
+suggests the 6 line never stabilized. `npm view typescript versions` is the
+source that shows 6.0.2 and 6.0.3.
+
+The rule was written before measuring, as §3.5's allowances were:
+
+> The analysis engine is the newest stable release of the JS-implementation
+> line that leaves `pnpm test`, `tsc --noEmit`, `biome ci`, and
+> `check src --coverage` / `check realistic-api --coverage` counts unchanged,
+> or changed only by deltas that can be named. If 6.0.3 fails that, the
+> specific failure is the reason 5.9.3 stays.
+
+Measured in a `git worktree` with `typescript` set to 6.0.3 and a fresh
+install:
+
+| | 5.9.3 | 6.0.3 |
+|---|---|---|
+| `pnpm test` | 335 pass | 335 pass |
+| `tsc --noEmit` | 0 | 0 |
+| `check src --coverage` | 29 files, 238 functions, 66.0%, 109 skipped, 1287 call sites | identical, including the `unresolved-by-reason` breakdown |
+| `check realistic-api --coverage` | 16 files, 53 functions, 20.8%, 76 call sites | identical |
+| gate-4 probe on `src` | 1,213 calls: resolved 1,212, defaultLib 485, external 325, local 402 | identical |
+| the same probe, wall clock | 556 / 556 / 567 ms | 560 / 582 / 987 ms (first run cold) |
+| peak RSS | 356 MiB | 354 MiB |
+
+The last two rows are the controlled A/B: same worktree, same tsconfigs, only
+the compiler swapped, so nothing but the compiler can explain a difference —
+and there is none outside run-to-run noise.
+
+**6.0.3 adopted.** The cost is `"types": ["node"]` in `tsconfig.json` and in
+the four fixture tsconfigs whose sources use Node builtins (`backend-smoke`,
+`cross-module`, `init`, `propagation`). `test/fixtures/realistic-api` already
+declared `"types": []` on purpose — it must type-check with nothing installed —
+which is why its numbers never moved, and adding the line there breaks it
+(verified: TS2688, plus one backend test flipping `ambient-declaration` to
+`external-module` because `response.json()` starts resolving to `@types/node`).
+
+What this buys is not speed or resolution — both are unchanged to the count.
+It is that the version now has a rule behind it instead of a scaffolding
+default, recorded in `AGENTS.md`. Staying would have needed the opposite
+sentence ("6.0.3 improves nothing"), which expires the next time the line
+releases.
+
+### Decision
+
+**The JavaScript-implementation TypeScript Compiler API is the default for the
+initial release, at version 6.0.3.** DESIGN.md §3.5「既定バックエンド（決定）」
+records it, with the reasoning and the conditions that would reopen it. In one
+line: adopting the native engine means a second backend on an API published
+entirely under `unstable/`, plus owning snapshot invalidation on pain of silent
+staleness, and its speed buys no threshold that the JS implementation does not
+already meet.
+
+`src/checker/backend/legacy-ts.ts` therefore stops being "a throwaway pending
+§3.5" and becomes the adopted backend. Its engine id stays `typescript-legacy`
+— it names the JavaScript implementation as against the Go one, and does not
+mean unmaintained; diagnostics now report `version: "6.0.3"`. Its file comment, `src/core/backend.ts`'s
+`TsBackend` doc, and `AGENTS.md`'s Architecture section were updated to say so
+in this change — a file that calls itself disposable after the decision to keep
+it is a claim the tree no longer supports.
+
 ## Milestones
 
 ### M0 — specification, diagnostic ledger, RFC procedure, scope
@@ -238,10 +607,10 @@ machine, and §3.5's performance gate has not run either way.
 | | |
 |---|---|
 | Spec section | §3.5, Appendix A |
-| Acceptance | publish §3.5 evidence, adopt a default backend by RFC |
-| Implemented | nothing beyond Appendix A's preliminary probe |
-| Evidence | none — Appendix A explicitly records the native engine failing to start |
-| Outstanding | **All five gates.** No API-conformance suite, no TS 5.x compatibility comparison, no update-correctness matrix, no performance or memory comparison, no distribution/maintenance assessment. `src/checker/backend/legacy-ts.ts` remains a disposable connection layer, not an adopted product backend. No performance number is assigned to any unrun backend. |
+| Acceptance | publish §3.5 evidence, adopt a default backend |
+| Implemented | **All five gates ran.** Allowances fixed in DESIGN.md §3.5 *before* measuring. Gate 1: `test/backend.conformance.test.ts` (28 tests) against the `TsBackend` interface, plus a native primitive probe. Gate 2: both compilers on the same tsconfigs and the same tree. Gate 3: `scripts/m05-update-correctness.ts`. Gate 4: `scripts/m05-backend-compare.ts` + `scripts/m05-corpus.ts`, 5 interleaved runs per corpus, equal counts enforced. Gate 5: install size, platform coverage, failure modes, `bin` collision. **Default backend decided**: the legacy Compiler API (DESIGN.md §3.5「既定バックエンド（決定）」). Pre-publish, so §9 sends it to `docs/DESIGN.md` directly rather than to an RFC |
+| Evidence | The "M0.5 — the backend comparison, measured" section above, including "The version within the adopted line" (why `typescript` is 6.0.3 and not the scaffolding default 5.9.3). Every figure was run; the one corpus where the two backends did not do equal work is labelled not comparable rather than turned into a ratio |
+| Outstanding | **Linux is not re-verified.** Appendix A's `/proc/self/exe` failure was environment-specific and the engine runs on darwin/arm64; no Linux run was made in this comparison, so nothing is claimed about it either way. Gate 1's native column checked `getFullyQualifiedName` reconstruction on **one** symbol shape, not on the external-package or project-`.d.ts` shapes. Gates 3 and 4 are worth re-running once §6.2's resident path exists, which is the second of §3.5's three reopening conditions — until then native's 1 ms re-query has nowhere in the product to appear. `conformance/` as a published, external suite (§9) still waits for the first publish; `test/backend.conformance.test.ts` is its stand-in |
 
 ### M1 — effects, unknown, coverage, JSON diagnostics, init, resident path
 

@@ -53,6 +53,42 @@ describe("architecture constraint: only the connection layer depends on typescri
   });
 });
 
+describe("architecture constraint: the M0.5 comparison probes stay out of the product", () => {
+  // DESIGN.md §3.5's gate probes live under `scripts/` and load a second
+  // TypeScript compiler from `.m05-native/`, outside this package's
+  // dependencies. They are measurement code: nothing shipped may import them,
+  // and no second compiler may enter `src/` without the backend decision in
+  // §3.5 changing first. The `typescript` rule above would not catch either,
+  // because neither is spelled `"typescript"`.
+  const FORBIDDEN = [
+    { pattern: /from\s+["'][^"']*scripts\//, what: "scripts/" },
+    { pattern: /from\s+["']typescript-native/, what: '"typescript-native"' },
+    { pattern: /\.m05-native/, what: "the M0.5 native compiler install" },
+  ];
+
+  it("no file under src/ reaches the comparison probes or a second compiler", async () => {
+    const files = await listTsFiles(path.join(PROJECT_ROOT, "src"));
+    for (const file of files) {
+      const relative = path.relative(PROJECT_ROOT, file);
+      const content = await readFile(file, "utf8");
+      for (const { pattern, what } of FORBIDDEN) {
+        expect(pattern.test(content), `${relative} references ${what}`).toBe(false);
+      }
+    }
+  });
+
+  it("the published package does not ship the probes or the native install", async () => {
+    const manifest = JSON.parse(
+      await readFile(path.join(PROJECT_ROOT, "package.json"), "utf8"),
+    ) as { files: readonly string[]; dependencies: Record<string, string> };
+    expect(manifest.files).not.toContain("scripts");
+    // A second compiler as a dependency would also collide on
+    // `node_modules/.bin/tsc` and silently change what `pnpm exec tsc` means
+    // (docs/status.md, M0.5 gate 5).
+    expect(Object.keys(manifest.dependencies)).toEqual(["typescript"]);
+  });
+});
+
 describe("architecture constraint: the config layer is independent of the compiler", () => {
   // DESIGN.md §4.1 (c): `ambit.config.ts` is loaded by importing it, not by
   // parsing it, and the contracts it declares are plain data about symbol ids

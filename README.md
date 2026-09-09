@@ -234,10 +234,21 @@ the one that keeps the contract and rewrites the code.
 
 Ambit is experimental and not production-ready; diagnostic ids and the NDJSON
 field shape can still change. `check src` over Ambit's own source — 29 files,
-236 functions — takes 0.87–1.35 s across five runs. Nothing is cached, so a
-re-check costs the same, and nothing larger than that has been measured yet.
-What is implemented and what is not, milestone by milestone with the measured
-numbers behind it, is in [docs/status.md](docs/status.md).
+238 functions — takes 0.88–1.24 s across five runs. Nothing is cached, so a
+re-check costs the same. The analysis backend has been measured on a
+300-file project (458 ms, 348 MiB peak) as part of choosing it; the CLI on top
+of it has not. What is implemented and what is not, milestone by milestone with
+the measured numbers behind it, is in [docs/status.md](docs/status.md).
+
+The analysis runs on the TypeScript Compiler API (`typescript` 6.0.3, the
+JavaScript implementation). That is a decision, not an accident: it was
+compared against native TypeScript 7 (the Go implementation), which is three to
+four times faster and was still not adopted — its API is published entirely
+under `unstable/`, it answers from a stale snapshot without saying so unless it
+is told which files changed, and none of its speed was needed to meet any
+threshold set beforehand. [docs/DESIGN.md](docs/DESIGN.md) §3.5 records the
+decision and what would reopen it; [docs/status.md](docs/status.md) has the
+measurements.
 
 ## Docs / License
 

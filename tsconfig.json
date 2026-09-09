@@ -4,6 +4,10 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": ["ES2023"],
+    // TypeScript 6 no longer includes `node_modules/@types/*` automatically
+    // (5.9.3 did). Without this, every `node:` import and every Node global in
+    // this repository is an error — measured, docs/status.md M0.5 gate 2.
+    "types": ["node"],
     "strict": true,
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,

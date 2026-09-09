@@ -10,6 +10,7 @@
     "includes": [
       "src/**",
       "test/**",
+      "scripts/**",
       "*.json",
       "*.md",
       "!test/fixtures/broken-tsconfig/tsconfig.json"
