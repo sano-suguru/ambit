@@ -19,6 +19,7 @@ import type {
 import {
   callLeavesUnknown,
   DEFAULT_ON_EXCEED,
+  displayName,
   excessCapabilities,
   excessEffects,
   formatBudget,
@@ -920,15 +921,4 @@ function declaredContractList(
   declared: ReadonlySet<KnownEffect>,
 ): readonly (KnownEffect | "pure")[] {
   return declared.size === 0 ? ["pure"] : [...declared];
-}
-
-function displayName(id: SymbolId): string {
-  const afterHash = id.split("#")[1] ?? id;
-  const parts = afterHash.split(".");
-  const last = parts[parts.length - 1];
-  if (last === undefined) return id;
-  // A bare "constructor" names nothing — keep the class with it
-  // (`Client.constructor`), since every class contributes one.
-  if (last === "constructor" && parts.length >= 2) return `${parts[parts.length - 2]}.${last}`;
-  return last;
 }

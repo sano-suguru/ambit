@@ -285,6 +285,44 @@ describe("ambit check (CLI)", () => {
     ).toBe(true);
   });
 
+  it("prints every via hop with its own file:line, and no path line where there is no path", async () => {
+    // DESIGN.md §5: the text output is a rendering of the structured
+    // diagnostic, so the hops it prints are exactly `contract.via` — expected
+    // values come from the CLI's own JSON run, not from written-out strings.
+    const json = await runCli(["check", PROPAGATION_FIXTURES, "--format", "json"]);
+    const text = await runCli(["check", PROPAGATION_FIXTURES]);
+    const diagnostics = json.stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((record) => !record.kind);
+
+    const multiHop = diagnostics.filter((d) => (d.contract?.via ?? []).length > 1);
+    expect(multiHop.length).toBeGreaterThan(0);
+    for (const diagnostic of diagnostics) {
+      for (const hop of diagnostic.contract?.via ?? []) {
+        const name = hop.symbol.split("#")[1];
+        expect(text.stdout).toContain(`  -> ${name} (${hop.file}:${hop.line})`);
+      }
+    }
+
+    // A diagnostic with no hops prints no path line: the header must be
+    // followed by the next diagnostic, never by a synthesized path.
+    const direct = diagnostics.filter((d) => (d.contract?.via ?? []).length === 0);
+    expect(direct.length).toBeGreaterThan(0);
+    const lines = text.stdout.split("\n");
+    for (const diagnostic of direct) {
+      const index = lines.findIndex(
+        (line) =>
+          line.startsWith(`${diagnostic.severity}: ${diagnostic.message} `) &&
+          line.endsWith(`(${diagnostic.location.file}:${diagnostic.location.line})`),
+      );
+      expect(index).toBeGreaterThanOrEqual(0);
+      expect(lines[index + 1]).not.toMatch(/^ {2}-> /);
+    }
+  });
+
   it("every NDJSON diagnostic carries an engine identity", async () => {
     const { stdout } = await runCli(["check", PROPAGATION_FIXTURES, "--format", "json"]);
     const lines = stdout.trim().split("\n").filter(Boolean);

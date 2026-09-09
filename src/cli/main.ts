@@ -19,6 +19,7 @@ import {
   summarizeExtractedFiles,
 } from "../checker/index.ts";
 import type { Diagnostic } from "../core/index.ts";
+import { displayName } from "../core/index.ts";
 
 /**
  * Exit codes (plan step 9): distinguish "checked, no error-level violation"
@@ -239,10 +240,38 @@ function formatJson(diagnostic: Diagnostic): string {
   return `${JSON.stringify(diagnostic)}\n`;
 }
 
-/** Minimal human-readable form. `--format json` (NDJSON, DESIGN.md §5.1) is this slice's real output. */
+/**
+ * Human-readable form, rendered from the structured diagnostic (DESIGN.md §5:
+ * 「人間向け表示は構造化診断からのレンダリングとして実装する」).
+ *
+ * The header line reports the function that declared the contract, at its own
+ * `file:line`. `contract.via` — the call path from there to the function that
+ * carries what was observed — follows as one indented line per hop, each with
+ * its own `file:line`, so the middle of the path is readable without
+ * re-running the check with `--format json`.
+ */
 function formatText(diagnostic: Diagnostic): string {
   const { severity, message, location } = diagnostic;
-  return `${severity}: ${message} (${location.file}:${location.line})\n`;
+  const header = `${severity}: ${message} (${location.file}:${location.line})\n`;
+  return (
+    header +
+    viaPath(diagnostic)
+      .map((hop) => `  ${hop}\n`)
+      .join("")
+  );
+}
+
+/**
+ * One entry per hop in `contract.via`, as `-> name (file:line)`.
+ *
+ * Empty when the diagnostic has no hops: the effect is performed in the
+ * reported function's own body, so there is no call path, and a path that does
+ * not exist is not synthesized (DESIGN.md §5.3 — the same rule that forbids
+ * fabricating a fix candidate).
+ */
+function viaPath(diagnostic: Diagnostic): readonly string[] {
+  const via = diagnostic.contract?.via ?? [];
+  return via.map((hop) => `-> ${displayName(hop.symbol)} (${hop.file}:${hop.line})`);
 }
 
 function formatSummaryText(coverage: CoverageReport): string {
