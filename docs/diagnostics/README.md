@@ -234,8 +234,54 @@ A handler whose `@capabilities` failed to parse is skipped here: `AMB-E004`
 already reports that tag, and comparing against a declaration Ambit rejected
 would name the wrong problem.
 
+The budget half of the same duplication is `AMB-E011`, reported separately:
+each half is fixed by the source on its own, so a spec may write one as a
+literal and build the other at runtime.
+
 **Fixes:** none. Aligning the two means choosing which one is right, which is
 the decision being reported (§5.3).
+
+## AMB-E011
+
+`withAmbit` or `ambitHandler` disagrees with the handler's `@budget`.
+
+**Severity:** error
+**Category:** budget
+
+The budget half of DESIGN.md §4.4's duplication: the limits are written twice,
+as `@budget` on the handler and again as `spec.budget` in the `withAmbit(spec,
+handler)` or `ambitHandler(spec, handler, decode)` beside it. `spec.budget` is
+what the runtime applies; `@budget` is what the source declares. This reports
+the two disagreeing — a different `timeMs`, a different `onExceed`, or a limit
+present on one side only.
+
+A separate id rather than an extension of `AMB-E010` because that diagnostic's
+`contract` field is capability text (`declared` / `required` / `excess`), which
+a budget disagreement has nothing honest to put in, and because the category
+that belongs on it is `budget`, not `capabilities`.
+
+`onExceed` is compared **after** both sides are defaulted to `throw`.
+`parseBudgetTag` writes the default into a `@budget` that omits it, and the
+runtime defaults an omitted `spec.budget.onExceed` the same way, so the JSDoc
+side has no absent state for an absent spec key to disagree with. The numeric
+limits are not defaulted: `timeMs=500` against no `timeMs` is a real
+disagreement, and is reported as one.
+
+Compared only when all of this holds — otherwise `AMB-W004`:
+
+- the spec is an object literal with no spread, and its `budget`, when
+  present, is an object literal whose keys are `timeMs` / `costUsd` /
+  `llmCalls` / `onExceed` and whose values are literals (a missing `budget`
+  key counts as no budget, which can still disagree with a declared one);
+- the handler is an identifier naming a declaration in the same file that the
+  analysis extracted.
+
+A handler whose `@budget` failed to parse is skipped here, for the reason
+`AMB-E010` skips an unparsed `@capabilities`: `AMB-E008` already reports that
+tag.
+
+**Fixes:** none, for `AMB-E010`'s reason — which of the two is right is the
+decision being reported.
 
 ## AMB-W004
 
@@ -245,9 +291,16 @@ the decision being reported (§5.3).
 **Category:** capabilities
 
 A `withAmbit(spec, handler)` or an adapter's `ambitHandler(spec, handler,
-decode)` was found, but one of `AMB-E010`'s conditions does not hold: the capability list is built at runtime, the handler is not a
-declaration in the same file, or the handler declares neither `@entrypoint` nor
-`@capabilities`. The message names which.
+decode)` was found, but one of `AMB-E010`'s or `AMB-E011`'s conditions does not
+hold: the capability list is built at runtime, the budget is not an object
+literal of literal limits, the handler is not a declaration in the same file,
+or the handler declares neither `@entrypoint` nor `@capabilities`. The message
+names which.
+
+The two halves are reported independently, so one registration can produce a
+compared capability set and an uncompared budget, or the reverse. Collapsing
+the wrapper to a single warning the moment either half was dynamic would drop
+a check the source does support.
 
 Reported rather than skipped for the reason `AMB-E003` reports an inert
 declaration: a wrapper that produced no diagnostic at all would read as

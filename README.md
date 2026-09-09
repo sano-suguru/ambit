@@ -64,7 +64,10 @@ async function refreshRates(): Promise<void> {
 }
 
 export const refresh = withAmbit(
-  { capabilities: ["http:get:api.example.com"], budget: { timeMs: 500, onExceed: "throw" } },
+  {
+    capabilities: ["http:get:api.example.com"],
+    budget: { timeMs: 500, costUsd: 0.01, onExceed: "throw" },
+  },
   refreshRates,
 );
 ```
@@ -72,7 +75,9 @@ export const refresh = withAmbit(
 That file passes `ambit check` as written; uncommenting the second `fetch`
 fails it. The capability list appears twice on purpose: the JSDoc is what the
 checker reads, the literal array is what the runtime enforces, and `AMB-E010`
-fails the check if the two ever disagree.
+fails the check if the two ever disagree. `budget` is duplicated the same way
+and checked the same way (`AMB-E011`), so widening `timeMs` in one half alone
+fails too.
 
 On Hono, the adapter registers the same handler instead of a hand-written
 `withAmbit`:
@@ -84,7 +89,7 @@ import { ambitHandler } from "ambit/runtime/hono";
 const app = new Hono();
 
 app.get("/rates", ambitHandler(
-  { capabilities: ["http:get:api.example.com"], budget: { timeMs: 500 } },
+  { capabilities: ["http:get:api.example.com"], budget: { timeMs: 500, costUsd: 0.01 } },
   refreshRates,
   (c) => [c.req.query("currency") ?? "USD"] as const,
 ));
@@ -139,7 +144,7 @@ too.
 | `@effects` for the LLM SDKs (`openai`, `@anthropic-ai/sdk`) | yes | — | — | no runtime hook |
 | `@budget timeMs` | — | yes (`throw` / `warn` / `abort`) | — | — |
 | `@budget costUsd`, `llmCalls` | parsed and validated | — | — | no hook increments them |
-| `@entrypoint` vs. the `withAmbit` / `ambitHandler` beside it | yes, in the same file (`AMB-E010`) | — | — | a spec and handler split across modules (`AMB-W004`) |
+| `@entrypoint` vs. the `withAmbit` / `ambitHandler` beside it | yes, in the same file: the capability set (`AMB-E010`) and the budget (`AMB-E011`) | — | — | a spec and handler split across modules (`AMB-W004`) |
 | `@entrypoint` handler → runtime context | — | yes, via `withAmbit` or `ambit/runtime/hono` | recorded on the context | Express, Next.js, BullMQ — unadapted |
 
 Effects are inferred from bundled tables covering `fetch`/`undici`, the

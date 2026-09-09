@@ -32,7 +32,9 @@ A `withAmbit(spec, handler)`, or an adapter's `ambitHandler(spec, handler,
 decode)`, is compared with the handler's `@capabilities` when the spec's array
 is literal and the handler is declared in the same file (`AMB-E010`). Anything
 else — a list built at runtime, a handler from another module, a handler with
-no contract — is reported as `AMB-W004`. The comparison is on the source. What
+no contract — is reported as `AMB-W004`. `spec.budget` is compared with the
+handler's `@budget` under the same conditions (`AMB-E011`), independently of
+the capability half. The comparison is on the source. What
 reaches the *running* handler is the spec, which is a value in the module and
 therefore survives a build and a bundler (DESIGN.md §4.4); the duplication
 itself is what remains open.
@@ -473,6 +475,15 @@ Limits of what the adapter guarantees:
   inference (`hc`) sees `Response` rather than the handler's return shape.
 - **`timeMs` includes `decode`**, which runs inside the context: the time spent
   reading a request body counts against the budget.
+- **A file that imports `ambit/runtime/<framework>` does not type-check after
+  `npm remove ambit`.** P5 (DESIGN.md §2, 「いつでも撤退できる」) guarantees that
+  the JSDoc contracts survive removal — they are comments on ordinary
+  TypeScript, and nothing reads them at run time. The adapter call is not
+  covered by that: `ambitHandler(spec, handler, decode)` is a value imported
+  from Ambit, so removing the package leaves an unresolved import and a route
+  registration with no replacement. Backing out of an adapted route means
+  editing the source — replacing each `ambitHandler(...)` with the framework's
+  own handler — not only deleting a dependency.
 
 ## Backend
 
