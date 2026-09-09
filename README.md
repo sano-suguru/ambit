@@ -35,10 +35,9 @@ files=1 functions=1 declared=1
 TypeScript tells you whether a value has the type you expect. It does not tell
 you whether a function is allowed to do what it does. For human-written code
 that gap is closed by review and convention, which do not scale when an agent
-rewrites a codebase in one session. AI has
-cut the cost of producing code, not the cost of deciding whether that code
-should be allowed to do what it does. Ambit moves that decision out of
-convention and into an executable contract.
+rewrites a codebase in one session. AI has cut the cost of producing code, not
+the cost of judging it. Ambit moves that judgement out of convention and into
+an executable contract.
 
 ## What is actually enforced
 
@@ -50,7 +49,7 @@ convention and into an executable contract.
 | `@capabilities`, literal URL in source | yes (`http:<method>:<host>`) | — | — | — |
 | `@capabilities`, URL built at runtime | warns (`AMB-W003`) | yes, for `fetch` | recorded on the context | — |
 | `@capabilities`, DB table / LLM target | — | — | — | not derived from source |
-| `@effects` for `node:fs` / `child_process` / `pg` / `mysql2` / Prisma / OpenAI / Anthropic | yes | — | — | no runtime hook |
+| `@effects` for the covered Node APIs and five clients | yes | — | — | no runtime hook |
 | `@budget timeMs` | — | yes (`throw` / `warn` / `abort`) | — | — |
 | `@budget costUsd`, `llmCalls` | parsed and validated | — | — | no hook increments them |
 | `@entrypoint` vs. the `withAmbit` beside it | yes, in the same file (`AMB-E010`) | — | — | no adapter links the two |
@@ -62,8 +61,9 @@ around an entrypoint plus `installFetchHook()` from `ambit/runtime`; with no
 active context the
 process-wide `setUnscopedPolicy` decides, defaulting to `allow`.
 
-Effects are inferred from bundled tables covering `fetch`, the Node.js builtins
-named above, and five packages (`pg`, `mysql2`, `@prisma/client`, `openai`,
+Effects are inferred from bundled tables covering `fetch`/`undici`, the
+`node:fs`, `node:http`/`https`/`net`, and `node:child_process` builtins, and
+five clients (`pg`, `mysql2`, `@prisma/client`, `openai`,
 `@anthropic-ai/sdk`). Everything else resolves to `unknown` — never to `pure`,
 and `--strict` turns those warnings into errors. Linking a contract to the
 handler that actually runs, after a build or bundler moves either half, is
@@ -85,10 +85,9 @@ runtime behavior, removing Ambit is a small diff, and the code still
 type-checks and runs either way.
 
 **dependency-cruiser.** Its rules constrain the import edges between modules.
-Ambit constrains what one function may do and which resource it may touch, and
-it answers to an agent: `check --format json` is NDJSON,
-one diagnostic per line, carrying the declared and observed contract, the
-propagation path, and applicable edits.
+Ambit's unit is one function: what it may do, and which resource it may touch.
+A module graph that is entirely legal can still contain a `pure` helper that
+opens a socket.
 
 ## Designed for coding agents
 
@@ -99,7 +98,7 @@ line, meant to be piped into an agent loop:
 $ node src/cli/main.ts check src --format json
 {"id":"AMB-E001","severity":"error","contract":{"declared":["pure"],"observed":["network"]},"fixes":[{"kind":"widen","consistentWithContract":false,"edits":[{"file":"tax.ts","range":[[0,4],[0,17]],"replacement":"@effects network"}]}], ...}
 {"kind":"summary","filesAnalyzed":1,"functionsExtracted":1,"functionsDeclared":1}
-$ apply fixes[0].edits                            # 0-based, end-exclusive
+# the agent applies fixes[0].edits — ranges are 0-based, end-exclusive
 $ node src/cli/main.ts check src --format json    # re-check
 ```
 
