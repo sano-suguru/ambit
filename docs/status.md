@@ -8,13 +8,12 @@ Measured on 2026-09-09, Node.js v24.20.0, macOS (darwin arm64), Apple M1,
 8 cores, 16 GiB. Every number below was run, not estimated.
 
 **Verdict: not a release candidate.** M0.5 has not been run at all, M1 has no
-config and no incremental path, and M2–M4 are partial. The details are per
-row.
+incremental path, and M2–M4 are partial. The details are per row.
 
 ## Baseline commands
 
 ```sh
-pnpm test                     # 277 tests, 19 files — pass
+pnpm test                     # 305 tests, 20 files — pass
 pnpm exec tsc --noEmit        # pass
 ./node_modules/.bin/biome ci .  # pass
 node src/cli/main.ts check src --coverage   # exit 0
@@ -29,32 +28,58 @@ runs `pnpm exec biome ci .` in GitHub Actions, where no such wrapper exists.
 
 ## Ambit's own source (`check src --coverage`)
 
-| Figure | Before local mutation | After local mutation | After the runtime hooks | After the Hono adapter |
+| Figure | After the runtime hooks | After the Hono adapter | Before `ambit.config.ts` | After `ambit.config.ts` |
 |---|---|---|---|---|
-| files analyzed | 19 | 21 | 26 | 27 |
-| functions extracted | 163 | 176 | 193 | 194 |
-| functions with a declared `@effects` | 4 | 4 | 4 | 4 |
-| `unknown` rate | 68.7% (112/163) | 63.1% (111/176) | 64.2% (124/193) | **64.4% (125/194)** |
-| `boundary` rate | 0.0% (0/163) | 0.0% (0/176) | 0.0% (0/193) | 0.0% (0/194) |
-| call sites | 851 — resolved 243, stub 3, known-pure 244, unresolved 361 | 924 — resolved 268, stub 3, known-pure 244, mutation 81, unresolved 328 | 997 — resolved 298, stub 3, known-pure 257, mutation 94, unresolved 345 | 1003 — resolved 299, stub 3, known-pure 258, mutation 94, unresolved 349 |
-| unresolved by reason | `builtin-method` 131, `external-module` 221, `unresolved-symbol` 8, `callback-parameter` 1 | `builtin-method` 62, `external-module` 257, `unresolved-symbol` 8, `callback-parameter` 1 | `builtin-method` 68, `external-module` 264, `unresolved-symbol` 11, `callback-parameter` 2 | `builtin-method` 68, `external-module` 265, `unresolved-symbol` 12, `callback-parameter` 4 |
-| skipped function-like nodes | 74 (`callback-argument` 66, `nested-function` 8) | 75 (`callback-argument` 67, `nested-function` 8) | 88 (`callback-argument` 74, `nested-function` 14) | 90 (`callback-argument` 75, `nested-function` 15) |
+| files analyzed | 26 | 27 | 27 | 29 |
+| functions extracted | 193 | 194 | 202 | 236 |
+| functions with a declared `@effects` | 4 | 4 | 4 | 4 (jsdoc 4, config 0) |
+| `unknown` rate | 64.2% (124/193) | 64.4% (125/194) | 63.4% (128/202) | **65.7% (155/236)** |
+| `boundary` rate | 0.0% (0/193) | 0.0% (0/194) | 0.0% (0/202) | 0.0% (0/236) |
+| call sites | 997 — resolved 298, stub 3, known-pure 257, mutation 94, unresolved 345 | 1003 — resolved 299, stub 3, known-pure 258, mutation 94, unresolved 349 | 1035 — resolved 315, stub 3, known-pure 260, mutation 93, unresolved 364 | 1278 — resolved 404, stub 8, known-pure 327, mutation 110, unresolved 429 |
+| unresolved by reason | `builtin-method` 68, `external-module` 264, `unresolved-symbol` 11, `callback-parameter` 2 | `builtin-method` 68, `external-module` 265, `unresolved-symbol` 12, `callback-parameter` 4 | `builtin-method` 72, `external-module` 276, `unresolved-symbol` 12, `callback-parameter` 4 | `builtin-method` 102, `external-module` 307, `dynamic-import` 1, `unresolved-symbol` 15, `callback-parameter` 4 |
+| skipped function-like nodes | 88 (`callback-argument` 74, `nested-function` 14) | 90 (`callback-argument` 75, `nested-function` 15) | 91 (`callback-argument` 76, `nested-function` 15) | 109 (`callback-argument` 91, `object-literal-method` 3, `nested-function` 15) |
 | exit code | 0 | 0 | 0 | 0 |
 
-The fourth column is `src/` after `src/runtime/hono.ts`: one more file, one
-more exported function, and two more skipped nodes (the adapter's inner
-arrows). Measured on 2026-09-09 with `node src/cli/main.ts check src
---coverage`.
+The two earliest columns (before and after DESIGN.md §4.2's local-mutation
+rule: 19/163 and 21/176) are dropped from the table to keep it readable; the
+paragraphs below still describe that change, and its numbers are in the git
+history of this file.
 
-The third column is `src/` after the four runtime hooks were added
+The last column is `src/` with `ambit.config.ts` implemented, measured on
+2026-09-09 with `node src/cli/main.ts check src --coverage`. The
+"before" column beside it is commit `5bdf48b` (the design commit), measured
+the same way in the same session, so the two are comparable.
+
+The `unknown` rate went 63.4% → 65.7% because the change added
+`src/checker/config.ts` and `src/core/config.ts` — 34 more functions, almost
+all undeclared, in a layer that calls the `typescript` API and Node's `fs` and
+`path` (`external-module` 276 → 307, `builtin-method` 72 → 102). That is the
+same accounting as the runtime-hook column described below: a per-function ratio pays
+for every undeclared function added, and no resolution got worse. The
+`dynamic-import` 1 is the loader's own `await import(configPath)` — Ambit
+reports its own config loading as unanalyzable, which is correct.
+
+`object-literal-method` 3 and `callback-argument` 76 → 91 are the new files'
+inline arrows and object literals; `getter-setter` and
+`anonymous-default-export` are absent from the breakdown for a different
+reason — DESIGN.md §4.1 (a) gave them declaration paths, so they are extracted
+now rather than skipped. `src/` contains none of either, so no function moved
+between the two counts in this measurement.
+
+The "After the Hono adapter" column is `src/` after `src/runtime/hono.ts`: one
+more file, one more exported function, and two more skipped nodes (the
+adapter's inner arrows). Measured on 2026-09-09 with `node
+src/cli/main.ts check src --coverage`.
+
+The "After the runtime hooks" column is `src/` after the four hooks were added
 (`src/runtime/enforce.ts`, `fs.ts`, `child-process.ts`, `pg.ts`, and
 `src/core/sql.ts`). The rate went from 63.1% to 64.2% because the hooks are
 17 more mostly-undeclared functions in the connection-adjacent layers; that
 is the same accounting the paragraph below describes, not a regression in
 resolution.
 
-The "after" column is DESIGN.md §4.2's local-mutation rule (「ローカル変異と
-`pure`」) in place. `builtin-method` unresolved dropped 131 → 62: 81 sites
+The two columns dropped from the table above are DESIGN.md §4.2's
+local-mutation rule (「ローカル変異と `pure`」) before and after. `builtin-method` unresolved dropped 131 → 62: 81 sites
 became mutation sites, and `Array.push`, `Map.set` and `Set.add` left
 `top-unresolved-names` entirely — every one of them is now either a local
 mutation with no effect or a `state_write`. The two columns' denominators
@@ -173,6 +198,7 @@ of `unknown` in the fixture.
 | `check src`, five consecutive runs | 0.80 / 0.74 / 0.84 / 0.78 / 0.74 s |
 | `check src` after changing one contract comment | 0.81 s |
 | `check src`, five consecutive runs, 2026-09-09 (21 files, 176 functions) | 0.90 / 0.77 / 0.92 / 0.78 / 0.78 s |
+| `check src`, five consecutive runs, 2026-09-09 after `ambit.config.ts` (29 files, 236 functions) | 1.35 / 0.94 / 0.87 / 0.93 / 0.98 s |
 
 The re-check costs the same as the first check because **nothing is cached**.
 DESIGN.md §6.2's resident/incremental path is not implemented, so "初回検査"
@@ -180,14 +206,15 @@ and "変更後の再検査" are the same operation. That is the honest reading o
 these numbers, and the reason no threshold has been set: there is nothing yet
 to compare against.
 
-Every row is labelled with the tree it was measured on, and none has been
-re-measured since the runtime hooks were added: `src/` is now 26 files and 193
-functions, so these are timings for a smaller tree than the one in the
-repository today. No new number is claimed for the current tree.
+Every row is labelled with the tree it was measured on. The last row is the
+current tree; the rows above it are smaller trees and are kept as recorded,
+not restated for this build.
 
 The first two rows are the original measurement and have **not** been
-superseded; the 2026-09-09 row is a second five-run measurement on the same
-machine, and 0.77–0.92 s is the range README quotes. Re-running the same command while adding the client stubs gave 1.72–3.20 s, and
+superseded; the two 2026-09-09 rows are later five-run measurements on the same
+machine, and 0.87–1.35 s is the range README quotes. The first run of the last
+row is the slowest of the five and is left in: nothing warms a cache between
+them, so a one-off high reading is the measurement, not noise to discard. Re-running the same command while adding the client stubs gave 1.72–3.20 s, and
 re-running it on the pre-change tree in the same session gave 2.58–3.63 s —
 both far above the recorded range, and the older tree the slower of the two.
 That is machine load, not a change in the analysis, and neither range is
@@ -222,9 +249,9 @@ machine, and §3.5's performance gate has not run either way.
 |---|---|
 | Spec section | §4.2, §4.3, §5.1–5.3, §6.2 |
 | Acceptance | dogfooding on Ambit itself; diagnostics update on a contract-comment-only change; schema and measurement conditions fixed |
-| Implemented | `@effects` parsing and propagation (rules 1–7 incl. cycles, constructors, `super`, object literals), `unknown`, `--coverage`, NDJSON diagnostics with `engine`, `--strict`, `fixes[].edits` for AMB-E001, `ambit init` contract inference |
-| Evidence | `test/{effects,propagate,summarize,diagnose,construction,cli,fix}.test.ts`; `check src --coverage` exit 0; `test/backend.legacy-ts.test.ts` self-hosting block; `test/init.test.ts` round-trips every proposal through `check` |
-| Outstanding | **`ambit init` writes no config** — it proposes JSDoc (§4.1's inference half) but `ambit.config.ts` is not implemented, so out-of-code contracts, user-defined effects, per-directory `strict`, and the price table have nowhere to live. **No resident or incremental check** (§6.2) — measured above: a re-check costs the same as a first check. **No versioned JSON Schema** for the diagnostic format (§5.2); the shape is fixed in code and documented, not schema-validated. |
+| Implemented | `@effects` parsing and propagation (rules 1–7 incl. cycles, constructors, `super`, object literals), `unknown`, `--coverage` (with a `declared-by` jsdoc/config split), NDJSON diagnostics with `engine`, `--strict`, `fixes[].edits` for AMB-E001, `ambit init` contract inference. `ambit.config.ts` (§4.1): out-of-code contracts for all five tags, JSDoc-wins merging with `AMB-W005` on a difference, `AMB-W006` for an exact key that matches nothing, user-defined effects usable from both JSDoc and config, per-directory `strict`, and `ambit init --config` for the declarations no comment can carry |
+| Evidence | `test/{effects,propagate,summarize,diagnose,construction,cli,fix}.test.ts`; `check src --coverage` exit 0; `test/backend.legacy-ts.test.ts` self-hosting block; `test/init.test.ts` round-trips every proposal through `check`; `test/e2e.config.test.ts` (15 cases, all through the CLI as a subprocess); `test/e2e.realistic.test.ts` round-trips `init --config`; `test/e2e.install.test.ts` loads a config that imports `ambit/config` from the installed package |
+| Outstanding | **The price table is not implemented** — `@budget costUsd` parses, carries and is compared, and nothing prices an LLM call, so it is never enforced (§4.5). Config has no `stubs` key either: a package's effect definitions still come only from `src/stubs/` (§4.2). **No resident or incremental check** (§6.2) — measured above: a re-check costs the same as a first check. **No versioned JSON Schema** for the diagnostic format (§5.2); the shape is fixed in code and documented, not schema-validated. |
 
 ### M2 — capabilities, budget, runtime hooks, framework adapters, 50 stubs
 

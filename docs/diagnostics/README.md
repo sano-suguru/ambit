@@ -94,10 +94,13 @@ object-literal member with no stable declaration path, an anonymous default
 export, a callback passed inline as an argument, or a function declared inside
 another function.
 
-Two of those *are* analyzed: a `get`/`set` accessor and an anonymous
-`export default` have stable declaration paths (`Cls.get total`, `default`),
-so their bodies propagate and `ambit.config.ts` can declare contracts for
-them — DESIGN.md §4.1 (a) keeps the config namespace a superset of the JSDoc
+Two of those *are* analyzed where the declaration path reaches them: a
+`get`/`set` accessor on a class or on a module-scope `const` object literal,
+and an anonymous `export default`, have stable paths (`Cls.get total`,
+`default`), so their bodies propagate and `ambit.config.ts` can declare
+contracts for them. An accessor in a literal that rule does not reach (a `let`
+binding, a spread, a nested or inline literal) is still skipped, and neither
+JSDoc nor config can name it — DESIGN.md §4.1 (a) keeps the config namespace a superset of the JSDoc
 one. The comment on them is still inert, so this is still an error, and the
 message ends with the config key that would work:
 `declare it in ambit.config.ts under "src/cart.ts#Cart.get total" instead`.

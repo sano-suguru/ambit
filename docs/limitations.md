@@ -46,12 +46,73 @@ parsed and carried on the context, and nothing increments them.
 ## Commands and flags
 
 `ambit check` and `ambit init` are implemented, with `--format json`,
-`--coverage`, and `--strict`. `ambit run`, `ambit agent`, `ambit stubs`, and
-`ambit sbom` are planned, not built.
+`--coverage`, `--strict`, and `init --config`. `ambit run`, `ambit agent`,
+`ambit stubs`, and `ambit sbom` are planned, not built.
 
-`ambit init` proposes `@effects` JSDoc. It writes no `ambit.config.ts` —
-out-of-code contracts (DESIGN.md §4.1) are not implemented, so there is no
-config for it to write.
+`ambit init` proposes `@effects` JSDoc. `ambit init --config` proposes an
+`ambit.config.ts` entry instead, for the declarations no comment can carry —
+and only by appending to an existing `contracts: {` block. It creates no
+config file: the `defineConfig` import specifier depends on how the consumer
+installed Ambit, and DESIGN.md §5.3 forbids emitting a patch that may not
+apply.
+
+## `ambit.config.ts`
+
+Out-of-code contracts (DESIGN.md §4.1) are implemented for all five tags. Two
+things the specification mentions are not:
+
+- **No `stubs` key.** A package's effect definitions still come only from the
+  bundled tables in `src/stubs/`; neither config nor a package-provided
+  `ambit.stubs.json` (§4.2) is read.
+- **No price table**, so `@budget costUsd` is still never enforced (§4.5).
+
+### Symbols a config key cannot name
+
+A `contracts` key is `"<file>#<symbol>"`, where `<symbol>` is the checker's
+own declaration path. Anything with no stable declaration path cannot be named
+— by a config key or by anything else — and stays reported as `AMB-E003` when
+a contract is written on it, and counted under `--coverage`'s "skipped":
+
+- an object-literal member with a **computed, string, or numeric key**
+  (`{ [KEY]: … }`, `{ "a.b": … }`, `{ 0: … }`) — the path is `"."`-joined, so
+  `{ "a.b": … }` would be indistinguishable from nesting
+- any member of an object literal the notation cannot reach at all: a nested
+  literal, one bound by `let`, one carrying a spread, one declared inside a
+  function body, or one passed inline as an argument
+- a **callback passed inline as an argument** (`xs.map((x) => …)`)
+- a **function declared inside another function**
+- a **named `export default`** is *not* in this list — it has its identifier
+  name and is named that way; only the anonymous form uses `default`
+
+The reverse case is a config-only namespace: three kinds of declaration have a
+path but nowhere to write a comment, so a key is the *only* way to declare
+them.
+
+| Declaration | Key | JSDoc |
+|---|---|---|
+| `get x()` / `set x()`, on a class or a module-scope `const` literal | `Cls.get x` / `Cls.set x` | inert — `AMB-E003` |
+| anonymous `export default` | `default` | inert — `AMB-E003` |
+| a class with no constructor | `Cls.constructor` | no declaration site at all |
+
+Keeping JSDoc closed on the first two is a decision, not a limit of the
+analysis: the comment is syntactically attachable, and DESIGN.md §4.1 (a)
+records why it is refused and §12 records that the asymmetry is open.
+
+### Matching
+
+`<file>` accepts `*` (within one path segment) and `**` (across directories);
+`<symbol>` accepts neither. An exact key always beats a glob; two globs
+matching one symbol stop the run with exit 2 rather than picking one. An exact
+key that matches nothing is `AMB-W006`; a glob that matches nothing is silent,
+because a glob covering a directory this run did not check is normal.
+
+The config is found by walking up from the directory passed to `check` /
+`init`, stopping after the first directory holding a `package.json` or `.git`.
+It is **loaded by importing it**, not by parsing it: a config that throws on
+import is exit 2, and a `contracts` object built by an expression rather than
+written literally works for matching but has no line a diagnostic can point
+at (`AMB-W006` then falls back to the file's first character, and `init
+--config` finds no `contracts: {` line to append to).
 
 ## Effect inference
 
@@ -280,12 +341,20 @@ covers:
   identifier name — `const handlers = { read() { … } }` gives `read` the id
   `handlers.read`, the same declaration-path notation a class method uses
 
-A call inside any other function-like node — a getter/setter, an
-object-literal member the notation cannot name, an anonymous `export default`
-function, a nested function declaration, an inline callback argument, or
-anything else with no extracted ancestor — is still walked, and its effects are
-attributed to the nearest enclosing *extracted* function. Such a call is
-invisible only when no extracted ancestor exists.
+Two more shapes are extracted and propagate, but can only be *declared* from
+`ambit.config.ts` (DESIGN.md §4.1 (a)): a `get`/`set` accessor, under
+`Cls.get x` / `Cls.set x`, and an anonymous `export default`, under `default`.
+The accessor case follows the same reachability rule as the bullet above it —
+a class member, or a member of a module-scope `const` object literal — so an
+accessor in a literal that rule does not reach is skipped, not extracted. A
+contract comment on any of these is still `AMB-E003`; see "`ambit.config.ts`"
+above.
+
+A call inside any other function-like node — an object-literal member the
+notation cannot name, a nested function declaration, an inline callback
+argument, or anything else with no extracted ancestor — is still walked, and
+its effects are attributed to the nearest enclosing *extracted* function. Such
+a call is invisible only when no extracted ancestor exists.
 
 The identifier-name restriction is not arbitrary. A declaration path is
 `"."`-joined, so a computed, string, or numeric key has no spelling that
@@ -294,7 +363,13 @@ rule already limits class-method extraction.
 
 `ambit check --coverage` reports these nodes as "skipped", broken down by
 kind: `getter-setter`, `object-literal-method`, `anonymous-default-export`,
-`callback-argument`, `nested-function`, and a residual `other`. "Skipped"
+`callback-argument`, `nested-function`, and a residual `other`. The first and
+third are narrower than they were: an accessor is extracted when it is a class
+member or a member of a module-scope `const` object literal, so `getter-setter`
+now counts only accessors in the literals that notation cannot reach (a `let`
+binding, a spread, a nested literal, one inside a function body, one passed
+inline). `anonymous-default-export` likewise counts only the forms `default`
+does not cover. "Skipped"
 means the node cannot declare a contract of its own — not that its effects go
 unseen. `object-literal-method` is now narrower than the kind's name suggests:
 it covers members of the literals Call resolution above rules out — a

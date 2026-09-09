@@ -210,7 +210,7 @@ git clone https://github.com/sano-suguru/ambit.git && cd ambit && pnpm install &
 ```
 
 Requires Node.js 24. That last command needs nothing prepared — it checks
-Ambit's own source: 21 files, 176 functions, 0.77–0.92 s across five runs.
+Ambit's own source: 29 files, 236 functions, 0.87–1.35 s across five runs.
 Nothing is cached, so a re-check costs the same, and nothing larger than that
 has been measured yet; `docs/status.md` has the numbers.
 
@@ -218,6 +218,26 @@ Point `check` at your own directory instead, with `--coverage`, `--strict`, or
 `--format json`. `ambit init` proposes `@effects` for undeclared functions, and
 proposes nothing for one that reached `unknown`. `check` exits 0 when nothing
 was reported, 1 on an error, and 2 when the analysis itself could not run.
+
+For code you cannot edit — third party, generated, or not yours yet — declare
+the same contracts in `ambit.config.ts`:
+
+```ts
+import { defineConfig } from "ambit/config";
+
+export default defineConfig({
+  effects: { payments: ["network", "db_write"] },
+  contracts: {
+    "src/legacy/billing.ts#charge": { effects: ["payments"] },
+  },
+  strict: ["src/app/**"],
+});
+```
+
+Where a symbol has both, the JSDoc contract is the one in force and the
+difference is reported as a warning (`AMB-W005`). `ambit init --config`
+proposes config entries for the declarations no comment can carry — accessors,
+anonymous default exports, and a class with no constructor.
 
 To use Ambit in another project, build a tarball — it is not published to npm
 yet:
