@@ -52,3 +52,25 @@ describe("architecture constraint: only the connection layer depends on typescri
     ).toBeGreaterThan(0);
   });
 });
+
+describe("architecture constraint: the runtime is independent of the analysis engine", () => {
+  // DESIGN.md §3.4: 「ランタイム強制 … コンパイラから独立。解析エンジンを
+  // 本番依存にしない」. A production process that enforces capabilities must
+  // not have to load a TypeScript compiler or Ambit's checker to do it.
+  const FORBIDDEN = [
+    { pattern: /from\s+["']typescript["']/, what: '"typescript"' },
+    { pattern: /from\s+["'][^"']*\/checker\//, what: "src/checker/" },
+  ];
+
+  it("no file under src/runtime/ imports typescript or the checker", async () => {
+    const files = await listTsFiles(path.join(PROJECT_ROOT, "src", "runtime"));
+    expect(files.length, "expected to find .ts files under src/runtime").toBeGreaterThan(0);
+    for (const file of files) {
+      const relative = path.relative(PROJECT_ROOT, file);
+      const content = await readFile(file, "utf8");
+      for (const { pattern, what } of FORBIDDEN) {
+        expect(pattern.test(content), `${relative} imports ${what}`).toBe(false);
+      }
+    }
+  });
+});

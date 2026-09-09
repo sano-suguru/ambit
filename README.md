@@ -103,12 +103,16 @@ analysis itself could not run.
   callers it would affect. There is no contract-preserving candidate: fixing
   the code instead of the contract means restructuring it, and Ambit does not
   invent a patch it cannot generate safely.
-- **Not yet:** nothing *enforces* `@capabilities` or `@budget` at runtime —
-  everything above is static. The static half of §4.4's 二重強制 (rejecting a
-  literal URL outside the granted target) is not implemented either; only the
-  declaration-to-declaration narrowing check runs. `@budget`'s
-  loop-pattern warnings are not implemented. `ambit init`, `ambit run`,
-  `ambit agent`, `ambit stubs`, and `ambit sbom` are planned, not built.
+- **Runtime enforcement, for `fetch` only:** `ambit/runtime` establishes an
+  entrypoint context and blocks an outgoing `fetch` whose
+  `http:<method>:<host>` is not granted. See [What is actually
+  enforced](#what-is-actually-enforced).
+- **Not yet:** the static half of §4.4's 二重強制 (rejecting a literal URL
+  outside the granted target) is not implemented; only the
+  declaration-to-declaration narrowing check runs. `@budget`'s loop-pattern
+  warnings are not implemented. `ambit init`, `ambit run`, `ambit agent`,
+  `ambit stubs`, and `ambit sbom` are planned, not built. There are no
+  framework adapters — `withAmbit` is wrapped by hand.
 - **Safety posture:** a call Ambit cannot resolve is reported as `unknown`,
   not assumed safe. The bundled effect tables are deliberately small, so a lot
   of real code lands in `unknown` today — see
@@ -197,6 +201,53 @@ How much execution time or cost may an entrypoint consume?
 export async function GET(req: Request): Promise<Response> { /* ... */ }
 ```
 
+## Runtime enforcement
+
+Static checking cannot see a dynamic URL. For that, wrap the entrypoint:
+
+```ts
+import { withAmbit, installFetchHook } from "ambit/runtime";
+
+installFetchHook();
+
+export const GET = withAmbit(
+  { capabilities: ["http:get:api.example.com"], budget: { timeMs: 500, onExceed: "throw" } },
+  async (req: Request) => {
+    await fetch("https://api.example.com/rates");   // allowed
+    await fetch("https://elsewhere.example/steal"); // throws AmbitCapabilityError
+  },
+);
+```
+
+The blocked request never reaches the socket. With no active context, the
+process-wide `setUnscopedPolicy("allow" | "warn" | "deny")` decides; the
+default is `allow`, so adopting the runtime does not break code that has no
+entrypoints declared yet. `installFetchHook()` returns a function that
+restores the original `fetch`.
+
+### What is actually enforced
+
+| | Static check | Runtime block | Audit only | Unsupported |
+|---|---|---|---|---|
+| `@effects` | yes | — | — | — |
+| `@capabilities`, caller→callee narrowing | yes | — | — | — |
+| `@capabilities`, `globalThis.fetch` | — | yes | recorded on the context | — |
+| `@capabilities`, literal URL in source | — | — | — | not implemented |
+| `@capabilities`, `node:fs` / `child_process` / DB clients / LLM SDKs | — | — | — | no hook |
+| `@budget timeMs` | — | yes (`throw` / `warn` / `abort`) | — | — |
+| `@budget costUsd`, `llmCalls` | parsed and validated | — | — | no hook increments them |
+| `@entrypoint` declared but not wrapped | warns if no `@capabilities` | — | — | no adapter links the two |
+
+Two limits worth stating plainly. Nothing connects the `@entrypoint` JSDoc to
+the `withAmbit` call — you write the capability list twice, and Ambit does not
+check that they agree (DESIGN.md §12 「契約とハンドラの対応付け」). And
+`costUsd`/`llmCalls` are carried on the context but never incremented, because
+no LLM SDK is hooked; they are not enforced limits.
+
+The runtime currently ships in the same package as the CLI, so installing it
+pulls in `typescript` as a production dependency. DESIGN.md §6 says it should
+not — that split waits for the `@ambit/*` packages.
+
 ## Designed for coding agents
 
 `ambit check --format json` emits machine-readable NDJSON: one diagnostic per
@@ -284,7 +335,9 @@ replaceable until measurement and compatibility testing justify them. See
 
 Direction, not commitments — nothing here is scheduled.
 
-- Runtime enforcement of `@capabilities` and `@budget` at entrypoints
+- Runtime hooks beyond `fetch`: `node:fs`, `child_process`, DB and LLM clients
+- Framework adapters (Express, Hono, Next.js) that link a declared
+  `@entrypoint` to the running handler
 - The static half of capability enforcement: rejecting a literal URL or table
   name outside the granted target
 - Stable diagnostic ids (from the first public release)
