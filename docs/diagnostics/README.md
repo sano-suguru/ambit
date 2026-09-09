@@ -52,6 +52,11 @@ guarantee.
 Example: a function declared `@effects pure` or `@effects network` calls
 `eval(...)` or a function with an unresolved call graph.
 
+Promoted to an error by `--strict`, and by a `strict` glob in
+`ambit.config.ts` that matches the file it is reported in (DESIGN.md §4.3) —
+the mechanism for tightening new code while leaving legacy directories at
+warning level.
+
 ## AMB-E002
 
 Unknown effect name in `@effects`.
@@ -204,7 +209,9 @@ Declared capabilities reach unknown.
 
 A function with declared `@capabilities` cannot have its requirement fully
 determined. The capability analogue of AMB-W001, and promoted to an error by
-`--strict` for the same reason.
+`--strict` for the same reason — or by a `strict` glob in `ambit.config.ts`
+that matches the file it is reported in (DESIGN.md §4.3). The two are a
+union: a config listing fewer directories never narrows a `--strict` run.
 
 The message names which of three causes applies, because they are fixed
 differently: a callee that could not be resolved, a `@boundary` callee that

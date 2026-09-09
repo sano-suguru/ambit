@@ -98,7 +98,7 @@ export async function loadConfig(startDir: string): Promise<LoadedConfig | undef
   return { configPath, config: validateConfig(module.default, configPath), sourceText };
 }
 
-const TOP_LEVEL_KEYS = ["effects", "contracts"] as const;
+const TOP_LEVEL_KEYS = ["effects", "contracts", "strict"] as const;
 const CONTRACT_KEYS = ["effects", "capabilities", "budget", "entrypoint", "boundary"] as const;
 const BUDGET_KEYS = ["timeMs", "costUsd", "llmCalls", "onExceed"] as const;
 
@@ -115,6 +115,8 @@ export function validateConfig(value: unknown, where: string): AmbitConfig {
 
   const effects =
     root.effects === undefined ? undefined : validateEffectAliases(root.effects, where);
+  const strict =
+    root.strict === undefined ? undefined : validateStringArray(root.strict, where, "strict");
   const contracts =
     root.contracts === undefined
       ? undefined
@@ -123,6 +125,7 @@ export function validateConfig(value: unknown, where: string): AmbitConfig {
   return {
     ...(effects ? { effects } : {}),
     ...(contracts ? { contracts } : {}),
+    ...(strict ? { strict } : {}),
   };
 }
 
@@ -361,6 +364,8 @@ export interface ResolvedConfig {
   readonly effectAliases: ReadonlyMap<string, readonly KnownEffect[]>;
   /** The contract declared for `id`, or `undefined`. Records the match for {@link unmatchedExactKeys}. */
   contractFor(id: SymbolId): ConfigContract | undefined;
+  /** Whether `relativeFile`'s diagnostics get `--strict`'s promotion (§4.3). */
+  isStrictFile(relativeFile: string): boolean;
   /**
    * Exact keys that named no extracted symbol, after every lookup has run.
    * Glob keys are excluded on purpose: a glob matching nothing under the
@@ -395,6 +400,10 @@ export function resolveConfig(loaded: LoadedConfig, rootDir: string): ResolvedCo
       contract,
     });
   }
+
+  const strictMatchers = (loaded.config.strict ?? []).map((pattern) =>
+    globToRegExp(rebase(pattern, configDir, absoluteRoot)),
+  );
 
   const effectAliases = new Map<string, readonly KnownEffect[]>();
   for (const [name, members] of Object.entries(loaded.config.effects ?? {})) {
@@ -439,6 +448,9 @@ export function resolveConfig(loaded: LoadedConfig, rootDir: string): ResolvedCo
       }
       for (const entry of candidates) matchedKeys.add(entry.key);
       return candidates[0]?.contract;
+    },
+    isStrictFile(relativeFile: string): boolean {
+      return strictMatchers.some((matcher) => matcher.test(relativeFile));
     },
     unmatchedExactKeys(): readonly string[] {
       return entries

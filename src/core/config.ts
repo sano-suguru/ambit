@@ -44,6 +44,12 @@ export interface AmbitConfig {
    * declaration path and may not (§4.1 (a), (b)).
    */
   readonly contracts?: Readonly<Record<string, ConfigContract>>;
+  /**
+   * File globs — same syntax as a key's `<file>` half — whose diagnostics get
+   * the promotion `--strict` applies, and only theirs (§4.3: 「ディレクトリ
+   * 単位に `strict` を設定できる」).
+   */
+  readonly strict?: readonly string[];
 }
 
 /**

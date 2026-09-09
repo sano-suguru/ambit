@@ -350,6 +350,58 @@ export async function refund(id: string): Promise<number> {
     expect(result.stderr).toContain("redefines the standard effect");
   });
 
+  it("(d) promotes AMB-W003 to an error inside a strict directory and leaves it outside", async () => {
+    // DESIGN.md §4.3: 「`ambit.config.ts` でディレクトリ単位に `strict` を
+    // 設定できる。新規コードから締め、レガシーは警告のままにする」. Both
+    // files below make the same unresolvable-target call, so the only thing
+    // separating them is which directory they are in.
+    const source = (host: string) => `/**
+ * @entrypoint
+ * @effects network
+ * @capabilities http:get:${host}
+ */
+export async function refresh(path: string): Promise<number> {
+  const response = await fetch("https://" + path);
+  return response.status;
+}
+`;
+    const dir = await project({
+      "src/app/rates.ts": source("api.example.test"),
+      "src/legacy/rates.ts": source("legacy.example.test"),
+      "ambit.config.ts": `export default {
+  strict: ["src/app/**"],
+};
+`,
+    });
+
+    const result = await run(dir);
+    const byFile = new Map(
+      result.diagnostics
+        .filter((d) => d.id === "AMB-W003")
+        .map((d) => [d.location.file, d.severity]),
+    );
+    expect(byFile.get("app/rates.ts")).toBe("error");
+    expect(byFile.get("legacy/rates.ts")).toBe("warning");
+    expect(result.exitCode).toBe(1);
+
+    // Without the config both stay warnings and the run is clean, so the
+    // promotion is the config's doing …
+    await fs.rm(path.join(dir, "ambit.config.ts"));
+    const without = await run(dir);
+    expect(without.diagnostics.filter((d) => d.id === "AMB-W003").map((d) => d.severity)).toEqual([
+      "warning",
+      "warning",
+    ]);
+    expect(without.exitCode).toBe(0);
+
+    // … and `--strict` still promotes everywhere, config or not: the two are
+    // a union, never a narrowing.
+    const everywhere = await run(dir, ["check", "src", "--format", "json", "--strict"]);
+    expect(
+      everywhere.diagnostics.filter((d) => d.id === "AMB-W003").map((d) => d.severity),
+    ).toEqual(["error", "error"]);
+  });
+
   it("(f) leaves a project with no config exactly as it was", async () => {
     const source = `/** @effects pure */
 export async function fetchRate(): Promise<number> {

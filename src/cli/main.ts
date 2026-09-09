@@ -89,6 +89,7 @@ export async function main(argv: readonly string[]): Promise<number> {
                 : []),
             ],
             args.strict,
+            config,
           );
     coverage = computeCoverage({
       filesAnalyzed: project.files.length,
@@ -149,10 +150,26 @@ const KNOWN_FLAGS = new Set(["--format", "--coverage", "--strict", "--config"]);
  */
 const STRICT_PROMOTED_IDS: ReadonlySet<string> = new Set(["AMB-W001", "AMB-W003"]);
 
-function applyStrict(diagnostics: readonly Diagnostic[], strict: boolean): readonly Diagnostic[] {
-  if (!strict) return diagnostics;
+/**
+ * `--strict` promotes everywhere; `strict` in `ambit.config.ts` promotes only
+ * inside the globs it lists (DESIGN.md §4.3: 「`ambit.config.ts` でディレクトリ
+ * 単位に `strict` を設定できる。新規コードから締め、レガシーは警告のまま
+ * にする」). The two are a union, so `--strict` on the command line is never
+ * narrowed by a config that lists fewer directories.
+ *
+ * Matched on the diagnostic's own file, which is why the config-level
+ * diagnostics (AMB-W005/W006) are unaffected in practice: theirs is the
+ * config file, which no `strict` glob names.
+ */
+function applyStrict(
+  diagnostics: readonly Diagnostic[],
+  strict: boolean,
+  config: ResolvedConfig | undefined,
+): readonly Diagnostic[] {
+  if (!strict && config === undefined) return diagnostics;
   return diagnostics.map((diagnostic) =>
-    STRICT_PROMOTED_IDS.has(diagnostic.id)
+    STRICT_PROMOTED_IDS.has(diagnostic.id) &&
+    (strict || config?.isStrictFile(diagnostic.location.file) === true)
       ? { ...diagnostic, severity: "error" as const }
       : diagnostic,
   );
