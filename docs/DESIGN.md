@@ -164,7 +164,7 @@ JS 実装を既定にする代償も記録する。`typescript` 6.0.3 は npm �
 
 ### 4.1 宣言の形式
 
-契約は既定では **JSDoc タグ**で宣言する。通常の宣言では、関数本体やシグネチャを変更しない。出所は JSDoc だけではなく、`ambit.config.ts`（下記「コード外宣言」）と `withAmbit` / `ambitHandler` の `spec`（下記「宣言の出所」、§4.4）がある。3 つは同じ 5 つの契約を同じ意味で宣言する。
+契約は既定では **JSDoc タグ**で宣言する。通常の宣言では、関数本体やシグネチャを変更しない。出所は JSDoc だけではなく、`ambit.config.ts`（下記「コード外宣言」）と `withAmbit` / `ambitHandler` / `ambitRoute` の `spec`（下記「宣言の出所」、§4.4）がある。3 つは同じ 5 つの契約を同じ意味で宣言する。
 
 ```ts
 /** @effects pure */
@@ -531,7 +531,7 @@ SQL 文からテーブル名を読み取って `db:` のケイパビリティを
 - **鍵の生存**: `esbuild --bundle --minify --format=esm` で、スパイクのルート path リテラルは 15/15 そのまま残った（`/users/:email`、`/posts/:id{[0-9]+}`、`/files/*`、配列に置いてループで登録した `/loop/one` を含む）。関数宣言名は 1 文字に潰れ、実測 `fn.name` は `listUsers`→`"a"`、`getUser`→`"u"`、`createOrder`→`"c"`。ただし `--keep-names` はビルドプラグインではなく**フラグ 1 つ**で、付ければ `fn.name` は全て元に戻る（1213B → 1520B）。したがって「シンボルを鍵にすると保存されない」は既定の話であって、path 鍵に対する反論としては成り立たない。ここは問いの言うとおりである。
 - **実行時に鍵が読めるか（hono）**: `app.use("*")` の中で `next()` の**前**に読める `c.req.routePath` はミドルウェア自身の `/*` を返す。契約はハンドラの前に積まねばならないので、`routePath` では足りない。`c.req.matchedRoutes` は `next()` の前から `[/*, /users/:email]` を持っており、こちらなら鍵になる。フレームワークごとに別の API であり、hono 以外では未検証。
 - **静的側で鍵が決まるか**: スパイクの `app.*` 登録 14 件を TypeScript の AST で走査すると、リテラル path が取れるのは 12/14 (86%)。取れないのは配列からループで登録した 1 件と `app.route("/api", sub)` 自身。問題は残る 1 件で、`sub.get("/items", …)` は静的には `/items`、実行時の鍵は `/api/items` である。マウントを解決しない限り、実行時に一致する鍵 11・**一致しない鍵 1**・鍵なし 2 になる。一致しない鍵は鍵なしより悪い: そのルートは黙って `runtime.unscoped` に落ちるのに、emit 側は 12/14 を網羅したと報告する。鍵なしなら見える欠落が、ここでは見えない。（同じ path が上位アプリにも登録されていれば別ルートの契約が当たりうるが、これは**未計測**である。）
-- **`test/fixtures/realistic-api` に対する割合は測れない**。fixture に `app.<method>(...)` は 0 件、`new Hono()` も 0 件で、母数が存在しない（あるのは `ambitHandler` 登録 7 件）。現行 checker にも `method + path` を抽出する経路はなく（`RUNTIME_WRAPPER_NAMES` は `withAmbit` と `ambitHandler` の 2 つだけ）、任意のアプリに対して 0/N である。上の 86% はスパイクの数値であって fixture の数値ではない。
+- **`test/fixtures/realistic-api` に対する割合は測れない**。fixture に `app.<method>(...)` は 0 件、`new Hono()` も 0 件で、母数が存在しない（あるのは `ambitHandler` 登録 7 件）。現行 checker にも `method + path` を抽出する経路はなく（`RUNTIME_WRAPPER_NAMES` は `withAmbit`・`ambitHandler`・`ambitRoute` の 3 つで、いずれも `method + path` を持たない）、任意のアプリに対して 0/N である。上の 86% はスパイクの数値であって fixture の数値ではない。
 - **導入コスト**: fixture の 7 ルートで、`ambitHandler` 登録が占めるのは 44 行（orders 10 / users 13 / audit 21）= 6.3 行/ルート。既存 N ルートの API に A を入れるコストは概ね 6N 行、B は 1 行 + ビルド／CI への emit 工程 1 つである。この差は B の実在する利点であり、小さくない。
 
 それでも選ぶのは A（変更なし）。理由は鍵の生存ではなく、次の 3 つ:
@@ -565,7 +565,7 @@ C も採らない。C は 1 と 2 を B から丸ごと引き継いだうえで�
 - **`@effects` も `spec` に入れる**。`effects` は全関数に付くものであり、エントリポイントにしか無いラッパーでは受けきれない。粒度が合わない。
 - **ラップされていることから `@entrypoint` を推論する**。`@entrypoint` は 1 行であり、そもそも重複していない。推論すれば「ラップし忘れ」と「エントリポイントではない」が区別できなくなる。
 
-一致検査（`AMB-E010` / `AMB-E011`）は**残す。意味も severity も変えない**。両方書かれていて食い違えば error である。変わったのは「JSDoc 側が無くてもよい」ことだけで、「食い違ってもよい」ではない。合流で `spec` を最後に置くのはこのためで、JSDoc か config が宣言していればそちらが有効となり、`spec` はその宣言と比較される。`ambitHandler(spec, handler, decode)` にも `withAmbit` と同じ規則を適用する。
+一致検査（`AMB-E010` / `AMB-E011`）は**残す。意味も severity も変えない**。両方書かれていて食い違えば error である。変わったのは「JSDoc 側が無くてもよい」ことだけで、「食い違ってもよい」ではない。合流で `spec` を最後に置くのはこのためで、JSDoc か config が宣言していればそちらが有効となり、`spec` はその宣言と比較される。`ambitHandler(spec, handler, decode)` と `ambitRoute(spec, handler, decode)` にも `withAmbit` と同じ規則を適用する。
 
 この決定が捨てる検査を明記する。二重に書かれていた時代は、`spec` だけを広げた編集が「対の不一致」として `AMB-E010` に当たった。宣言が 1 箇所になれば対が無いので、この当たり方は無くなる。ただしこれは契約の保証面積の縮小ではない。`AMB-E010` / `AMB-E011` は権限拡大そのものを捕まえる仕組みではなく、複製が食い違っていないことを見張る仕組みだった（両側を同時に広げる編集は以前から黙って通っていた）。`spec` に書いた宣言は他のあらゆる Ambit の契約と同じく diff に現れ、§4.4 の縮小則で呼び出し元から縛られ（`AMB-E005`）、リテラル target は `AMB-E009` で検査される。
 

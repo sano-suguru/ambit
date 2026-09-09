@@ -11,8 +11,8 @@ Ambit is experimental. Expect this file to shrink as the analysis grows.
 
 `@effects`, `@capabilities`, `@budget`, `@entrypoint`, and `@boundary` are all
 parsed. `@effects` and `@capabilities` are checked statically; `@budget` is
-validated but only `timeMs` is enforced, at runtime, through `withAmbit` or
-the Hono adapter's `ambitHandler`.
+validated but only `timeMs` is enforced, at runtime, through `withAmbit` or an
+adapter's `ambitHandler` / `ambitRoute`.
 
 The `@capabilities` check has two halves (DESIGN.md §4.4's 二重強制):
 
@@ -29,7 +29,8 @@ table-level permission for arbitrary SQL, so no `db:` capability is read out
 of a statement.
 
 A `withAmbit(spec, handler)`, or an adapter's `ambitHandler(spec, handler,
-decode)`, whose `capabilities` is a literal array and whose `handler` names a
+decode)` / `ambitRoute(spec, handler, decode)`, whose `capabilities` is a
+literal array and whose `handler` names a
 declaration in the same file *is* that handler's `@capabilities` (DESIGN.md
 §4.4). `spec.budget` is the handler's `@budget` under the same conditions,
 independently of the capability half. Writing the tag as well is still

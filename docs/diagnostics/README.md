@@ -241,14 +241,16 @@ hook rather than to the checker.
 
 ## AMB-E010
 
-`withAmbit` or `ambitHandler` disagrees with the handler's `@capabilities`.
+`withAmbit` or an adapter's `ambitHandler` / `ambitRoute` disagrees with the
+handler's `@capabilities`.
 
 **Severity:** error
 **Category:** capabilities
 
 DESIGN.md §4.4 chose explicit registration, so the capability set that reaches
-the runtime is the one in the `withAmbit(spec, handler)` or `ambitHandler(spec,
-handler, decode)` (the `ambit/runtime/hono` adapter) beside the handler. A
+the runtime is the one in the `withAmbit(spec, handler)`, `ambitHandler(spec,
+handler, decode)` (the `ambit/runtime/hono` adapter) or `ambitRoute(spec,
+handler, decode)` (the `ambit/runtime/next` adapter) beside the handler. A
 literal one *is* the handler's `@capabilities`, so the tag need not repeat it.
 Writing both is still allowed, and this reports the two disagreeing, as sets of
 the text each one wrote. The message names the call the source actually wrote. Order does not matter; anything else does, including a glob on one
@@ -284,7 +286,8 @@ the decision being reported (§5.3).
 
 ## AMB-E011
 
-`withAmbit` or `ambitHandler` disagrees with the handler's `@budget`.
+`withAmbit` or an adapter's `ambitHandler` / `ambitRoute` disagrees with the
+handler's `@budget`.
 
 **Severity:** error
 **Category:** budget
@@ -325,13 +328,14 @@ decision being reported.
 
 ## AMB-W004
 
-`withAmbit` or `ambitHandler` was not compared with a declared contract.
+`withAmbit`, `ambitHandler` or `ambitRoute` was not compared with a declared
+contract.
 
 **Severity:** warning
 **Category:** capabilities
 
 A `withAmbit(spec, handler)` or an adapter's `ambitHandler(spec, handler,
-decode)` was found, but one of `AMB-E010`'s or `AMB-E011`'s conditions does not
+decode)` / `ambitRoute(spec, handler, decode)` was found, but one of `AMB-E010`'s or `AMB-E011`'s conditions does not
 hold: the capability list is built at runtime, the budget is not an object
 literal of literal limits, or the handler is not a declaration in the same
 file. The message names which.

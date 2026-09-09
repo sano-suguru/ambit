@@ -15,11 +15,12 @@ path, and M2–M4 are partial. The details are per row.
 ## Baseline commands
 
 ```sh
-pnpm test                     # 335 tests, 21 files — pass
+pnpm test                     # 370 tests, 24 files — pass
 pnpm exec tsc --noEmit        # pass
 ./node_modules/.bin/biome ci .  # pass
 node src/cli/main.ts check src --coverage   # exit 0
 node src/cli/main.ts check test/fixtures/realistic-api --coverage   # exit 0
+node src/cli/main.ts check test/fixtures/next-app --coverage         # exit 0
 ```
 
 The M0.5 comparison is a separate, manual procedure — it spawns a Go engine and

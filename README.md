@@ -112,8 +112,8 @@ check, runtime block* below.
 | `@entrypoint` | where a request enters | warned when it declares no capability set (`AMB-W002`) |
 | `@boundary reason="…"` | that a body is not analysed, and its declared contract is trusted in its place | counted separately in `--coverage` |
 
-`@capabilities` and `@budget` are also what a `withAmbit` / `ambitHandler`
-registration writes. A literal one is that handler's declaration, so the tag
+`@capabilities` and `@budget` are also what a `withAmbit` / `ambitHandler` /
+`ambitRoute` registration writes. A literal one is that handler's declaration, so the tag
 need not repeat it; where both are written and they disagree, the check fails
 (`AMB-E010`, `AMB-E011`).
 
@@ -148,8 +148,7 @@ anonymous default exports, and a class with no constructor.
 `ambit check` reads the source and nothing that runs, so adopting the static
 check means writing the declarations and nothing more. Runtime enforcement is
 the opposite: it is adopted **per entrypoint**. Every entrypoint needs its own
-`withAmbit` or `ambitHandler` registration, and a JSDoc tag alone never turns
-it on.
+`withAmbit` or adapter registration, and a JSDoc tag alone never turns it on.
 
 ```ts
 import { installFetchHook, withAmbit } from "ambit/runtime";
