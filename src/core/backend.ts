@@ -111,6 +111,15 @@ export interface CallSite {
 /** Raw JSDoc tag text for one function declaration, before contract parsing. */
 export interface RawJsDoc {
   readonly tags: ReadonlyMap<string, string>;
+  /**
+   * Where each tag was written, so a fix can replace the tag itself rather
+   * than guess at a line (DESIGN.md §5.3: `fixes[].edits` must be a concrete,
+   * applicable patch). Same 1-based, end-exclusive convention as every other
+   * `SourceLocation`; `diagnose.ts` converts to the 0-based edit range §5.3
+   * specifies. Character offsets are UTF-16 units, which is what the
+   * compiler already reports.
+   */
+  readonly tagLocations: ReadonlyMap<string, SourceLocation>;
 }
 
 /** Everything the connector layer can extract about one function/method declaration. */

@@ -39,6 +39,7 @@ export function summarizeExtractedFiles(
       summaries.push({
         id: fn.id,
         location: fn.location,
+        tagLocations: fn.jsDoc?.tagLocations ?? new Map(),
         declared: parseDeclaredEffects(fn.jsDoc),
         capabilities: parseDeclaredCapabilities(fn.jsDoc),
         budget: parseDeclaredBudget(fn.jsDoc),

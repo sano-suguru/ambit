@@ -97,6 +97,12 @@ analysis itself could not run.
   set. `@boundary reason="…"` stops checking a body and trusts the declared
   contract instead, counted separately in `--coverage`. `@budget` is parsed
   and validated. `--strict` promotes the `unknown` warnings to errors.
+- **Fix candidates:** an `AMB-E001` diagnostic carries one applicable patch
+  (`fixes[].edits`, 0-based and end-exclusive) that widens the `@effects` tag
+  to what was observed, marked `consistentWithContract: false` with the
+  callers it would affect. There is no contract-preserving candidate: fixing
+  the code instead of the contract means restructuring it, and Ambit does not
+  invent a patch it cannot generate safely.
 - **Not yet:** nothing *enforces* `@capabilities` or `@budget` at runtime —
   everything above is static. The static half of §4.4's 二重強制 (rejecting a
   literal URL outside the granted target) is not implemented either; only the
@@ -282,6 +288,5 @@ Direction, not commitments — nothing here is scheduled.
 - The static half of capability enforcement: rejecting a literal URL or table
   name outside the granted target
 - Stable diagnostic ids (from the first public release)
-- Suggested fixes (`fixes[].edits` — patches that are actually applicable)
 - Impact analysis and incremental re-checking
 - Inferring candidate contracts for existing code

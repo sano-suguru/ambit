@@ -3,8 +3,11 @@ import type {
   ContractViaEntry,
   Diagnostic,
   DiagnosticEngine,
+  DiagnosticFix,
+  FixEdit,
   KnownEffect,
   SkippedFunctionKind,
+  SourceLocation,
   SymbolId,
   UncarriedContract,
 } from "../core/index.ts";
@@ -46,6 +49,86 @@ export function diagnose(
   }
 
   return diagnostics;
+}
+
+/**
+ * The one fix candidate AMB-E001 can generate: widen the `@effects` tag to
+ * cover what was observed.
+ *
+ * There is deliberately no second, contract-preserving candidate. Restoring a
+ * declaration means restructuring the code — moving the effectful call to a
+ * caller that is allowed to make it — and Ambit cannot generate that patch
+ * safely. DESIGN.md §5.3 forbids inventing one for the sake of ranking:
+ * 「生成できない候補を順位のために捏造しない」. So this fix is always
+ * `consistentWithContract: false`, and `impact` says what widening costs.
+ */
+function buildWidenFix(
+  propagated: PropagatedFunction,
+  declared: ReadonlySet<KnownEffect>,
+  excess: ReadonlySet<KnownEffect>,
+  state: ReadonlyMap<SymbolId, PropagatedFunction>,
+): readonly DiagnosticFix[] {
+  const { summary } = propagated;
+  const tagLocation = summary.tagLocations.get("effects");
+  // No recorded tag position means no applicable patch. §5.3: never emit a
+  // summary-only candidate as if it were one.
+  if (!tagLocation) return [];
+
+  const widened = KNOWN_EFFECTS.filter((effect) => declared.has(effect) || excess.has(effect));
+  if (widened.length === 0) return [];
+
+  const edit: FixEdit = {
+    file: tagLocation.file,
+    range: toEditRange(tagLocation),
+    replacement: `@effects ${widened.join(", ")}`,
+  };
+
+  const callers = callersOf(summary.id, state);
+  const pureCallersBroken = callers.filter((caller) => {
+    const callerDeclared = caller.summary.declared;
+    if (callerDeclared.kind !== "declared") return false;
+    return [...excess].some((effect) => !callerDeclared.effects.effects.has(effect));
+  }).length;
+
+  return [
+    {
+      rank: 1,
+      kind: "widen",
+      summary: `Allow ${[...excess].join(", ")} in ${displayName(summary.id)}`,
+      // Not a probability. The patch is mechanical and always applies; what
+      // is uncertain is whether widening is what the author wants, which is
+      // exactly what `consistentWithContract: false` is for.
+      confidence: 1,
+      consistentWithContract: false,
+      edits: [edit],
+      impact: {
+        callersAffected: callers.map((caller) => caller.summary.id),
+        pureCallersBroken,
+      },
+    },
+  ];
+}
+
+/**
+ * DESIGN.md §5.3: `location` is 1-based, an edit range 0-based and
+ * end-exclusive. `SourceLocation.endLine`/`endCol` are already exclusive, so
+ * only the origin shifts.
+ */
+function toEditRange(location: SourceLocation): FixEdit["range"] {
+  return [
+    [location.line - 1, location.col - 1],
+    [location.endLine - 1, location.endCol - 1],
+  ];
+}
+
+/** Every analyzed function with a resolved call to `id` — who a widened contract newly affects. */
+function callersOf(
+  id: SymbolId,
+  state: ReadonlyMap<SymbolId, PropagatedFunction>,
+): readonly PropagatedFunction[] {
+  return [...state.values()].filter((candidate) =>
+    candidate.summary.calls.some((call) => call.kind === "resolved" && call.callee === id),
+  );
 }
 
 function diagnoseEffects(
@@ -304,7 +387,7 @@ function buildExcessDiagnostic(
       observed: [...propagated.observed.effects],
       via,
     },
-    fixes: [],
+    fixes: buildWidenFix(propagated, declared, excess, state),
     docs: "docs/diagnostics/README.md#amb-e001",
     engine,
   };

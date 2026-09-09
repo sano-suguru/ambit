@@ -27,6 +27,14 @@ least one call.
 Example: a function declared `@effects pure` calls another function that
 performs a `fetch`.
 
+**Fixes:** one `widen` candidate, replacing the `@effects` tag with the
+observed set. It is always `consistentWithContract: false` — it loosens the
+promise rather than keeping it — and `impact.pureCallersBroken` counts the
+callers whose own declaration would no longer cover it. No contract-preserving
+candidate is emitted: restoring the declaration means restructuring the code,
+which Ambit cannot patch safely, and DESIGN.md §5.3 forbids inventing a
+candidate for the sake of ranking.
+
 ## AMB-W001
 
 Declared effects reach unknown.

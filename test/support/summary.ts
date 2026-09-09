@@ -4,6 +4,7 @@ import type {
   DeclaredCapabilities,
   Diagnostic,
   KnownEffect,
+  SourceLocation,
 } from "../../src/core/index.ts";
 import { isEffectsContract } from "../../src/core/index.ts";
 
@@ -14,11 +15,13 @@ import { isEffectsContract } from "../../src/core/index.ts";
  * from a backend or a summarizer, and a test opting out of one should say so.
  */
 export const NO_OTHER_CONTRACTS: {
+  readonly tagLocations: ReadonlyMap<string, SourceLocation>;
   readonly capabilities: DeclaredCapabilities;
   readonly budget: DeclaredBudget;
   readonly boundary: DeclaredBoundary;
   readonly entrypoint: false;
 } = {
+  tagLocations: new Map(),
   capabilities: { kind: "none" },
   budget: { kind: "none" },
   boundary: { kind: "none" },

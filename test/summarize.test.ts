@@ -47,7 +47,7 @@ describe("summarizeExtractedFiles", () => {
           {
             id: "f.ts#typoed" as never,
             location: LOC,
-            jsDoc: { tags: new Map([["effects", "netwrok"]]) },
+            jsDoc: { tagLocations: new Map(), tags: new Map([["effects", "netwrok"]]) },
             calls: [],
           },
         ],

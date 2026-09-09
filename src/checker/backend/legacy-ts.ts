@@ -87,7 +87,7 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
       functions.push({
         id,
         location: locationOf(absoluteRoot, sourceFile, nameOrNode(node)),
-        jsDoc: extractJsDoc(node),
+        jsDoc: extractJsDoc(node, absoluteRoot),
         calls: collectCalls(node, sourceFile, program, checker, declaredNodeToId, absoluteRoot),
       });
     }
@@ -406,7 +406,7 @@ function collectSkippedFunctions(
       // node; the local alias only widens it to the shape the JSDoc and
       // location helpers take.
       const decl = node as FunctionLikeDeclaration;
-      const jsDoc = extractJsDoc(decl);
+      const jsDoc = extractJsDoc(decl, absoluteRoot);
       for (const tag of CONTRACT_TAGS) {
         const raw = jsDoc?.tags.get(tag);
         if (raw === undefined) continue;
@@ -581,7 +581,7 @@ function isFunctionValuedProperty(member: ts.ClassElement): member is ts.Propert
 
 // ---- JSDoc extraction ---------------------------------------------------
 
-function extractJsDoc(decl: FunctionLikeDeclaration): RawJsDoc | undefined {
+function extractJsDoc(decl: FunctionLikeDeclaration, absoluteRoot: string): RawJsDoc | undefined {
   // A `ClassDeclaration` is only ever indexed as a stand-in for an *implicit*
   // constructor (`collectFunctionLikeDeclarations`). That constructor has no
   // declaration site, so the class's own JSDoc must not be read as its
@@ -594,10 +594,43 @@ function extractJsDoc(decl: FunctionLikeDeclaration): RawJsDoc | undefined {
   if (tags.length === 0) return undefined;
 
   const map = new Map<string, string>();
+  const locations = new Map<string, SourceLocation>();
+  const sourceFile = target.getSourceFile();
   for (const tag of tags) {
     map.set(tag.tagName.text, jsDocTagText(tag));
+    locations.set(tag.tagName.text, jsDocTagLocation(absoluteRoot, sourceFile, tag));
   }
-  return { tags: map };
+  return { tags: map, tagLocations: locations };
+}
+
+/**
+ * A JSDoc tag's own span, with trailing trivia trimmed.
+ *
+ * `tag.getEnd()` runs to where the next tag or the closing `*/ ` begins, so it
+ * swallows the whitespace after the tag text. A fix that replaced that span
+ * would produce `; /** @effects network*​/`. The patch has to be one a person
+ * would have written (DESIGN.md §5.3), so the range stops at the last
+ * non-whitespace character.
+ */
+function jsDocTagLocation(
+  absoluteRoot: string,
+  sourceFile: ts.SourceFile,
+  tag: ts.JSDocTag,
+): SourceLocation {
+  const start = tag.getStart(sourceFile);
+  const text = sourceFile.text;
+  let end = tag.getEnd();
+  while (end > start && /\s/.test(text[end - 1] ?? "")) end--;
+
+  const startPosition = sourceFile.getLineAndCharacterOfPosition(start);
+  const endPosition = sourceFile.getLineAndCharacterOfPosition(end);
+  return {
+    file: relativePath(absoluteRoot, sourceFile),
+    line: startPosition.line + 1,
+    col: startPosition.character + 1,
+    endLine: endPosition.line + 1,
+    endCol: endPosition.character + 1,
+  };
 }
 
 function jsDocTagText(tag: ts.JSDocTag): string {

@@ -38,7 +38,14 @@ describe("diagnose (end-to-end: backend -> summarize -> propagate -> diagnose)",
       severity: "error",
       category: "effects",
       contract: { declared: ["pure"], observed: ["network"], via: [] },
-      fixes: [],
+    });
+    // Since fixes[].edits landed, this diagnostic carries one applicable
+    // widen patch (see test/fix.test.ts for applying and re-checking it).
+    expect(diag?.fixes).toHaveLength(1);
+    expect(diag?.fixes[0]).toMatchObject({
+      kind: "widen",
+      consistentWithContract: false,
+      edits: [{ file: "rule2-direct.ts", replacement: "@effects network" }],
     });
     expect(diag?.location.file).toBe("rule2-direct.ts");
     expect(diag?.location.line).toBeGreaterThan(0);

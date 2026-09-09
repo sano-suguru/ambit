@@ -102,6 +102,12 @@ export type DeclaredBoundary =
 export interface FunctionSummary {
   readonly id: SymbolId;
   readonly location: SourceLocation;
+  /**
+   * Where each contract tag was written, carried through from
+   * {@link RawJsDoc.tagLocations} so a fix can rewrite the tag in place
+   * instead of guessing at a line (DESIGN.md §5.3).
+   */
+  readonly tagLocations: ReadonlyMap<string, SourceLocation>;
   readonly declared: DeclaredEffects;
   readonly capabilities: DeclaredCapabilities;
   readonly budget: DeclaredBudget;
