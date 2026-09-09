@@ -11,7 +11,11 @@ import { applyEdits } from "./support/apply-edits.ts";
  * The accidents this fixture exists to stop, run end to end against a project
  * shaped like one a coding agent would produce: HTTP handlers with
  * `@entrypoint` contracts, a `pg` pool and a Prisma client, an LLM SDK, a
- * barrel file, and pure domain logic (`docs/goals/realistic-api.md`).
+ * barrel file, and pure domain logic. The six accidents are the ones a coding
+ * agent actually causes: a side effect added to a `pure` function (`fetch`, a
+ * database query, an LLM call), a network call reached through a barrel file, a
+ * literal URL outside the granted capability, and a `withAmbit` capability list
+ * that drifts from the handler's JSDoc.
  *
  * The fixture depends on nothing installed: `pg`, `@prisma/client`, `openai`
  * and `ambit/runtime` are declared under `types/` and the tsconfig sets
@@ -120,7 +124,7 @@ export function formatCents(cents: number): string {
   return (cents / 100).toFixed(2);
 }`;
 
-describe("realistic API fixture (docs/goals/realistic-api.md)", () => {
+describe("realistic API fixture (agent-accident scenarios)", () => {
   it("reports no error on the baseline", async () => {
     // The floor every accident is measured against: a project written the way
     // Ambit asks for it must not be noisy.
