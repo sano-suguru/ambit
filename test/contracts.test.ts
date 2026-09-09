@@ -293,6 +293,35 @@ describe("contract-to-handler agreement (DESIGN.md §4.4「契約とハンドラ
     expect(diagnostics.filter((d) => d.message.includes("agreeing"))).toEqual([]);
   });
 
+  /**
+   * DESIGN.md §4.4: with the spec read as the declaration, the JSDoc tag is
+   * optional where the spec can supply it. `specOnly` writes `@entrypoint` and
+   * `@effects` and nothing else; the three diagnostics that answered a missing
+   * `@capabilities` / `@budget` beside a registration — AMB-W002, AMB-E010,
+   * AMB-E011 — have nothing to report, because the contract is not missing.
+   */
+  it("reports nothing for a handler whose only capability and budget are in the spec", async () => {
+    const { diagnostics, state } = await analyze(WRAPPER_ROOT);
+    expect(diagnostics.filter((d) => d.message.includes("specOnly "))).toEqual([]);
+    // Silent because the contract is there, not because it went missing.
+    const summary = [...state.values()].find((p) => p.summary.id === "routes.ts#specOnly")?.summary;
+    expect(summary?.declaredBy).toEqual({ effects: "jsdoc", capabilities: "spec", budget: "spec" });
+    expect(summary?.capabilities.kind).toBe("declared");
+  });
+
+  it("takes only the half the JSDoc left out, leaving the written tag in force", async () => {
+    const { state } = await analyze(WRAPPER_ROOT);
+    const summary = [...state.values()].find(
+      (p) => p.summary.id === "routes.ts#specOnlyBudget",
+    )?.summary;
+    expect(summary?.declaredBy?.capabilities).toBe("jsdoc");
+    expect(summary?.declaredBy?.budget).toBe("spec");
+    expect(summary?.budget).toEqual({
+      kind: "declared",
+      budget: { timeMs: 500, onExceed: "throw" },
+    });
+  });
+
   it("reports an adapter registration it cannot compare as AMB-W004 rather than passing it", async () => {
     const { diagnostics } = await analyze(WRAPPER_ROOT);
     // Filtered by reason, not counted: the two halves are reported
