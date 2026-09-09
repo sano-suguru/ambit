@@ -56,9 +56,19 @@ describe("runtime enforcement against a real server, through the installed packa
     // `pg` is installed for real: DESIGN.md §4.4 (c) chose it because
     // `Pool.prototype.query` is a stable patch point, and a hand-written
     // double would not prove that the real package still has that shape.
+    // `hono` and `@hono/node-server` for the same reason as `pg`: the adapter
+    // is only worth testing against the real framework, over a real socket.
     await execFileAsync(
       "npm",
-      ["install", "--no-audit", "--no-fund", await packedTarball(), "pg@8"],
+      [
+        "install",
+        "--no-audit",
+        "--no-fund",
+        await packedTarball(),
+        "pg@8",
+        "hono@4",
+        "@hono/node-server@1",
+      ],
       { cwd: consumer },
     );
   }, 300_000);
@@ -307,6 +317,140 @@ try {
 `);
     expect(stdout).toContain("ABORTED:");
     expect(stdout).not.toContain("COMPLETED:");
+  }, 60_000);
+
+  /**
+   * The Hono adapter (DESIGN.md §4.4「契約とハンドラの対応付け（決定）」),
+   * driven by real HTTP requests to a real server. `ambitHandler` registers
+   * the route, so the context comes from the registration and not from a
+   * hand-written `withAmbit` — which is the whole claim being tested.
+   *
+   * The app installs `app.onError` and reports `error.name`: §4.4 decided the
+   * adapter does not translate a denial into 403/504, so what a route returns
+   * on denial is whatever the framework's error handler makes of the throw.
+   */
+  const HONO_APP = (routes: string) => `
+import { serve } from "@hono/node-server";
+import { Hono } from "hono";
+import pg from "pg";
+import { ambitHandler } from "ambit/runtime/hono";
+import { installFetchHook, installPgHook } from "ambit/runtime";
+installFetchHook();
+installPgHook(pg);
+
+const app = new Hono();
+app.onError((error, c) => c.json({ error: error.name, message: error.message }, 500));
+${routes}
+
+const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 0 }, async (info) => {
+  const results = {};
+  for (const [name, url] of CASES(info.port)) {
+    const response = await fetch(url);
+    results[name] = { status: response.status, body: await response.json() };
+  }
+  console.log("RESULT:" + JSON.stringify(results));
+  server.close(() => process.exit(0));
+});
+`;
+
+  it("lets a granted fetch through a handler the adapter registered", async () => {
+    const before = seen.length;
+    const { stdout, stderr } = await runScript(
+      HONO_APP(`
+app.get("/rates", ambitHandler(
+  { capabilities: ["http:get:127.0.0.1:${port}"] },
+  async (path) => ({ body: await (await fetch("http://127.0.0.1:${port}" + path)).text() }),
+  (c) => [c.req.query("path") ?? "/"],
+));
+const CASES = (p) => [["granted", "http://127.0.0.1:" + p + "/rates?path=/via-adapter"]];
+`),
+    );
+    expect(stderr).toBe("");
+    const results = JSON.parse(stdout.trim().replace("RESULT:", ""));
+    expect(results.granted).toEqual({ status: 200, body: { body: "pong" } });
+    expect(seen.slice(before)).toEqual(["/via-adapter"]);
+  }, 60_000);
+
+  it("blocks an ungranted fetch and an ungranted pg query in an adapter-registered handler", async () => {
+    // Same decisive assertions as the `withAmbit` cases: the HTTP server never
+    // sees the request, and the listener standing in for Postgres never sees a
+    // connection.
+    const connections: number[] = [];
+    const listener = net.createServer((socket) => {
+      connections.push(1);
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
+    const dbPort = (listener.address() as AddressInfo).port;
+    const before = seen.length;
+    try {
+      const { stdout } = await runScript(
+        HONO_APP(`
+const pool = new pg.Pool({ connectionString: "postgres://u:p@127.0.0.1:${dbPort}/app" });
+
+app.get("/steal", ambitHandler(
+  { capabilities: ["http:get:api.example.test"] },
+  async () => ({ body: await (await fetch("http://127.0.0.1:${port}/denied-via-adapter")).text() }),
+  () => [],
+));
+
+app.get("/query", ambitHandler(
+  { capabilities: ["db:read:app"] },
+  async () => ({ rows: (await pool.query("INSERT INTO orders (id) VALUES (1)")).rowCount }),
+  () => [],
+));
+
+const CASES = (p) => [
+  ["fetch", "http://127.0.0.1:" + p + "/steal"],
+  ["query", "http://127.0.0.1:" + p + "/query"],
+];
+`),
+      );
+      const results = JSON.parse(stdout.trim().replace("RESULT:", ""));
+      expect(results.fetch.body.error).toBe("AmbitCapabilityError");
+      expect(results.fetch.body.message).toContain(`http:get:127.0.0.1:${port}`);
+      expect(results.query.body.error).toBe("AmbitCapabilityError");
+      expect(results.query.body.message).toContain("db:write:app");
+      expect(seen.slice(before)).toEqual([]);
+      expect(connections).toEqual([]);
+    } finally {
+      await new Promise<void>((resolve) => listener.close(() => resolve()));
+    }
+  }, 60_000);
+
+  it("follows @budget timeMs onExceed for an adapter-registered handler", async () => {
+    const { stdout } = await runScript(
+      HONO_APP(`
+app.get("/throws", ambitHandler(
+  { capabilities: [], budget: { timeMs: 10, onExceed: "throw" } },
+  async () => {
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    return { done: true };
+  },
+  () => [],
+));
+
+app.get("/warns", ambitHandler(
+  { capabilities: [], budget: { timeMs: 10, onExceed: "warn" } },
+  async () => {
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    return { done: true };
+  },
+  () => [],
+));
+
+const CASES = (p) => [
+  ["throws", "http://127.0.0.1:" + p + "/throws"],
+  ["warns", "http://127.0.0.1:" + p + "/warns"],
+];
+`),
+    );
+    const results = JSON.parse(stdout.trim().replace("RESULT:", ""));
+    // `throw` reaches the framework's error handler …
+    expect(results.throws.body.error).toBe("AmbitBudgetError");
+    expect(results.throws.body.message).toContain("timeMs=10");
+    // … and `warn` lets the response through, which is the difference.
+    expect(results.warns).toEqual({ status: 200, body: { done: true } });
   }, 60_000);
 
   it("stops enforcing once the hook is removed (P5: 撤退できること)", async () => {

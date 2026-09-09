@@ -97,7 +97,7 @@ describe("distribution: pack, install into a clean project, uninstall", () => {
     // that only works from a clone is not a distribution.
     const installed = await run(
       "npm",
-      ["install", "--no-audit", "--no-fund", "-D", tarball, "typescript@5.9.3"],
+      ["install", "--no-audit", "--no-fund", "-D", tarball, "typescript@5.9.3", "hono@4"],
       consumer,
     );
     expect(installed.exitCode, installed.stderr).toBe(0);
@@ -173,6 +173,78 @@ describe("distribution: pack, install into a clean project, uninstall", () => {
     const result = await run("npx", ["--no-install", "ambit", "check", "src"], consumer);
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("fetchRate declares pure but performs [network] directly");
+  }, 120_000);
+
+  it("resolves the ambit/runtime/hono subpath and enforces through it (§4.4)", async () => {
+    // Deliberately outside `src/`: the uninstall test typechecks `src/`, and a
+    // file importing `ambit/runtime/hono` cannot type-check once the package is
+    // gone. P5 claims the *contract JSDoc* survives removal, not the imports.
+    await fs.writeFile(
+      path.join(consumer, "adapter.ts"),
+      `import { Hono } from "hono";
+import { ambitHandler } from "ambit/runtime/hono";
+import { installFetchHook } from "ambit/runtime";
+
+installFetchHook();
+const app = new Hono();
+app.onError((error, c) => c.json({ error: error.name }, 500));
+
+/**
+ * @entrypoint
+ * @capabilities http:get:api.example.test
+ * @effects network
+ */
+async function refreshRates(host: string): Promise<{ readonly host: string }> {
+  await fetch(\`https://\${host}/rates\`);
+  return { host };
+}
+
+app.get(
+  "/rates",
+  ambitHandler(
+    { capabilities: ["http:get:api.example.test"] },
+    refreshRates,
+    (c) => [c.req.query("host") ?? ""] as const,
+  ),
+);
+
+const denied = await app.request("/rates?host=elsewhere.example.test");
+console.log("DENIED:" + JSON.stringify(await denied.json()));
+`,
+    );
+    await fs.writeFile(
+      path.join(consumer, "tsconfig.adapter.json"),
+      `${JSON.stringify(
+        {
+          compilerOptions: {
+            target: "ES2023",
+            module: "NodeNext",
+            moduleResolution: "nodenext",
+            lib: ["ES2023", "DOM"],
+            strict: true,
+            noEmit: true,
+            skipLibCheck: true,
+          },
+          include: ["adapter.ts"],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const typecheck = await run(
+      path.join("node_modules", ".bin", "tsc"),
+      ["--noEmit", "-p", "tsconfig.adapter.json"],
+      consumer,
+    );
+    expect(typecheck.exitCode, typecheck.stdout).toBe(0);
+
+    // The route is registered through the adapter, so the context comes from
+    // the registration: an ungranted host is refused, and the error reaches the
+    // framework's handler untranslated (§4.4).
+    const executed = await run("node", ["--experimental-strip-types", "adapter.ts"], consumer);
+    expect(executed.stderr).toBe("");
+    expect(executed.stdout.trim()).toBe('DENIED:{"error":"AmbitCapabilityError"}');
   }, 120_000);
 
   it("uninstalls cleanly, leaving the consumer's own code untouched and valid", async () => {

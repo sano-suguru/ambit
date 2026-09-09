@@ -431,6 +431,23 @@ export const GET = ambitHandler(`,
     );
   }, 60_000);
 
+  it("type-checks as a scratch copy with nothing installed (P5)", async () => {
+    // The fixture now imports `ambit/runtime/hono` and `hono`, both declared
+    // under `types/`. If that declaration were wrong, or if the adapter's
+    // three-argument shape did not type-check, this fails — and it is also the
+    // shape of the claim that removing Ambit leaves a project valid.
+    const dir = await scratchCopy();
+    try {
+      const tsc = path.join(import.meta.dirname, "..", "node_modules", ".bin", "tsc");
+      const result = await execFileAsync(tsc, ["--noEmit", "-p", dir]).catch(
+        (error: { stdout?: string }) => ({ stdout: error.stdout ?? "failed" }),
+      );
+      expect(result.stdout).toBe("");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("reports AMB-E009 and AMB-E005 together when one capability is missing both ways", async () => {
     // The two capability errors are different findings about the same
     // capability: the body reaches a literal URL nothing granted (E009, at the
