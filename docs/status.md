@@ -201,7 +201,7 @@ machine, and §3.5's performance gate has not run either way.
 | Acceptance | editor compatibility with the chosen compiler; one pilot team |
 | Implemented | tarball distribution: `pnpm pack` → install into a clean project → `npx ambit check` → `npm remove`, with a distribution-only build (`tsconfig.build.json` → `dist/`) |
 | Evidence | `test/e2e.install.test.ts` (6) — installs into a scratch project, drives the installed bin, uninstalls, and confirms the consumer's own code still type-checks and runs |
-| Outstanding | **Not published to npm** (requires approval; the `@ambit` scope is unsecured and the package is `private: true`). **No editor integration** — no LSP, no Language Service Plugin, no extension. **`ambit sbom` does not exist**, nor does dependency-effect-diff reporting (§8) or stub trust levels in diagnostics. **No pilot team** — that is an external condition, not a technical one, and cannot be substituted with self-testing. |
+| Outstanding | **Not published to npm** (requires approval; the `@ambit` scope is unsecured and the package is `private: true`). **No editor integration** — no LSP, no Language Service Plugin, no extension. **`ambit sbom` does not exist**, nor does dependency-effect-diff reporting (§8) or stub trust levels in diagnostics. **No pilot team** — that is an external condition, not a technical one, and cannot be substituted with self-testing. **The runtime ships in the same package as the CLI**, so installing Ambit pulls `typescript` in as a production dependency; §6.1's `@ambit/runtime` split has not been done. |
 
 ### M5 — Phase 1 exit criteria
 
