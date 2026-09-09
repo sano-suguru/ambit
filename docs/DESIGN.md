@@ -340,13 +340,101 @@ SQL 文からテーブル名を読み取って `db:` のケイパビリティを
 
 ソースの JSDoc と実行中のハンドラの対応付け、コメントが消えるビルドへの対応は M2 の設計・検証対象とする。ランタイムに型解析エンジンを持ち込まず、明示登録または解析時の契約データを渡す方式を検証する。一行で導入できる範囲と追加設定が必要な範囲を公開する。
 
-フック対象の計画:
+**ランタイムフックの方式（決定）**
 
-- `globalThis.fetch`、`node:http` / `node:https` / `node:net`
-- `node:fs`（同期・非同期・Promise API）
-- `node:child_process`
-- DB クライアント: `pg`、`mysql2`、`@prisma/client`、`drizzle-orm`、`mongodb`（フック対象は `stubs/` と同期）
-- LLM SDK: `openai`、`@anthropic-ai/sdk`、`ai`（Vercel AI SDK）
+以下 (a)(b)(c) は 12 章「ランタイムフックの網羅性と壊れやすさ」のうち、方式・target 形式・DB クライアント対応を決めた部分である。計測は Node.js v24.19.0 / macOS (darwin arm64) で行い、計測していない事項は「未計測」と明記する。
+
+**(a) フックの方式と、遮断できる対象・監査のみの対象**
+
+選択肢:
+
+1. monkeypatch — モジュールオブジェクトのメソッドを差し替える。
+2. `diagnostics_channel` — 公式のイベント通知を購読する。
+3. ローダーフック — `module.register` で `node:fs` を差し替えモジュールへ解決する。
+4. クライアントラップ — 利用側が渡したモジュール／インスタンスのプロトタイプを包む。
+
+選んだもの:
+
+| 対象 | 方式 | 遮断 | 監査 |
+|---|---|---|---|
+| `globalThis.fetch` | monkeypatch (`installFetchHook`) | できる | する |
+| `node:fs` / `node:fs/promises` | monkeypatch (`installFsHook`) | できる | する |
+| `node:child_process` | monkeypatch (`installChildProcessHook`) | できる | する |
+| `pg` | クライアントラップ (`installPgHook(pg)`) | できる | する |
+| `mysql2`、`@prisma/client`、`drizzle-orm`、`mongodb`、LLM SDK（`openai`、`@anthropic-ai/sdk`、`ai`） | フックなし | できない | しない |
+
+理由:
+
+- `diagnostics_channel` は**遮断できない**。実測: 購読者が `throw` しても `publish()` は正常に戻り、例外は次の tick の `uncaughtException` になる。§12 の「監査通知があることと遮断できることを区別する」への答えはこれで、通知しかできない経路を遮断として数えない。監査だけが要るケースは現れていないので、今回は採用しない（採用しても遮断列は埋まらない）。
+- ローダーフックは、monkeypatch がすでに覆う範囲を**超えない**。実測: `node:fs` の ESM 名前空間がまだ生成されていない時点で `require("fs")` のプロパティを差し替えると、後から `import { readFileSync } from "node:fs"` した名前付きインポートも差し替え後の関数を見る。逆に `node:fs` を先に `import` した後で差し替えると、名前付きインポートと `import * as` の名前空間は元の関数に束縛されたままになり、覆えるのは `fs.readFileSync()` のプロパティ経由だけになる。この差は導入順序の差であって方式の差ではない。
+- `pg` にクライアントラップを使うのは、Ambit が `pg` に依存しないため。利用側が `installPgHook(pg)` にモジュールを渡し、Ambit は `Pool.prototype.query` / `Client.prototype.query` を包む。Ambit 側が `pg` を import すれば、`pg` を使わない利用者にも依存が増える。
+- 性能への影響（差し替えた関数を通す分の overhead）は**未計測**。
+
+選ばなかった場合に起きること:
+
+- `diagnostics_channel` だけを採用すると「フックがある」とは言えても呼び出しは素通りする。README の遮断列に真でない印が入る。
+- ローダーフックを採用すると、`node:` 組み込みの解決書き換えに伴う再入制御・ワーカースレッド・`--import` の順序という壊れやすさを、覆う範囲を広げないまま抱え込む。
+- `pg` を Ambit 側から import すると、`pg` を使わない利用者の依存グラフに `pg` が入る。
+
+導入モードと覆う範囲（`node:fs` / `node:child_process`）:
+
+| 導入 | 覆う呼び出し | 覆わない呼び出し |
+|---|---|---|
+| プリロード（`node --import`／`--require` でアプリのモジュールグラフより前に `install*Hook()` を実行） | `import { readFileSync } from "node:fs"`、`import fs from "node:fs"; fs.readFileSync()`、`require("fs").readFileSync()` | 下の共通の非対象のみ |
+| グラフ内（エントリモジュールの先頭で `install*Hook()` を呼ぶ） | `fs.readFileSync()`（既定エクスポート／`require` のプロパティ経由） | 束縛済みの名前付きインポート `import { readFileSync } from "node:fs"`、`import * as fs from "node:fs"` |
+
+どちらの導入でも覆わないもの: `node:fs` の内部が公開 API を経由せずに呼ぶ経路、ネイティブアドオン、子プロセスの中、`worker_threads` の別ワーカー（フックはワーカーごとに導入が要る）。
+
+拒否の伝え方は API の形に合わせる: 同期 API は `throw`、コールバック API は `process.nextTick(callback, error)`、Promise API は reject。`existsSync` は拒否時に `false` を返さず `throw` する — 「存在しない」と「見てはいけない」は別の答えであり、`false` を返せば後者を前者に化けさせる。
+
+Node.js のモジュールローダー自身が公開 API の `fs.readFileSync` でファイルを読む（実測）。したがって `installFsHook()` の後は、`require()` と動的 `import()` もフックを通る。`runtime.unscoped` が `deny` の状態、あるいは `fs:read` を持たないコンテキストの中で遅延読み込みを行うと、その読み込みが拒否される。これは仕様どおりの動作であり、`docs/limitations.md` に導入手順として記載する。
+
+**(b) `node:fs` と `node:child_process` の target 形式**
+
+選択肢:
+
+1. 呼び出し時に解決した**絶対パス**を target とする。
+2. ソースに書かれたままの文字列を target とする（相対パスは相対のまま）。
+3. パスを見ず、操作単位（`fs:read:*`）だけで許可する。
+
+選んだもの: 1。`fs:read:<絶対パスのグロブ>`、`fs:write:<絶対パスのグロブ>`、`proc:spawn:<コマンド>`。
+
+- パス引数は呼び出し時に正規化する: `Buffer` は `toString()`、`file:` URL は `fileURLToPath`、相対パスは呼び出し時点の `process.cwd()` を基準に `path.resolve`。
+- グロブは許可側（granted）にのみ書ける。`*` は `/` を跨ぐ（`globMatches` の既存の意味をそのまま使う）。`fs:read:/srv/app/*` は `/srv/app/a/b.txt` にも一致する。ディレクトリ 1 段だけを許可する書き方はない。
+- fd を取る操作（`fs.readSync(fd)`、`FileHandle.read`）は fd の時点でパスを持たない。`open` / `openSync` / `promises.open` の時点で flags から read / write を決めて照合する。`createReadStream` / `createWriteStream` は `fs.open` を経由するので同じ入口で捕まる（実測）。
+- 2 つのパスを取る操作（`rename`、`copyFile`、`link`）は、書き込み先に `fs:write`、読み出し元に `fs:read` を要求する。
+- `proc:spawn:<コマンド>`: `spawn` / `execFile` とその `Sync` 版は argv[0] を**書かれたまま**（PATH 解決をしない）target とする。`fork` は `process.execPath`。シェル形式（`exec`、`execSync`、`shell: true`）は、実際に起動されるプログラムがシェル文字列の中にあり、シェルのパーサなしには決まらないので、target は**シェル自身**（`options.shell` が文字列ならそれ、そうでなければ `/bin/sh`）とする。例外メッセージには「シェルを起動した／許可されたシェルは任意のプログラムを実行できる」と書く。シェル文字列の先頭語を「本当のコマンド」として名乗ることはしない。これは任意の SQL からテーブル名を読み取らないのと同じ理由で、場所が変わっても主張は変わらない。
+- target セグメントの文字種を「コンマ（`@capabilities` の区切り）と制御文字以外」に広げる。パスには空白・`+`・`~`・`%` が現れる。この緩和は閉じる方向にしか効かない: タグの書き損じは「何にも一致しない target」になり、拒否として現れる。
+
+理由: 呼び出し時に見えるのは解決後のパスであり、許可と照合できる形はこれしかない。正規化のコスト（`path.resolve` 1 回分）は**未計測**。
+
+選ばなかった場合に起きること:
+
+- 2 を選ぶと、`./data/x` と `/srv/app/data/x` が別の target になり、同じファイルを 2 通りに書ける。cwd が変われば同じ文字列が別のファイルを指すので、許可の意味がプロセスの起動場所に依存する。
+- 3 を選ぶと「どのファイルを読んでよいか」を宣言できず、`fs:read` は「ファイルを読む」以上を意味しなくなる。
+
+**(c) DB クライアント: `pg`**
+
+選択肢: `pg` / `@prisma/client`。
+
+選んだもの: `pg`。
+
+理由: `pg` は `Pool.prototype.query` / `Client.prototype.query` という安定した差し替え点を持ち、`installFetchHook` と同じ install / restore の対称な形で書ける。Prisma の公式拡張点 `$extends` は**新しいクライアントを返す**ので、元のクライアントを元に戻す restore が書けない。また `prisma generate` を通さないとクライアントが存在せず、実接続のテストが重い。両者の性能比較は**未計測**。
+
+選ばなかった場合に起きること: Prisma を選ぶと restore のないフックになり、P5（撤退できること）を満たさない。
+
+操作とケイパビリティの対応:
+
+| 操作 | 要求するケイパビリティ |
+|---|---|
+| `Pool.query(text, …)` / `Client.query(text, …)`、`text` の先頭キーワードが `select` / `show` / `explain` / `describe` | `db:read:<データベース名>` |
+| 同、先頭キーワードが `insert` / `update` / `delete` / `create` / `drop` 等 | `db:write:<データベース名>` |
+| 同、`text` が文字列でない・先頭キーワードが読めない・`Submittable` を渡す形 | `db:read:<…>` と `db:write:<…>` の**両方** |
+| `query({ text })` の設定オブジェクト形式 | `text` を上と同じ規則で判定 |
+
+- 方向の判定は静的側（`src/stubs/data-clients.ts` の SQL キーワード表）と**同一の規則**を使う。規則を 2 か所に置けば、同じ文について静的検査とランタイムが別の答えを出しうる。規則は `src/core/` に 1 つ置き、両方がそれを読む。
+- target は**データベース名**であって、テーブル名ではない。`pg` のクライアントから決まるのは接続先データベースまでで、任意の SQL からテーブルを読み取ることは上の但し書きが禁じている。テーブル単位の `db:read:users` のような target は静的な縮小則（AMB-E005）でのみ意味を持ち、`pg` のランタイムフックはそれを満たさない。この非対称は README と診断文に明記する。
+- 接続先データベースが決まらない場合（`connectionString` にパスがない、環境変数のみ、など）、target は `unknown` とする。`db:read:app` のような狭い許可では満たされず、`db:read:*` のようにデータベースを問わない許可だけが通す。例外メッセージに「接続先データベースを特定できなかった」と書く。
 
 対応ライブラリ・バージョン・操作と保証の限界を公開する。DB クライアントへのフックの存在だけで、任意の SQL のテーブル単位権限を判定できるとみなさない。
 
@@ -595,7 +683,7 @@ Phase 1 で計測する。
 - **フレームワークの間接呼び出し**: Express、NestJS の DI、Next.js、Hono 等の呼び出し経路。専用スタブとエントリポイント宣言で吸収できる範囲を M1 で検証する。
 - **型アサーションと非 null アサーション**: `as any` と `!` を同一扱いにしない。型が残っても契約上の呼び出し先が決まらない場合の規則を確定する。
 - **pure とアクセサ**: 外部状態・引数の変更は §4.2「ローカル変異と `pure`」で `state_write` として決着した。残るのはアクセサで、プロパティ参照 `o.x` が getter を起動して任意のコードを走らせうる経路を、どこまで呼び出しとして扱うかが未決定である。型 API の取得成功を純粋性の証明としない。
-- **ランタイムフックの網羅性と壊れやすさ**: ESM、初期化順序、ライブラリ更新。`diagnostics_channel`、ローダーフック、公式拡張点、クライアントラップの適用範囲を決める。監査通知があることと遮断できることを区別する。
+- **ランタイムフックの網羅性と壊れやすさ**: 方式の適用範囲（`diagnostics_channel` は監査のみで遮断できない、ローダーフックは monkeypatch の範囲を超えない、`pg` はクライアントラップ）、ESM と初期化順序による覆う範囲の差、`node:fs` / `node:child_process` / `pg` の target 形式は §4.4「ランタイムフックの方式（決定）」で決着した。残るのは (1) `mysql2`、`@prisma/client`、`drizzle-orm`、`mongodb`、LLM SDK の未フック分をどの方式で足すか — Prisma は `$extends` が restore を書けないため、方式そのものが未決である。(2) ライブラリ更新への追従: 差し替え点（`Pool.prototype.query` 等）が上流で変わったことを検知する仕組みがなく、現在は対応バージョンを `docs/limitations.md` に書くだけである。(3) `worker_threads` の各ワーカーと子プロセスへの導入手順。
 - **契約とハンドラの対応付け**: コメントが消えるビルド、バンドル、ソース位置変更に対応する。明示登録や契約データ生成の方式と導入手順を決める。
 - **エッジランタイム**: Phase 1 は Node.js のみを保証。その他はランタイム強制の有無を明示する。
 - **予算の遮断精度**: 料金表更新、上限予約、並列呼び出し、実績精算、キャンセル非対応処理、推定上限を得られない呼び出しの保証範囲を確定する。
