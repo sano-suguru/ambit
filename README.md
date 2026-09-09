@@ -134,24 +134,26 @@ The patch Ambit offers widens the contract to what the code actually does. It
 is marked `consistentWithContract: false` and carries the callers it would
 affect, so the agent — or the human reading its output — can tell "the contract
 was wrong" from "the code was wrong". Ambit does not invent the other patch,
-the one that keeps the contract and rewrites the code. `ambit init` proposes
-`@effects` the same way, and proposes nothing for a function that reached
-`unknown`.
+the one that keeps the contract and rewrites the code.
 
 ## Quick start
 
 ```sh
-git clone https://github.com/sano-suguru/ambit.git && cd ambit && pnpm install && node src/cli/main.ts check <dir>
+git clone https://github.com/sano-suguru/ambit.git && cd ambit && pnpm install && node src/cli/main.ts check src
 ```
 
-Requires Node.js 24. `check` also takes `--coverage`, `--strict`, and
-`--format json`.
+Requires Node.js 24. That last command needs nothing prepared — it checks
+Ambit's own source: 21 files, 176 functions, 0.77–0.92 s across five runs on
+the author's laptop. Nothing is cached, so a re-check costs the same, and no
+performance gate has run yet; `docs/status.md` has the measurement in full.
 
-`check` exits 0 when nothing was reported, 1 on an error, and 2 when the
-analysis itself could not run.
+Point `check` at your own directory instead, with `--coverage`, `--strict`, or
+`--format json`. `ambit init` proposes `@effects` for undeclared functions, and
+proposes nothing for one that reached `unknown`. `check` exits 0 when nothing
+was reported, 1 on an error, and 2 when the analysis itself could not run.
 
-To use Ambit in another project, build a tarball — it is not published to
-npm yet:
+To use Ambit in another project, build a tarball — it is not published to npm
+yet:
 
 ```sh
 pnpm pack                                   # → ambit-0.0.0.tgz
@@ -160,14 +162,19 @@ npm install -D /path/to/ambit/ambit-0.0.0.tgz && npx ambit check src
 ```
 
 `npm remove ambit` undoes it; the `@effects` comments left behind still
-type-check and run. Both paths are covered by `test/e2e.install.test.ts`.
+type-check and run. Both paths are covered by `test/e2e.install.test.ts`. In
+CI, the exit code is the whole integration:
+
+```yaml
+- run: npx ambit check src --strict
+```
 
 ## Status
 
-Ambit is experimental and not production-ready. Diagnostic ids and the NDJSON
-field shape can still change. The milestone-by-milestone account of what is
-implemented and what is not, with the measured coverage numbers behind it, is
-in [docs/status.md](docs/status.md).
+Ambit is experimental and not production-ready; diagnostic ids and the NDJSON
+field shape can still change. What is implemented and what is not, milestone by
+milestone with the measured numbers behind it, is in
+[docs/status.md](docs/status.md).
 
 ## Docs / License
 
