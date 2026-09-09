@@ -72,6 +72,17 @@ const PURE_BUILTINS: ReadonlySet<string> = new Set([
   "JSON.stringify",
   "Math.round",
   "Number.toFixed",
+  // Surfaced by `check test/fixtures/realistic-api --coverage` on 2026-09-09,
+  // the same admission rule. Each is the exact twin of an entry already here —
+  // `ReadonlyArray.filter` of `Array.filter`, `ReadonlyArray.every` of
+  // `ReadonlyArray.some`, `Math.max` of `Math.round` — or a non-mutating
+  // `String` method beside `String.slice`. Listing one of a pair without the
+  // other was an accident of what an earlier measurement happened to show.
+  "ReadonlyArray.filter",
+  "ReadonlyArray.every",
+  "Math.max",
+  "String.toLowerCase",
+  "String.toUpperCase",
 ]);
 
 export function isKnownPureBuiltin(qualifiedName: string): boolean {
