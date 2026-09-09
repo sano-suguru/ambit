@@ -250,7 +250,7 @@ export default defineConfig({
 
 `ambit init` は既存コードのエフェクトを 4.2 の根拠から推論し、JSDoc の追加を診断の修正候補（5 章 `fixes[].edits`）として出力する。推論できない関数は `unknown` のまま残り、`--coverage` に現れる。
 
-`ambit init --config` は同じ推論の結果を、**JSDoc を置けない宣言先**（(a) の 2 種）についてだけ `ambit.config.ts` への追記パッチとして出力する。JSDoc を置ける関数には従来どおり JSDoc を提案する。`unknown` に達した関数にはどちらも提案しない — 理由は §4.3 と同じで、「判らなかった」を宣言に変えないためである。
+`ambit init --config` は同じ推論の結果を、**JSDoc を置けない宣言先**についてだけ `ambit.config.ts` への追記パッチとして出力する。対象は (a) の 2 種と、コンストラクタを書いていないクラスの構築（`Class.constructor`）である。後者は宣言経路を持つがコメントを書く場所そのものが無く、(a) の 2 種と同じ理由で config だけが宣言できる。JSDoc を置ける関数には従来どおり JSDoc を提案する。`unknown` に達した関数にはどちらも提案しない — 理由は §4.3 と同じで、「判らなかった」を宣言に変えないためである。
 
 ### 4.2 エフェクト（effects）
 

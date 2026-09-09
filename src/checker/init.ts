@@ -21,6 +21,7 @@ import type { PropagatedFunction } from "./propagate.ts";
  * difference would propose a key that names nothing.
  */
 export interface ConfigTarget {
+  /** The config file as the output names it — root-relative when it is under the root. */
   readonly path: string;
   readonly source: string;
   readonly rootDir: string;
@@ -224,18 +225,25 @@ function configEdit(
   effects: readonly KnownEffect[],
 ): FixEdit | undefined {
   const lines = target.source.split("\n");
-  const index = lines.findIndex((line) => /(^|[^A-Za-z0-9_$])contracts\s*:\s*\{/.test(line));
+  const pattern = /(?:^|[^A-Za-z0-9_$])contracts\s*:\s*\{/;
+  const index = lines.findIndex((line) => pattern.test(line));
   const line = lines[index];
   if (index < 0 || line === undefined) return undefined;
+  const opening = pattern.exec(line);
+  if (!opening) return undefined;
 
+  // Inserted immediately after the `{`, not at the end of the line: a
+  // formatter collapses an empty block to `contracts: {},` and appending
+  // after that line's text would put the entry outside the object.
+  const column = opening.index + opening[0].length;
   const indent = " ".repeat(line.length - line.trimStart().length + 2);
   const key = configKeyFor(target, id);
   const value = `{ effects: [${effects.map((effect) => `"${effect}"`).join(", ")}] }`;
   return {
     file: target.path,
     range: [
-      [index, line.length],
-      [index, line.length],
+      [index, column],
+      [index, column],
     ],
     replacement: `\n${indent}"${key}": ${value},`,
   };
@@ -246,7 +254,8 @@ function configKeyFor(target: ConfigTarget, id: SymbolId): string {
   const hash = id.indexOf("#");
   if (hash < 0) return id;
   const absolute = path.resolve(target.rootDir, id.slice(0, hash));
-  const relative = path.relative(path.dirname(target.path), absolute).split(path.sep).join("/");
+  const configDir = path.dirname(path.resolve(target.rootDir, target.path));
+  const relative = path.relative(configDir, absolute).split(path.sep).join("/");
   return `${relative}#${id.slice(hash + 1)}`;
 }
 

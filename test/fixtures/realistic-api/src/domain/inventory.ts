@@ -45,3 +45,21 @@ export function canFulfill(levels: readonly StockLevel[], lines: readonly OrderL
 export function shortfall(level: StockLevel, wanted: number): number {
   return Math.max(0, wanted - available(level));
 }
+
+/**
+ * A class with an accessor. The getter's body is analyzed and propagates like
+ * any method's, but a contract *comment* on it is inert (DESIGN.md §4.1 (a)):
+ * `ambit.config.ts` is the only place its contract can be written, which is
+ * what `ambit init --config` proposes and what the round-trip test applies.
+ */
+export class StockSummary {
+  readonly levels: readonly StockLevel[];
+
+  constructor(levels: readonly StockLevel[]) {
+    this.levels = levels;
+  }
+
+  get shortfall(): number {
+    return this.levels.filter((level) => isBackordered(level)).length;
+  }
+}

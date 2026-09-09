@@ -359,6 +359,16 @@ interface ResolvedEntry {
  */
 export interface ResolvedConfig {
   readonly configPath: string;
+  /**
+   * The config file as diagnostics and fixes should name it: relative to the
+   * analysis root when it sits inside it, absolute when it does not.
+   *
+   * Every other `location.file` and `edits[].file` in the output is
+   * root-relative, and a consumer that resolves them against the checked
+   * directory (`test/e2e.realistic.test.ts` does exactly that) would break on
+   * one absolute path among them.
+   */
+  readonly displayPath: string;
   readonly sourceText: string;
   /** User-defined effect names → the standard effects they stand for (§4.1 (d)). */
   readonly effectAliases: ReadonlyMap<string, readonly KnownEffect[]>;
@@ -412,8 +422,15 @@ export function resolveConfig(loaded: LoadedConfig, rootDir: string): ResolvedCo
 
   const matchedKeys = new Set<string>();
 
+  const relative = path.relative(absoluteRoot, loaded.configPath);
+  const displayPath =
+    relative.startsWith("..") || path.isAbsolute(relative)
+      ? loaded.configPath
+      : relative.split(path.sep).join("/");
+
   return {
     configPath: loaded.configPath,
+    displayPath,
     sourceText: loaded.sourceText,
     effectAliases,
     contractFor(id: SymbolId): ConfigContract | undefined {

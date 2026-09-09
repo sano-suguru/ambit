@@ -451,12 +451,24 @@ block above it — and is `consistentWithContract: true`: adding a declaration
 where there was none cannot contradict one, and the set proposed is exactly
 what was observed.
 
-A class that writes no constructor gets a proposal with **no** patch: its
-construction has real effects (property initializers, the base constructor),
-but there is no declaration site to attach a contract to, and a comment above
-the `class` would be inert (AMB-E003). The message says to write an explicit
-constructor. Reporting it with no fix beats either proposing a patch that
-changes nothing or staying silent about effects that are real.
+Three kinds of declaration have a stable symbol id and nowhere to write a
+comment: a `get`/`set` accessor, an anonymous `export default` (DESIGN.md
+§4.1 (a)), and a class that writes no constructor — its construction has real
+effects (property initializers, the base constructor) but no declaration site
+at all. For those, `ambit init` reports the inferred effects with **no** patch
+and names the `ambit.config.ts` key that would carry them; `ambit init
+--config` produces that patch, appending one `contracts` entry.
+
+The config patch is an insertion at the end of the `contracts: {` line. It is
+emitted only when a config file exists with such a line: the config is loaded
+by importing it, not by parsing it, so there is no brace-matched block to
+append to — and creating a whole config file, with a `defineConfig` specifier
+that depends on how the consumer installed Ambit, is not a patch this command
+can generate safely (§5.3). Without a config file, the proposal carries no fix
+and says so.
+
+Reporting these with no fix beats either proposing a patch that changes
+nothing or staying silent about effects that are real.
 
 No proposal is made when the function's effects reached `unknown`. Declaring
 `@effects pure` for a function the analysis could not resolve would convert

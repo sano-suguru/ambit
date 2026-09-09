@@ -78,11 +78,11 @@ export async function main(argv: readonly string[]): Promise<number> {
                 state,
                 engine,
               ),
-              ...(config ? diagnoseContractDivergence(state, config.configPath, engine) : []),
+              ...(config ? diagnoseContractDivergence(state, config.displayPath, engine) : []),
               ...(config
                 ? diagnoseUnmatchedConfigKeys(
                     config.unmatchedExactKeys(),
-                    config.configPath,
+                    config.displayPath,
                     config.sourceText,
                     engine,
                   )
@@ -189,7 +189,7 @@ function configTarget(
   rootDir: string,
 ): ConfigTarget | undefined {
   if (!config) return undefined;
-  return { path: config.configPath, source: config.sourceText, rootDir };
+  return { path: config.displayPath, source: config.sourceText, rootDir };
 }
 
 function parseArgs(argv: readonly string[]): Args {

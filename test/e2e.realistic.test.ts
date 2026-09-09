@@ -569,4 +569,58 @@ import { fetchElsewhere } from "../lib/rates.ts";`,
       await fs.rm(dir, { recursive: true, force: true });
     }
   }, 120_000);
+
+  it("round-trips `ambit init --config`: the accessor's contract lands in ambit.config.ts", async () => {
+    // DESIGN.md §4.1 (a): `StockSummary.get shortfall` propagates like any
+    // method, but no comment on it is adopted — so the only way to declare it
+    // is the config file, and `--config` is what proposes that. The class also
+    // writes an explicit constructor, so the round trip covers both halves at
+    // once: JSDoc where JSDoc can go, config where it cannot.
+    const dir = await scratchCopy();
+    try {
+      const proposals = await run("init", dir, ["--config"]);
+      expect(proposals.exitCode).toBe(0);
+
+      const accessor = proposals.diagnostics.find((d) =>
+        d.fixes[0]?.edits.some((edit) => edit.replacement.includes("StockSummary.get shortfall")),
+      );
+      expect(accessor, "expected a config proposal for the accessor").toBeDefined();
+      expect(accessor?.fixes[0]?.edits[0]?.file).toBe("ambit.config.ts");
+      expect(accessor?.fixes[0]?.consistentWithContract).toBe(true);
+
+      // Plain `init` proposes the same accessor with no patch at all: there is
+      // nowhere to write it without `--config`.
+      const withoutFlag = await run("init", dir);
+      const sameAccessor = withoutFlag.diagnostics.find((d) =>
+        d.message.includes("StockSummary.get shortfall"),
+      );
+      expect(sameAccessor?.fixes).toEqual([]);
+
+      const byFile = new Map<string, Diagnostic["fixes"][number]["edits"][number][]>();
+      for (const diagnostic of proposals.diagnostics.filter((d) => d.fixes.length > 0)) {
+        for (const edit of diagnostic.fixes[0]?.edits ?? []) {
+          const list = byFile.get(edit.file) ?? [];
+          list.push(edit);
+          byFile.set(edit.file, list);
+        }
+      }
+      expect([...byFile.keys()]).toContain("ambit.config.ts");
+      for (const [file, edits] of byFile) {
+        const full = path.join(dir, file);
+        await fs.writeFile(full, applyEdits(await fs.readFile(full, "utf8"), edits));
+      }
+
+      // The config Ambit wrote is one Ambit reads back: a key it cannot match
+      // would be AMB-W006, and a contract that contradicts the body AMB-E001.
+      const after = await run("check", dir);
+      expect(errors(after)).toEqual([]);
+      expect(after.diagnostics.map((d) => d.id)).not.toContain("AMB-W006");
+      expect(after.exitCode).toBe(0);
+
+      const remaining = await run("init", dir, ["--config"]);
+      expect(remaining.diagnostics.filter((d) => d.fixes.length > 0)).toEqual([]);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
 });
