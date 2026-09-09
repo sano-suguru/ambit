@@ -205,18 +205,19 @@ hook rather than to the checker.
 
 ## AMB-E010
 
-`withAmbit` disagrees with the handler's `@capabilities`.
+`withAmbit` or `ambitHandler` disagrees with the handler's `@capabilities`.
 
 **Severity:** error
 **Category:** capabilities
 
-With no framework adapter, DESIGN.md §4.4 has the capability set written twice
-— as `@capabilities` on the handler, and again in the `withAmbit(spec,
-handler)` beside it. This reports the two disagreeing, as sets of the text each
-one wrote. Order does not matter; anything else does, including a glob on one
+DESIGN.md §4.4 chose explicit registration, so the capability set is written
+twice — as `@capabilities` on the handler, and again in the `withAmbit(spec,
+handler)` or `ambitHandler(spec, handler, decode)` (the `ambit/runtime/hono`
+adapter) beside it. This reports the two disagreeing, as sets of the text each
+one wrote. The message names the call the source actually wrote. Order does not matter; anything else does, including a glob on one
 side only, since `db:read:*` and `db:read:users` are different grants.
 
-Reported at the `withAmbit` call. Neither side is privileged: whichever half an
+Reported at the call. Neither side is privileged: whichever half an
 agent edited, the pair stopped agreeing, and Ambit cannot tell which one the
 author meant.
 
@@ -238,13 +239,13 @@ the decision being reported (§5.3).
 
 ## AMB-W004
 
-`withAmbit` was not compared with a declared contract.
+`withAmbit` or `ambitHandler` was not compared with a declared contract.
 
 **Severity:** warning
 **Category:** capabilities
 
-A `withAmbit(spec, handler)` was found, but one of `AMB-E010`'s conditions does
-not hold: the capability list is built at runtime, the handler is not a
+A `withAmbit(spec, handler)` or an adapter's `ambitHandler(spec, handler,
+decode)` was found, but one of `AMB-E010`'s conditions does not hold: the capability list is built at runtime, the handler is not a
 declaration in the same file, or the handler declares neither `@entrypoint` nor
 `@capabilities`. The message names which.
 

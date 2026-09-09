@@ -14,7 +14,7 @@ row.
 ## Baseline commands
 
 ```sh
-pnpm test                     # 261 tests, 18 files — pass
+pnpm test                     # 277 tests, 19 files — pass
 pnpm exec tsc --noEmit        # pass
 ./node_modules/.bin/biome ci .  # pass
 node src/cli/main.ts check src --coverage   # exit 0
@@ -29,17 +29,22 @@ runs `pnpm exec biome ci .` in GitHub Actions, where no such wrapper exists.
 
 ## Ambit's own source (`check src --coverage`)
 
-| Figure | Before local mutation | After local mutation | After the runtime hooks |
-|---|---|---|---|
-| files analyzed | 19 | 21 | 26 |
-| functions extracted | 163 | 176 | 193 |
-| functions with a declared `@effects` | 4 | 4 | 4 |
-| `unknown` rate | 68.7% (112/163) | 63.1% (111/176) | **64.2% (124/193)** |
-| `boundary` rate | 0.0% (0/163) | 0.0% (0/176) | 0.0% (0/193) |
-| call sites | 851 — resolved 243, stub 3, known-pure 244, unresolved 361 | 924 — resolved 268, stub 3, known-pure 244, mutation 81, unresolved 328 | 997 — resolved 298, stub 3, known-pure 257, mutation 94, unresolved 345 |
-| unresolved by reason | `builtin-method` 131, `external-module` 221, `unresolved-symbol` 8, `callback-parameter` 1 | `builtin-method` 62, `external-module` 257, `unresolved-symbol` 8, `callback-parameter` 1 | `builtin-method` 68, `external-module` 264, `unresolved-symbol` 11, `callback-parameter` 2 |
-| skipped function-like nodes | 74 (`callback-argument` 66, `nested-function` 8) | 75 (`callback-argument` 67, `nested-function` 8) | 88 (`callback-argument` 74, `nested-function` 14) |
-| exit code | 0 | 0 | 0 |
+| Figure | Before local mutation | After local mutation | After the runtime hooks | After the Hono adapter |
+|---|---|---|---|---|
+| files analyzed | 19 | 21 | 26 | 27 |
+| functions extracted | 163 | 176 | 193 | 194 |
+| functions with a declared `@effects` | 4 | 4 | 4 | 4 |
+| `unknown` rate | 68.7% (112/163) | 63.1% (111/176) | 64.2% (124/193) | **64.4% (125/194)** |
+| `boundary` rate | 0.0% (0/163) | 0.0% (0/176) | 0.0% (0/193) | 0.0% (0/194) |
+| call sites | 851 — resolved 243, stub 3, known-pure 244, unresolved 361 | 924 — resolved 268, stub 3, known-pure 244, mutation 81, unresolved 328 | 997 — resolved 298, stub 3, known-pure 257, mutation 94, unresolved 345 | 1003 — resolved 299, stub 3, known-pure 258, mutation 94, unresolved 349 |
+| unresolved by reason | `builtin-method` 131, `external-module` 221, `unresolved-symbol` 8, `callback-parameter` 1 | `builtin-method` 62, `external-module` 257, `unresolved-symbol` 8, `callback-parameter` 1 | `builtin-method` 68, `external-module` 264, `unresolved-symbol` 11, `callback-parameter` 2 | `builtin-method` 68, `external-module` 265, `unresolved-symbol` 12, `callback-parameter` 4 |
+| skipped function-like nodes | 74 (`callback-argument` 66, `nested-function` 8) | 75 (`callback-argument` 67, `nested-function` 8) | 88 (`callback-argument` 74, `nested-function` 14) | 90 (`callback-argument` 75, `nested-function` 15) |
+| exit code | 0 | 0 | 0 | 0 |
+
+The fourth column is `src/` after `src/runtime/hono.ts`: one more file, one
+more exported function, and two more skipped nodes (the adapter's inner
+arrows). Measured on 2026-09-09 with `node src/cli/main.ts check src
+--coverage`.
 
 The third column is `src/` after the four runtime hooks were added
 (`src/runtime/enforce.ts`, `fs.ts`, `child-process.ts`, `pg.ts`, and
@@ -227,9 +232,9 @@ machine, and §3.5's performance gate has not run either way.
 |---|---|
 | Spec section | §4.4, §4.5, §4.6 |
 | Acceptance | conformance tests for the planned hook targets; contract-to-handler mapping; 50 bundled stub packages |
-| Implemented | `@capabilities` narrowing (static, crosses undeclared functions, target globs), the static half of §4.4's 二重強制 for literal HTTP targets (`AMB-E009`), source-level `withAmbit` ↔ `@entrypoint` agreement (`AMB-E010`/`AMB-W004`), `@entrypoint` warning, `@boundary` with mandatory reason and separate coverage accounting, `@budget` parsing/validation, runtime `withAmbit` + `timeMs` enforcement + `runtime.unscoped`, four capability hooks with install/restore — `globalThis.fetch`, `node:fs`/`node:fs/promises`, `node:child_process`, and `pg` (`Pool`/`Client.query`) — every decision recorded on the context's audit trail, `db_read`/`db_write`/`llm` stubs for `pg`/`mysql2`/Prisma/OpenAI/Anthropic |
-| Evidence | `test/contracts.test.ts` (26), `test/runtime.test.ts` (in-process, 27 — includes the fs, `child_process` and `pg` hooks and their restores), `test/e2e.runtime.test.ts` (10 — real socket, real files, a real child process and a real `pg@8` client, all through the installed package), `test/e2e.realistic.test.ts` (16 — the six agent-accident scenarios plus the `AMB-E009`/`AMB-E005` overlap), `test/stubs.data-clients.test.ts`, `test/stubs.http-capabilities.test.ts` |
-| Outstanding | **`fetch`, `node:fs`, `node:child_process` and `pg` are hooked; nothing else is.** `node:http`/`https`/`net`, `mysql2`/Prisma/Drizzle/MongoDB, OpenAI/Anthropic/Vercel AI — no runtime hook, so calling them is neither blocked nor recorded. The builtin hooks cover named ESM imports only when installed from a preload (`docs/limitations.md`), and the `pg` hook is verified against `pg@8` only. **`costUsd` and `llmCalls` are not enforced**; nothing increments them. **No framework adapters** (Express/Hono/Next.js/BullMQ). **Contract-to-handler mapping is source-level only** — a literal capability array is compared with the JSDoc of a handler declared in the same file; a list built at runtime, a handler from another module, or a build/bundle that moves either half is reported as uncompared (`AMB-W004`), and §12's 「契約とハンドラの対応付け」 stays open. **Only HTTP targets are read from source** — no `db:` capability is derived from SQL (§4.4's caveat). **No `@budget` loop-pattern warnings.** Bundled stubs: 52 call entries across 9 namespaces (`fetch`, `globalThis`, `undici`, `node:http`, `node:https`, `node:net`, `node:fs`, `node:fs/promises`, `node:child_process`), 43 constructor entries, 36 pure-builtin methods, 19 in-place-mutation methods, 35 database/LLM client rules across 5 packages (`pg`, `mysql2`, `@prisma/client`, `openai`, `@anthropic-ai/sdk`), and 7 HTTP capability rules — **not** 50 packages. All nine effects now have at least one bundled source. |
+| Implemented | `@capabilities` narrowing (static, crosses undeclared functions, target globs), the static half of §4.4's 二重強制 for literal HTTP targets (`AMB-E009`), source-level `withAmbit` ↔ `@entrypoint` agreement (`AMB-E010`/`AMB-W004`), `@entrypoint` warning, `@boundary` with mandatory reason and separate coverage accounting, `@budget` parsing/validation, runtime `withAmbit` + `timeMs` enforcement + `runtime.unscoped`, four capability hooks with install/restore — `globalThis.fetch`, `node:fs`/`node:fs/promises`, `node:child_process`, and `pg` (`Pool`/`Client.query`) — every decision recorded on the context's audit trail, `db_read`/`db_write`/`llm` stubs for `pg`/`mysql2`/Prisma/OpenAI/Anthropic, one framework adapter (`ambit/runtime/hono`'s `ambitHandler`, which registers a route's contract explicitly and establishes the context for the handler and its request decoder) |
+| Evidence | `test/contracts.test.ts` (30 — the last four compare a `withAmbit` and an `ambitHandler` registration against the same handler's JSDoc), `test/runtime.test.ts` (in-process, 27 — includes the fs, `child_process` and `pg` hooks and their restores), `test/runtime.hono.test.ts` (7 — the adapter driven through Hono itself), `test/e2e.runtime.test.ts` (13 — real socket, real files, a real child process, a real `pg@8` client and a real Hono server, all through the installed package), `test/e2e.install.test.ts` (8 — includes the `ambit/runtime/hono` subpath resolving after `npm install`), `test/e2e.realistic.test.ts` (17 — the six agent-accident scenarios, the `AMB-E009`/`AMB-E005` overlap, and the fixture type-checking with nothing installed), `test/stubs.data-clients.test.ts`, `test/stubs.http-capabilities.test.ts` |
+| Outstanding | **`fetch`, `node:fs`, `node:child_process` and `pg` are hooked; nothing else is.** `node:http`/`https`/`net`, `mysql2`/Prisma/Drizzle/MongoDB, OpenAI/Anthropic/Vercel AI — no runtime hook, so calling them is neither blocked nor recorded. The builtin hooks cover named ESM imports only when installed from a preload (`docs/limitations.md`), and the `pg` hook is verified against `pg@8` only. **`costUsd` and `llmCalls` are not enforced**; nothing increments them. **One framework adapter** — `ambit/runtime/hono` (verified against `hono@4` and `@hono/node-server@1`); Express, Next.js and BullMQ have none, and a route they register establishes no context, so `setUnscopedPolicy` decides what its operations do. **Contract-to-handler mapping is explicit registration** (§4.4's decision): the `spec` passed to `withAmbit` or `ambitHandler` is a value in the module, so it reaches the running handler after a build strips the comments and after a bundler renames everything — the runtime reads no JSDoc, no symbol ID and no file path. The cost is that the capability set is written twice, and the check on the pair is source-level: a literal array compared with the JSDoc of a handler declared in the same file, with a runtime-built list or a cross-module handler reported as uncompared (`AMB-W004`). Removing the duplication needs a build-time transform (§4.5's Phase 1 非目標), which is what §12's 「契約とハンドラの対応付け」 still holds. The adapter covers only the route it wraps: `app.use` middleware runs outside the context (`docs/limitations.md`). **Only HTTP targets are read from source** — no `db:` capability is derived from SQL (§4.4's caveat). **No `@budget` loop-pattern warnings.** Bundled stubs: 52 call entries across 9 namespaces (`fetch`, `globalThis`, `undici`, `node:http`, `node:https`, `node:net`, `node:fs`, `node:fs/promises`, `node:child_process`), 43 constructor entries, 36 pure-builtin methods, 19 in-place-mutation methods, 35 database/LLM client rules across 5 packages (`pg`, `mysql2`, `@prisma/client`, `openai`, `@anthropic-ai/sdk`), and 7 HTTP capability rules — **not** 50 packages. All nine effects now have at least one bundled source. |
 
 ### M3 — concrete fix patches, agent protocol
 

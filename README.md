@@ -74,6 +74,33 @@ fails it. The capability list appears twice on purpose: the JSDoc is what the
 checker reads, the literal array is what the runtime enforces, and `AMB-E010`
 fails the check if the two ever disagree.
 
+On Hono, the adapter registers the same handler instead of a hand-written
+`withAmbit`:
+
+```ts
+import { Hono } from "hono";
+import { ambitHandler } from "ambit/runtime/hono";
+
+const app = new Hono();
+
+app.get("/rates", ambitHandler(
+  { capabilities: ["http:get:api.example.com"], budget: { timeMs: 500 } },
+  refreshRates,
+  (c) => [c.req.query("currency") ?? "USD"] as const,
+));
+```
+
+The contract travels as a value in the module, so it reaches the running
+handler after a build that strips the comments and after a bundler renames
+everything — the runtime reads no JSDoc and no file paths. The third argument
+maps the request to the handler's arguments, which keeps the framework's own
+API (`c.req.*`, in no stub table) out of the contract-bearing function. A route
+registered without the adapter establishes no context at all, and what its
+operations do then is `setUnscopedPolicy`'s decision. `AmbitCapabilityError`
+and `AmbitBudgetError` are not translated into HTTP statuses: they go to the
+framework's error handler, because a denial means this server's own code
+exceeded its grant, which is not what 403 says.
+
 At run time `withAmbit` puts that same set on the context, and four hooks
 check operations against it: `installFetchHook()` for `globalThis.fetch`,
 `installFsHook()` for `node:fs` and `node:fs/promises`,
@@ -112,15 +139,17 @@ too.
 | `@effects` for the LLM SDKs (`openai`, `@anthropic-ai/sdk`) | yes | — | — | no runtime hook |
 | `@budget timeMs` | — | yes (`throw` / `warn` / `abort`) | — | — |
 | `@budget costUsd`, `llmCalls` | parsed and validated | — | — | no hook increments them |
-| `@entrypoint` vs. the `withAmbit` beside it | yes, in the same file (`AMB-E010`) | — | — | no adapter links the two |
+| `@entrypoint` vs. the `withAmbit` / `ambitHandler` beside it | yes, in the same file (`AMB-E010`) | — | — | a spec and handler split across modules (`AMB-W004`) |
+| `@entrypoint` handler → runtime context | — | yes, via `withAmbit` or `ambit/runtime/hono` | recorded on the context | Express, Next.js, BullMQ — unadapted |
 
 Effects are inferred from bundled tables covering `fetch`/`undici`, the
 `node:fs`, `node:http`/`https`/`net`, and `node:child_process` builtins, and
 five clients (`pg`, `mysql2`, `@prisma/client`, `openai`,
 `@anthropic-ai/sdk`). Everything else resolves to `unknown` — never to `pure`,
-and `--strict` turns those warnings into errors. Matching a contract to the handler that
-actually runs, after a build moves either half, is DESIGN.md §12 and still
-open.
+and `--strict` turns those warnings into errors. Matching a contract to the
+handler that actually runs is settled by explicit registration (DESIGN.md
+§4.4), which is why the set is written twice; removing that duplication would
+take a build-time transform, and that is still open.
 
 ## Why not ESLint / Effect-TS / dependency-cruiser
 

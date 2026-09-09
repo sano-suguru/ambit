@@ -11,7 +11,8 @@ Ambit is experimental. Expect this file to shrink as the analysis grows.
 
 `@effects`, `@capabilities`, `@budget`, `@entrypoint`, and `@boundary` are all
 parsed. `@effects` and `@capabilities` are checked statically; `@budget` is
-validated but only `timeMs` is enforced, at runtime, through `withAmbit`.
+validated but only `timeMs` is enforced, at runtime, through `withAmbit` or
+the Hono adapter's `ambitHandler`.
 
 The `@capabilities` check has two halves (DESIGN.md §4.4's 二重強制):
 
@@ -27,15 +28,18 @@ explicit that hooking a database client does not amount to deciding
 table-level permission for arbitrary SQL, so no `db:` capability is read out
 of a statement.
 
-A `withAmbit(spec, handler)` is compared with the handler's `@capabilities`
-when the spec's array is literal and the handler is declared in the same file
-(`AMB-E010`). Anything else — a list built at runtime, a handler from another
-module, a handler with no contract — is reported as `AMB-W004`. The comparison
-is on the source: matching a contract to the handler that actually runs after
-a build or a bundler is DESIGN.md §12's 「契約とハンドラの対応付け」, still
-open.
+A `withAmbit(spec, handler)`, or an adapter's `ambitHandler(spec, handler,
+decode)`, is compared with the handler's `@capabilities` when the spec's array
+is literal and the handler is declared in the same file (`AMB-E010`). Anything
+else — a list built at runtime, a handler from another module, a handler with
+no contract — is reported as `AMB-W004`. The comparison is on the source. What
+reaches the *running* handler is the spec, which is a value in the module and
+therefore survives a build and a bundler (DESIGN.md §4.4); the duplication
+itself is what remains open.
 
-Runtime enforcement covers `globalThis.fetch` and `@budget timeMs` only.
+Runtime enforcement covers `globalThis.fetch`, `node:fs`/`node:fs/promises`,
+`node:child_process`, `pg`, and `@budget timeMs`. `costUsd` and `llmCalls` are
+parsed and carried on the context, and nothing increments them.
 
 ## Commands and flags
 
@@ -431,6 +435,44 @@ code.
 
 No hook increments them, and none of the four hooks changes that. They are
 parsed, validated, and carried on the context for an adapter to use.
+
+## Framework adapters
+
+One adapter exists: `ambitHandler` from `ambit/runtime/hono`. Express,
+Next.js, BullMQ and the rest have none, and a handler they register
+establishes no Ambit context.
+
+| | |
+|---|---|
+| Framework | Hono — verified against `hono@4` and `@hono/node-server@1` in `test/e2e.runtime.test.ts` and `test/e2e.install.test.ts` |
+| Declared as | a devDependency here and a type-only import; the published package depends on neither |
+| Enforced | the capability set and `@budget` of the route it registers, for the handler and its `decode` |
+
+Limits of what the adapter guarantees:
+
+- **Only the route it registers.** `app.get(path, handler)` written without
+  `ambitHandler` establishes no context, so operations inside it are decided by
+  `setUnscopedPolicy` (`allow` by default) — not by the handler's JSDoc, which
+  the runtime never reads. The adapter does not scan the app for unwrapped
+  routes, and nothing reports one.
+- **Middleware ordering.** The context exists only inside the wrapped handler.
+  Middleware registered with `app.use` runs *outside* it — before and after —
+  so anything a middleware does is unscoped even when the route it fronts is
+  wrapped. Middleware that runs `next()` and then touches a hooked API is
+  therefore not covered by that route's capabilities.
+- **A contract that is not found is not a denial.** There is no lookup that can
+  fail: the contract is the `spec` argument. A missing contract means a missing
+  registration, which the adapter treats as "no context", never as "no
+  capabilities" — an empty grant would make a forgotten route look like a
+  policy decision.
+- **Errors are not HTTP statuses.** `AmbitCapabilityError` and
+  `AmbitBudgetError` reach the framework's error handler (Hono's default: a
+  bare 500). Nothing maps them to 403 or 504, and the message — which names the
+  granted set — is not put in a response body by Ambit.
+- **The wrapped route returns a plain `Response`**, so Hono's RPC type
+  inference (`hc`) sees `Response` rather than the handler's return shape.
+- **`timeMs` includes `decode`**, which runs inside the context: the time spent
+  reading a request body counts against the budget.
 
 ## Backend
 
