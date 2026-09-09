@@ -74,12 +74,27 @@ fails it. The capability list appears twice on purpose: the JSDoc is what the
 checker reads, the literal array is what the runtime enforces, and `AMB-E010`
 fails the check if the two ever disagree.
 
-At run time `withAmbit` puts that same set on the context. With
-`installFetchHook()` called, a `fetch` to an ungranted host throws
-`AmbitCapabilityError` before it reaches the socket, and `timeMs` is measured
-against the wall clock. Outside any entrypoint
+At run time `withAmbit` puts that same set on the context, and four hooks
+check operations against it: `installFetchHook()` for `globalThis.fetch`,
+`installFsHook()` for `node:fs` and `node:fs/promises`,
+`installChildProcessHook()` for `node:child_process`, and
+`installPgHook(pg)` for the `pg` client. An ungranted operation throws
+`AmbitCapabilityError` before the socket, the file, or the process is
+reached; every decision, allowed or denied, is recorded on the context's
+audit trail; and `timeMs` is measured against the wall clock. Each install
+returns the function that restores the original, so removing Ambit is one
+call. Outside any entrypoint
 `setUnscopedPolicy("allow" | "warn" | "deny")` decides, defaulting to `allow`,
 so adopting the runtime does not break code that has no contracts yet.
+
+The capability targets are `http:<method>:<host>`, `fs:read:` / `fs:write:`
+with the path resolved to an absolute path at the call, `proc:spawn:` with
+argv[0] as written, and `db:read:` / `db:write:` with **the database the
+connection names**. A hook on a database client does not make table-level
+permissions decidable: Ambit does not read table names out of SQL, and the
+exception says so where a grant like `db:read:users` fails. A shell spawn
+names the shell, not the program inside the command string, and says that
+too.
 
 | | Static check | Runtime block | Audit only | Unsupported |
 |---|---|---|---|---|
@@ -88,8 +103,13 @@ so adopting the runtime does not break code that has no contracts yet.
 | `@capabilities`, `globalThis.fetch` | — | yes | recorded on the context | — |
 | `@capabilities`, literal URL in source | yes (`http:<method>:<host>`) | — | — | — |
 | `@capabilities`, URL built at runtime | warns (`AMB-W003`) | yes, for `fetch` | recorded on the context | — |
-| `@capabilities`, DB table / LLM target | — | — | — | not derived from source |
-| `@effects` for the covered Node APIs and five clients | yes | — | — | no runtime hook |
+| `@capabilities`, `node:fs` / `node:fs/promises` | — | yes (`fs:read:` / `fs:write:`, absolute path) | recorded on the context | a named ESM import bound before the hook was installed |
+| `@capabilities`, `node:child_process` | — | yes (`proc:spawn:`, argv[0] as written) | recorded on the context | which program a shell command string runs |
+| `@capabilities`, `pg` (`Pool`/`Client.query`) | — | yes (`db:read:` / `db:write:`, per database) | recorded on the context | table-level targets |
+| `@capabilities`, DB table / LLM target | — | — | — | never derived, from source or from SQL at run time |
+| `@effects` for the covered Node APIs, and for `pg` | yes | — | — | — |
+| `@effects` for `mysql2`, `@prisma/client`, other DB clients | yes | — | — | no runtime hook |
+| `@effects` for the LLM SDKs (`openai`, `@anthropic-ai/sdk`) | yes | — | — | no runtime hook |
 | `@budget timeMs` | — | yes (`throw` / `warn` / `abort`) | — | — |
 | `@budget costUsd`, `llmCalls` | parsed and validated | — | — | no hook increments them |
 | `@entrypoint` vs. the `withAmbit` beside it | yes, in the same file (`AMB-E010`) | — | — | no adapter links the two |

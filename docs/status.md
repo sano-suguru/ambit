@@ -14,7 +14,7 @@ row.
 ## Baseline commands
 
 ```sh
-pnpm test                     # 242 tests, 18 files — pass
+pnpm test                     # 261 tests, 18 files — pass
 pnpm exec tsc --noEmit        # pass
 ./node_modules/.bin/biome ci .  # pass
 node src/cli/main.ts check src --coverage   # exit 0
@@ -29,19 +29,24 @@ runs `pnpm exec biome ci .` in GitHub Actions, where no such wrapper exists.
 
 ## Ambit's own source (`check src --coverage`)
 
-| Figure | Value |
-|---|---|
-| Figure | Before local mutation | After |
-|---|---|---|
-| files analyzed | 19 | 21 |
-| functions extracted | 163 | 176 |
-| functions with a declared `@effects` | 4 | 4 |
-| `unknown` rate | 68.7% (112/163) | **63.1% (111/176)** |
-| `boundary` rate | 0.0% (0/163) | 0.0% (0/176) |
-| call sites | 851 — resolved 243, stub 3, known-pure 244, unresolved 361 | 924 — resolved 268, stub 3, known-pure 244, mutation 81, unresolved 328 |
-| unresolved by reason | `builtin-method` 131, `external-module` 221, `unresolved-symbol` 8, `callback-parameter` 1 | `builtin-method` 62, `external-module` 257, `unresolved-symbol` 8, `callback-parameter` 1 |
-| skipped function-like nodes | 74 (`callback-argument` 66, `nested-function` 8) | 75 (`callback-argument` 67, `nested-function` 8) |
-| exit code | 0 | 0 |
+| Figure | Before local mutation | After local mutation | After the runtime hooks |
+|---|---|---|---|
+| files analyzed | 19 | 21 | 26 |
+| functions extracted | 163 | 176 | 193 |
+| functions with a declared `@effects` | 4 | 4 | 4 |
+| `unknown` rate | 68.7% (112/163) | 63.1% (111/176) | **64.2% (124/193)** |
+| `boundary` rate | 0.0% (0/163) | 0.0% (0/176) | 0.0% (0/193) |
+| call sites | 851 — resolved 243, stub 3, known-pure 244, unresolved 361 | 924 — resolved 268, stub 3, known-pure 244, mutation 81, unresolved 328 | 997 — resolved 298, stub 3, known-pure 257, mutation 94, unresolved 345 |
+| unresolved by reason | `builtin-method` 131, `external-module` 221, `unresolved-symbol` 8, `callback-parameter` 1 | `builtin-method` 62, `external-module` 257, `unresolved-symbol` 8, `callback-parameter` 1 | `builtin-method` 68, `external-module` 264, `unresolved-symbol` 11, `callback-parameter` 2 |
+| skipped function-like nodes | 74 (`callback-argument` 66, `nested-function` 8) | 75 (`callback-argument` 67, `nested-function` 8) | 88 (`callback-argument` 74, `nested-function` 14) |
+| exit code | 0 | 0 | 0 |
+
+The third column is `src/` after the four runtime hooks were added
+(`src/runtime/enforce.ts`, `fs.ts`, `child-process.ts`, `pg.ts`, and
+`src/core/sql.ts`). The rate went from 63.1% to 64.2% because the hooks are
+17 more mostly-undeclared functions in the connection-adjacent layers; that
+is the same accounting the paragraph below describes, not a regression in
+resolution.
 
 The "after" column is DESIGN.md §4.2's local-mutation rule (「ローカル変異と
 `pure`」) in place. `builtin-method` unresolved dropped 131 → 62: 81 sites
@@ -59,7 +64,7 @@ Nothing in `src/` declares `state_write`, and nothing needed to: no declared
 function in Ambit's own source mutates a value reachable from outside it, so
 the change added no AMB-E001.
 
-The remaining 63% unknown rate is dominated by `external-module` (257), which is almost
+The remaining 64% unknown rate is dominated by `external-module` (264), which is almost
 entirely calls into the `typescript` compiler API from the connection layer —
 the one file that is meant to be replaceable. It is a real number, not a
 target that has been met: DESIGN.md §10's goal is 30% for an *adopting team*
@@ -69,7 +74,9 @@ It had gone **up** from 63.2% (86/136) before local mutation was decided —
 measured before the client stubs and the capability work — because the
 denominator grew by 27 functions whose helpers use `Array.push` and `Map.set`,
 which the pure-builtin allowlist deliberately excludes. That is what §4.2's
-decision addressed; the figure is now at 63.1%, marginally below the 63.2% it started from.
+decision addressed; the figure reached 63.1% then, marginally below the 63.2%
+it started from. The current figure is 64.2%, for the reason the third column
+of the table above records.
 
 `String.slice`, which the same measurement surfaced at 8 occurrences, **was**
 added to the allowlist afterwards — a missing non-mutating entry, and the exact
@@ -85,34 +92,67 @@ DESIGN.md §10's `unknown`-rate target is about a team's own code, not about
 Ambit's connection layer, so it is measured against
 `test/fixtures/realistic-api` — a Node backend of the shape a coding agent
 produces (HTTP handlers with `@entrypoint` contracts, a `pg` pool, a Prisma
-client, an LLM SDK, a barrel file, pure domain logic). **This is not a team**,
+client, a `mysql2` pool, two LLM SDKs, a barrel file, pure domain logic). **This is not a team**,
 and it does not satisfy §10, which requires a real adopting team after three
 months. It is the fixture that makes the number measurable at all.
 
-| Figure | Before the client stubs | After |
+| Figure | Before the client stubs | After the client stubs | After the runtime hooks |
+|---|---|---|---|
+| files analyzed | 9 | 9 | 16 |
+| functions extracted | 19 | 19 | **51** |
+| `unknown` rate | 47.4% (9/19) | 5.3% (1/19) | **21.6% (11/51)** |
+| `boundary` rate | 0.0% | 0.0% | 0.0% |
+| call sites | 31 — resolved 12, stub 1, pure 9, unresolved 9 | 31 — resolved 12, stub 8, pure 9, mutation 1, unresolved 1 | 74 — resolved 31, stub 10, pure 26, mutation 2, unresolved 5 |
+| unresolved by reason | `builtin-method` 1, `unresolved-symbol` 8 | `ambient-declaration` 1 | `builtin-method` 1, `ambient-declaration` 4 |
+| top unresolved names | `Map.set` 1 | (none) | `ReadonlyArray.filter` 1 |
+| exit code | 0 | 0 | 0 |
+
+The middle column is where the fixture stood at 19 functions: the client
+stubs took it from 47.4% to 10.5%, and DESIGN.md §4.2's local-mutation rule
+then took it to 5.3% (1/19), because `putRate` in `src/lib/cache.ts` writes
+into a module-scope `Map` and is now inferred as `state_write` rather than
+left `unknown`.
+
+The right-hand column is the fixture after `mysql2` and `@anthropic-ai/sdk`
+were added — a second database client and a second LLM SDK, plus the pure
+domain code and the routes that use them — which is what makes 51 functions
+a realistic backend rather than a padded one. The rate went **up**, from 5.3%
+to 21.6%, and the reason is the point of recording it: `mysql2` hands out its
+pool through the `createPool` factory, and a factory result has no
+module-qualified name for a stub table to key on (see
+`docs/limitations.md`, "Call resolution"). The fixture uses the factory
+because that is how the package is actually used.
+
+Five entries were added to the pure-builtin allowlist in the same
+measurement — `ReadonlyArray.filter`, `ReadonlyArray.every`, `Math.max`,
+`String.toLowerCase`, `String.toUpperCase`, each the twin of an entry already
+there. Unresolved call sites went 10 → 5 and the rate 29.4% → 21.6%. The
+allowlist now holds 36 methods.
+
+**All eleven remaining `unknown` functions, accounted for:**
+
+| Function | File | Why |
 |---|---|---|
-| files analyzed | 9 | 9 |
-| functions extracted | 19 | 19 |
-| `unknown` rate | 47.4% (9/19) | **10.5% (2/19)** |
-| `boundary` rate | 0.0% | 0.0% |
-| call sites | 31 — resolved 12, stub 1, pure 9, unresolved 9 | 31 — resolved 12, stub 8, pure 9, mutation 1, unresolved 1 |
-| unresolved by reason | `builtin-method` 1, `unresolved-symbol` 8 | `ambient-declaration` 1 |
-| top unresolved names | `Map.set` 1 | (none) |
-| exit code | 0 | 0 |
+| `recentAuditRows` | `src/lib/mysql.ts` | calls `auditPool.query`, and `auditPool` came from `createPool(…)`; a factory result has no module-qualified name (`ambient-declaration`) |
+| `appendAuditRow` | `src/lib/mysql.ts` | same, through `auditPool.execute` |
+| `countAuditRows` | `src/lib/mysql.ts` | same, through `auditPool.query` |
+| `auditTrail` | `src/lib/audit.ts` | calls `recentAuditRows`, which declares no contract, so the unknown propagates |
+| `record` | `src/lib/audit.ts` | same, through `appendAuditRow` |
+| `auditSize` | `src/lib/audit.ts` | same, through `countAuditRows` |
+| `listAudit` | `src/routes/audit.ts` | reaches the same unresolved call through the undeclared audit layer (`AMB-W001`, `AMB-W003`) |
+| `writeAudit` | `src/routes/audit.ts` | same |
+| `reviewAudit` | `src/routes/audit.ts` | same |
+| `fetchRate` | `src/lib/rates.ts` | `(await fetch(url)).json()` — the method is declared on a type from a `.d.ts`, and the pure-builtin allowlist covers only the compiler's own lib, so the call cannot be named (`ambient-declaration`) |
+| `backorderedSkus` | `src/domain/inventory.ts` | `levels.filter(isBackordered)` passes a callback *by reference*; DESIGN.md §4.2 rule 4 refuses a pure verdict from the method name alone even though `ReadonlyArray.filter` is on the allowlist (`builtin-method`) |
 
-The "After" column now also carries DESIGN.md §4.2's local-mutation rule. It
-moved the fixture's `unknown` rate from 10.5% (2/19) to **5.3% (1/19)**:
-`putRate` in `src/lib/cache.ts` writes into a module-scope `Map`, which is
-now inferred as `state_write` instead of leaving the function `unknown`. It
-declares no `@effects` at all, so nothing is diagnosed — an undeclared
-function is a coverage concern, not a violation (§4.3) — but its effects are
-now known rather than unknown.
+That accounts for the five unresolved call sites too: three `mysql2` calls
+and one `.json()` are the four `ambient-declaration`s, and the callback-by-
+reference `filter` is the one `builtin-method`.
 
-The one remaining `unknown` is accounted for:
-
-- one `ambient-declaration` — `(await fetch(url)).json()`. The method is
-  declared on a type from a `.d.ts`, and the pure-builtin allowlist covers only
-  the compiler's own lib, so the call cannot be named.
+Functions that *call* an unknown function but declare their own contract —
+`summarizeUsers` calling `fetchRate`, for one — are not themselves `unknown`:
+a declared contract is what callers see. That is why the eleven above are the
+undeclared helpers and the entrypoints that reach through them.
 
 Before the client stubs, all eight of the `unresolved-symbol` calls were
 database and LLM client methods, and none of them carried a name at all —
@@ -181,9 +221,9 @@ machine, and §3.5's performance gate has not run either way.
 |---|---|
 | Spec section | §4.4, §4.5, §4.6 |
 | Acceptance | conformance tests for the planned hook targets; contract-to-handler mapping; 50 bundled stub packages |
-| Implemented | `@capabilities` narrowing (static, crosses undeclared functions, target globs), the static half of §4.4's 二重強制 for literal HTTP targets (`AMB-E009`), source-level `withAmbit` ↔ `@entrypoint` agreement (`AMB-E010`/`AMB-W004`), `@entrypoint` warning, `@boundary` with mandatory reason and separate coverage accounting, `@budget` parsing/validation, runtime `withAmbit` + `globalThis.fetch` blocking + `timeMs` enforcement + `runtime.unscoped`, `db_read`/`db_write`/`llm` stubs for `pg`/`mysql2`/Prisma/OpenAI/Anthropic |
-| Evidence | `test/contracts.test.ts` (26), `test/runtime.test.ts` (mock-level, 13), `test/e2e.runtime.test.ts` (real socket, through the installed package, 4), `test/e2e.realistic.test.ts` (15 — all six agent-accident scenarios), `test/stubs.data-clients.test.ts`, `test/stubs.http-capabilities.test.ts` |
-| Outstanding | **Only `fetch` is hooked at runtime.** `node:fs`, `node:http`/`https`/`net`, `child_process`, `pg`/`mysql2`/Prisma/Drizzle/MongoDB, OpenAI/Anthropic/Vercel AI — none. **`costUsd` and `llmCalls` are not enforced**; nothing increments them. **No framework adapters** (Express/Hono/Next.js/BullMQ). **Contract-to-handler mapping is source-level only** — a literal capability array is compared with the JSDoc of a handler declared in the same file; a list built at runtime, a handler from another module, or a build/bundle that moves either half is reported as uncompared (`AMB-W004`), and §12's 「契約とハンドラの対応付け」 stays open. **Only HTTP targets are read from source** — no `db:` capability is derived from SQL (§4.4's caveat). **No `@budget` loop-pattern warnings.** Bundled stubs: 52 call entries across 9 namespaces (`fetch`, `globalThis`, `undici`, `node:http`, `node:https`, `node:net`, `node:fs`, `node:fs/promises`, `node:child_process`), 43 constructor entries, 29 pure-builtin methods, 19 in-place-mutation methods, 35 database/LLM client rules across 5 packages (`pg`, `mysql2`, `@prisma/client`, `openai`, `@anthropic-ai/sdk`), and 7 HTTP capability rules — **not** 50 packages. All nine effects now have at least one bundled source. |
+| Implemented | `@capabilities` narrowing (static, crosses undeclared functions, target globs), the static half of §4.4's 二重強制 for literal HTTP targets (`AMB-E009`), source-level `withAmbit` ↔ `@entrypoint` agreement (`AMB-E010`/`AMB-W004`), `@entrypoint` warning, `@boundary` with mandatory reason and separate coverage accounting, `@budget` parsing/validation, runtime `withAmbit` + `timeMs` enforcement + `runtime.unscoped`, four capability hooks with install/restore — `globalThis.fetch`, `node:fs`/`node:fs/promises`, `node:child_process`, and `pg` (`Pool`/`Client.query`) — every decision recorded on the context's audit trail, `db_read`/`db_write`/`llm` stubs for `pg`/`mysql2`/Prisma/OpenAI/Anthropic |
+| Evidence | `test/contracts.test.ts` (26), `test/runtime.test.ts` (in-process, 27 — includes the fs, `child_process` and `pg` hooks and their restores), `test/e2e.runtime.test.ts` (10 — real socket, real files, a real child process and a real `pg@8` client, all through the installed package), `test/e2e.realistic.test.ts` (16 — the six agent-accident scenarios plus the `AMB-E009`/`AMB-E005` overlap), `test/stubs.data-clients.test.ts`, `test/stubs.http-capabilities.test.ts` |
+| Outstanding | **`fetch`, `node:fs`, `node:child_process` and `pg` are hooked; nothing else is.** `node:http`/`https`/`net`, `mysql2`/Prisma/Drizzle/MongoDB, OpenAI/Anthropic/Vercel AI — no runtime hook, so calling them is neither blocked nor recorded. The builtin hooks cover named ESM imports only when installed from a preload (`docs/limitations.md`), and the `pg` hook is verified against `pg@8` only. **`costUsd` and `llmCalls` are not enforced**; nothing increments them. **No framework adapters** (Express/Hono/Next.js/BullMQ). **Contract-to-handler mapping is source-level only** — a literal capability array is compared with the JSDoc of a handler declared in the same file; a list built at runtime, a handler from another module, or a build/bundle that moves either half is reported as uncompared (`AMB-W004`), and §12's 「契約とハンドラの対応付け」 stays open. **Only HTTP targets are read from source** — no `db:` capability is derived from SQL (§4.4's caveat). **No `@budget` loop-pattern warnings.** Bundled stubs: 52 call entries across 9 namespaces (`fetch`, `globalThis`, `undici`, `node:http`, `node:https`, `node:net`, `node:fs`, `node:fs/promises`, `node:child_process`), 43 constructor entries, 36 pure-builtin methods, 19 in-place-mutation methods, 35 database/LLM client rules across 5 packages (`pg`, `mysql2`, `@prisma/client`, `openai`, `@anthropic-ai/sdk`), and 7 HTTP capability rules — **not** 50 packages. All nine effects now have at least one bundled source. |
 
 ### M3 — concrete fix patches, agent protocol
 
@@ -217,7 +257,7 @@ repository claims progress against it.
 | Tag | Parsed | Statically checked | Runtime-enforced | Audit only |
 |---|---|---|---|---|
 | `@effects` | yes | yes (§4.2 rules 1–7) | — | — |
-| `@capabilities` | yes | yes (caller→callee narrowing; literal HTTP target) | `fetch` only | recorded on the context |
+| `@capabilities` | yes | yes (caller→callee narrowing; literal HTTP target) | `fetch`, `node:fs`, `node:child_process`, `pg` | every decision recorded on the context |
 | `@budget` | yes | validation only | `timeMs` only | — |
 | `@entrypoint` | yes | warns without `@capabilities`; compared with a same-file `withAmbit` | establishes the context via `withAmbit` | — |
 | `@boundary` | yes | excludes the body; reason required | — | counted in `--coverage` |

@@ -350,6 +350,88 @@ The summary line (`files= functions= declared=`) is printed on every run, with
 or without `--coverage`, so a check that analyzed nothing is never
 indistinguishable from a check that found no violations.
 
+## Runtime hooks
+
+Four hooks enforce `@capabilities` at run time: `installFetchHook()`,
+`installFsHook()`, `installChildProcessHook()` and `installPgHook(pg)`. Each
+returns the function that restores what it replaced. Everything below is what
+they do **not** cover.
+
+### What is hooked, and at which version
+
+| Hook | Target | Versions |
+|---|---|---|
+| `installFetchHook` | `globalThis.fetch` | the Node.js runtime Ambit supports (`engines.node`) |
+| `installFsHook` | `node:fs`, `node:fs/promises` | same |
+| `installChildProcessHook` | `node:child_process` | same |
+| `installPgHook` | `pg`'s `Pool.prototype.query`, `Client.prototype.query` | `pg` 8.x — verified against `pg@8` in `test/e2e.runtime.test.ts` |
+
+Not hooked at all, and therefore neither blocked nor recorded: `mysql2`,
+`@prisma/client`, `drizzle-orm`, `mongodb`, `openai`, `@anthropic-ai/sdk`,
+the Vercel AI SDK, `node:http`/`https`/`net` (their effects are inferred
+statically, but no runtime hook replaces them), and every other client. Ambit
+has no way to notice that an upstream release moved a patch point; the `pg`
+row above is a claim about the version tested, not about future ones
+(DESIGN.md §12).
+
+### Install order decides what a builtin hook covers
+
+A builtin's ESM namespace is a snapshot of its properties taken when that
+builtin is first `import`ed anywhere in the process.
+
+- Installed from a preload (`node --import ./ambit-hooks.mjs app.js`), before
+  the application's module graph is linked, the hooks cover every form:
+  `import { readFileSync } from "node:fs"`, `import fs from "node:fs"`, and
+  `require("fs")`.
+- Installed from inside the module graph — a call at the top of the entry
+  module — they cover `fs.readFileSync()` through the default export and
+  through `require("fs")`, but **not** a named import
+  (`import { readFileSync } from "node:fs"`) or `import * as fs`, which are
+  already bound to the original function.
+
+Neither mode covers a native addon, code inside a child process, or another
+`worker_threads` worker: a worker needs its own install.
+
+### Node's own module loader reads through the hook
+
+Node reads module sources with the public `fs.readFileSync`. After
+`installFsHook()`, a `require()` or a dynamic `import()` therefore goes
+through the capability check like any other read. Under
+`setUnscopedPolicy("deny")`, or inside a `withAmbit` context that grants no
+`fs:read`, a lazily loaded module is denied. Load what you need before
+installing the hook, or grant `fs:read:` for the directories that hold the
+code.
+
+### What a target can and cannot say
+
+- **Paths** are resolved to absolute at the call (`path.resolve`,
+  `fileURLToPath`, `Buffer` decoded), so a grant is written as an absolute
+  path glob. `*` crosses `/`: `fs:read:/srv/app/*` also covers
+  `/srv/app/a/b.txt`. There is no way to grant exactly one directory level.
+- **File descriptors** carry no path. `fs.readSync(fd)` is not checked; the
+  check happened at `open`, from the flags. A descriptor obtained before the
+  hook was installed is never checked.
+- **A shell spawn names the shell.** `exec`, `execSync` and `shell: true`
+  give `proc:spawn:/bin/sh` (or `options.shell`). Which program the command
+  string runs is not decidable without a shell parser, so a grant for the
+  shell permits any program the shell can start — the exception message says
+  this.
+- **A `pg` target is the database, never a table.** Ambit does not read table
+  names out of SQL, so `db:read:users` — which reads like a table grant — is
+  not what the `pg` hook matches; it matches `db:read:<database>`.
+  Table-level `db:` targets have meaning only in the static narrowing rule
+  (`AMB-E005`). When the connection names no database, the requirement
+  becomes `db:read:unknown`, which only a target-agnostic grant
+  (`db:read:*`) covers.
+- **An opaque statement requires both directions.** A `query` whose leading
+  SQL keyword is not readable — a `Submittable`, a config object without
+  `text` — requires `db:read:` *and* `db:write:`.
+
+### `costUsd` and `llmCalls` are still not enforced
+
+No hook increments them, and none of the four hooks changes that. They are
+parsed, validated, and carried on the context for an adapter to use.
+
 ## Backend
 
 The current analysis backend (`src/checker/backend/legacy-ts.ts`) is a
