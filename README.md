@@ -100,15 +100,22 @@ type-check and run. In CI, the exit code is the whole integration:
 
 ## What Ambit controls
 
-Contracts are JSDoc tags on ordinary TypeScript.
+Contracts are JSDoc tags on ordinary TypeScript. Two of them can also be
+declared by the runtime registration beside a handler instead — see *Static
+check, runtime block* below.
 
 | Tag | Declares | Checked |
 |---|---|---|
 | `@effects` | what side effects a function may perform | statically, propagated through the call graph |
 | `@capabilities` | which resources it may reach | statically — may only narrow from caller to callee — and at run time by four hooks |
 | `@budget` | how much an entrypoint may spend | parsed and validated; of its three limits only `timeMs` is enforced while the code runs |
-| `@entrypoint` | where a request enters | against the registration beside it (`AMB-E010`, `AMB-E011`) |
+| `@entrypoint` | where a request enters | warned when it declares no capability set (`AMB-W002`) |
 | `@boundary reason="…"` | that a body is not analysed, and its declared contract is trusted in its place | counted separately in `--coverage` |
+
+`@capabilities` and `@budget` are also what a `withAmbit` / `ambitHandler`
+registration writes. A literal one is that handler's declaration, so the tag
+need not repeat it; where both are written and they disagree, the check fails
+(`AMB-E010`, `AMB-E011`).
 
 Effects are inferred from bundled tables covering `fetch`/`undici`, the
 `node:fs`, `node:http`/`https`/`net`, and `node:child_process` builtins, and
@@ -138,10 +145,11 @@ anonymous default exports, and a class with no constructor.
 
 ## Static check, runtime block
 
-`ambit check` reads the JSDoc and nothing else, so adopting the static check
-means writing the tags and nothing more. Runtime enforcement is the opposite:
-it is adopted **per entrypoint**. Every entrypoint needs its own `withAmbit` or
-`ambitHandler` registration, and JSDoc tags alone never turn it on.
+`ambit check` reads the source and nothing that runs, so adopting the static
+check means writing the declarations and nothing more. Runtime enforcement is
+the opposite: it is adopted **per entrypoint**. Every entrypoint needs its own
+`withAmbit` or `ambitHandler` registration, and a JSDoc tag alone never turns
+it on.
 
 ```ts
 import { installFetchHook, withAmbit } from "ambit/runtime";
@@ -151,8 +159,6 @@ installFetchHook();
 /**
  * @entrypoint
  * @effects network
- * @capabilities http:get:api.example.com
- * @budget timeMs=500 costUsd=0.01
  */
 async function refreshRates(currency: string): Promise<void> {
   await fetch(`https://api.example.com/rates?base=${currency}`);
@@ -169,11 +175,25 @@ export const refresh = withAmbit(
 ```
 
 That file passes `ambit check` as written; uncommenting the second `fetch`
-fails it. The capability list and the budget each appear twice — the JSDoc is
-what the checker reads, the literal is what the runtime enforces — and
-`AMB-E010` / `AMB-E011` fail the check if the two halves ever disagree. The
-contract is a value in the module, so it survives a build that strips the
-comments and a bundler that renames everything.
+fails it. The capability list and the budget are written **once**, in the
+registration: a literal `spec` whose `handler` names a declaration in the same
+file *is* that handler's `@capabilities` and `@budget`, so the checker reads
+the same values the runtime will enforce. Writing the tags as well is still
+allowed and still checked — `AMB-E010` / `AMB-E011` fail the check if the two
+halves ever disagree. Keeping the contract in the `spec` rather than the
+comment is what makes it a value in the module, so it survives a build that
+strips the comments and a bundler that renames everything.
+
+`@effects` and `@entrypoint` stay in the JSDoc. The dividing line is whether
+the runtime needs the value: the hooks match against `capabilities` and the
+budget's `timeMs` is measured against the wall clock, while `@effects` is only
+ever read statically (DESIGN.md §4.1「宣言の出所」).
+
+Where a `spec` cannot supply the declaration — a capability list or budget
+built at runtime, or a handler declared in another module — the JSDoc tag is
+still required. Those registrations are reported as `AMB-W004`, and an
+entrypoint left with no capability set is `AMB-W002` on top of it; neither is
+silently treated as unknown.
 
 On Hono, the adapter registers the same handler instead of a hand-written
 `withAmbit`:
@@ -223,7 +243,7 @@ silently counting as safe.
 
 **Effect systems such as Effect-TS.** There, effects live in the types of the
 values you construct, so the code is written in that style throughout. Ambit's
-contracts are JSDoc comments on ordinary TypeScript: adding them changes no
+static contracts are JSDoc comments on ordinary TypeScript: adding them changes no
 runtime behavior, removing Ambit is a small diff, and the code still
 type-checks and runs either way.
 
