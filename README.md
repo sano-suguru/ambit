@@ -101,7 +101,15 @@ everything — the runtime reads no JSDoc and no file paths. The third argument
 maps the request to the handler's arguments, which keeps the framework's own
 API (`c.req.*`, in no stub table) out of the contract-bearing function. A route
 registered without the adapter establishes no context at all, and what its
-operations do then is `setUnscopedPolicy`'s decision. `AmbitCapabilityError`
+operations do then is `setUnscopedPolicy`'s decision.
+
+Runtime enforcement is therefore adopted **per entrypoint**: every entrypoint
+needs its own `withAmbit` or `ambitHandler` registration — roughly six lines
+per route in `test/fixtures/realistic-api` — and JSDoc tags alone never turn it
+on. The static check is the opposite: `ambit check` reads the JSDoc and nothing
+else, so adopting it means writing the tags and nothing more (keying contracts
+to `method + path`, so that one middleware could cover every route, was
+reconsidered and rejected — DESIGN.md §4.4). `AmbitCapabilityError`
 and `AmbitBudgetError` are not translated into HTTP statuses: they go to the
 framework's error handler, because a denial means this server's own code
 exceeded its grant, which is not what 403 says.
