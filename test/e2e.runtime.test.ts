@@ -183,6 +183,65 @@ console.log("RESULT:" + (await handler()));
     expect(stdout.trim()).toBe("RESULT:AmbitCapabilityError");
   }, 60_000);
 
+  it("blocks an ungranted child process, so no process is started", async () => {
+    // A real child process: the granted one has to actually print, and the
+    // blocked one has to leave no evidence behind.
+    const marker = path.join(consumer, "child-ran.txt");
+    const { stdout } = await runScript(`
+import { execFileSync } from "node:child_process";
+import nodeCp from "node:child_process";
+import { withAmbit, installChildProcessHook, AmbitCapabilityError } from "ambit/runtime";
+installChildProcessHook();
+const handler = withAmbit({ capabilities: ["proc:spawn:/bin/echo"] }, async () => {
+  const ok = nodeCp.execFileSync("/bin/echo", ["ambit"]).toString().trim();
+  try {
+    nodeCp.execFileSync("/bin/sh", ["-c", "touch ${marker}"]);
+    return ok + "|REACHED";
+  } catch (error) {
+    return ok + "|" + (error instanceof AmbitCapabilityError ? "BLOCKED:" + error.capability : "OTHER");
+  }
+});
+console.log("RESULT:" + (await handler()));
+`);
+    expect(stdout.trim()).toBe("RESULT:ambit|BLOCKED:proc:spawn:/bin/sh");
+    await expect(fs.stat(marker)).rejects.toThrow();
+  }, 60_000);
+
+  it("denies outside every entrypoint context when the policy is deny (§4.4)", async () => {
+    // All imports happen first: with the fs hook installed, Node's own module
+    // loader reads through `fs.readFileSync`, so a lazy `import()` under
+    // `deny` would be denied too — which is the documented behaviour, not a
+    // surprise to design around here.
+    const target = path.join(consumer, "unscoped.txt");
+    await fs.writeFile(target, "public");
+    const { stdout } = await runScript(`
+import nodeFs from "node:fs";
+import nodeCp from "node:child_process";
+import { installFsHook, installChildProcessHook, setUnscopedPolicy, AmbitCapabilityError } from "ambit/runtime";
+installFsHook();
+installChildProcessHook();
+const results = [];
+for (const policy of ["allow", "warn", "deny"]) {
+  setUnscopedPolicy(policy);
+  try {
+    nodeFs.readFileSync("${target}", "utf8");
+    results.push(policy + ":through");
+  } catch (error) {
+    results.push(policy + ":" + (error instanceof AmbitCapabilityError ? "denied" : "other"));
+  }
+}
+setUnscopedPolicy("deny");
+try {
+  nodeCp.execFileSync("/bin/echo", ["x"]);
+  results.push("proc:through");
+} catch (error) {
+  results.push("proc:" + (error instanceof AmbitCapabilityError ? "denied" : "other"));
+}
+console.log("RESULT:" + results.join(","));
+`);
+    expect(stdout.trim()).toBe("RESULT:allow:through,warn:through,deny:denied,proc:denied");
+  }, 60_000);
+
   it("cancels an in-flight request when a timeMs budget aborts", async () => {
     // The README says `onExceed: "abort"` cancels via AbortSignal. Without
     // joining the context's signal to the hooked request, the signal would

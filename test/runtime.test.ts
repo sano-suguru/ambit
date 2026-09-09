@@ -1,3 +1,4 @@
+import childProcess from "node:child_process";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
@@ -10,10 +11,12 @@ import {
   currentContext,
   fetchCapability,
   fsCapabilities,
+  installChildProcessHook,
   installFetchHook,
   installFsHook,
   requireCapability,
   setUnscopedPolicy,
+  spawnCapability,
   withAmbit,
 } from "../src/runtime/index.ts";
 
@@ -328,5 +331,71 @@ describe("installFsHook (DESIGN.md §4.4 (b))", () => {
     // And the original behaviour is back: an empty grant no longer blocks.
     const handler = withAmbit({ capabilities: [] }, async () => fs.readFileSync(here).length);
     expect(await handler()).toBeGreaterThan(0);
+  });
+});
+
+describe("installChildProcessHook (DESIGN.md §4.4 (b))", () => {
+  it("names argv[0] as written, and the shell for a shell form", () => {
+    expect(spawnCapability("spawn", ["git", ["status"]])).toEqual({
+      capability: "proc:spawn:git",
+    });
+    expect(spawnCapability("exec", ["git status"])).toMatchObject({
+      capability: `proc:spawn:${process.platform === "win32" ? "cmd.exe" : "/bin/sh"}`,
+    });
+    // `shell: true` turns a spawn into a shell spawn, and the target follows.
+    expect(spawnCapability("spawn", ["git", ["status"], { shell: "/bin/bash" }])).toMatchObject({
+      capability: "proc:spawn:/bin/bash",
+    });
+    expect(spawnCapability("fork", ["./worker.js"])).toEqual({
+      capability: `proc:spawn:${process.execPath}`,
+    });
+  });
+
+  it("says, in the exception, that a granted shell can run any program", async () => {
+    const restore = installChildProcessHook();
+    try {
+      const handler = withAmbit({ capabilities: [] }, async () => childProcess.execSync("echo hi"));
+      await expect(handler()).rejects.toThrow(/names the shell, not the program/);
+    } finally {
+      restore();
+    }
+  });
+
+  it("runs a granted command, blocks an ungranted one, and audits both", async () => {
+    const restore = installChildProcessHook();
+    try {
+      const handler = withAmbit({ capabilities: ["proc:spawn:/bin/echo"] }, async () => {
+        const allowed = childProcess.execFileSync("/bin/echo", ["ambit"]).toString().trim();
+        let blocked = "reached";
+        try {
+          childProcess.execFileSync("/bin/ls", ["/"]);
+        } catch (error) {
+          blocked = (error as Error).name;
+        }
+        return { allowed, blocked, audit: [...(currentContext()?.audit ?? [])] };
+      });
+      const { allowed, blocked, audit } = await handler();
+      expect(allowed).toBe("ambit");
+      expect(blocked).toBe("AmbitCapabilityError");
+      expect(audit).toEqual([
+        { capability: "proc:spawn:/bin/echo", allowed: true, reason: "granted" },
+        { capability: "proc:spawn:/bin/ls", allowed: false, reason: "denied" },
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("restores every patched member (P5: 撤退できること)", async () => {
+    const before = childProcess.execFileSync;
+    const restore = installChildProcessHook();
+    expect(childProcess.execFileSync).not.toBe(before);
+    restore();
+    expect(childProcess.execFileSync).toBe(before);
+
+    const handler = withAmbit({ capabilities: [] }, async () =>
+      childProcess.execFileSync("/bin/echo", ["back"]).toString().trim(),
+    );
+    expect(await handler()).toBe("back");
   });
 });
