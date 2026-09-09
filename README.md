@@ -118,6 +118,10 @@ analysis itself could not run.
   of real code lands in `unknown` today — see
   [Known limitations](#known-limitations).
 
+A milestone-by-milestone account of what is implemented, what is verified, and
+what is not built — with the measured coverage and latency numbers behind it —
+is in [docs/status.md](docs/status.md).
+
 The design is documented in [docs/DESIGN.md](docs/DESIGN.md) (a Draft — the
 RFC process for spec changes starts at the first public release, so this
 file is edited directly for now) and [docs/diagnostics/](docs/diagnostics/README.md)
@@ -271,11 +275,12 @@ instead of hidden.
 
 Representative cases where analysis is narrower than the model suggests:
 
-- **Small bundled effect tables.** 26 call entries (`fetch`, `undici`'s
-  `fetch`, and Node.js builtins) plus 6 constructor entries, producing only
-  `network`, `fs_read`, `fs_write`, `process`, and `env`. Nothing bundled
-  produces `db_read`, `db_write`, or `llm` — a `pure` function calling a
-  database driver reports `unknown`, not a violation.
+- **Small bundled effect tables.** 52 call entries (`fetch`, `undici`'s
+  `fetch`, and Node.js builtins) plus 45 constructor entries and a 29-entry
+  pure-builtin allowlist, producing only `network`, `fs_read`, `fs_write`,
+  `process`, and `env`. Nothing bundled produces `db_read`, `db_write`, or
+  `llm` — a `pure` function calling a database driver reports `unknown`, not a
+  violation.
 - **Import-shape sensitive matching.** `import * as fs from "node:fs"`,
   `import fs from "node:fs"`, and `import { writeFileSync } from "node:fs"`
   are all recognized; a destructured or re-exported binding several hops

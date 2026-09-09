@@ -186,6 +186,8 @@ directly — fixtures alone cannot catch a shape only the real codebase has.
 - External-facing explanation → `README.md`
 - Implementation limitations in detail (README's overflow) →
   `docs/limitations.md`
+- Milestone-by-milestone implementation status, with measured numbers →
+  `docs/status.md`
 
 Do not write product specification into this file.
 
