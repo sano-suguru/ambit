@@ -8,18 +8,58 @@ contract and verifies it.
 
 ## The accident
 
+Three files. `priceOrder` declares `pure`; `applyTax` and `currentRate` declare
+nothing at all.
+
 ```ts
+// pricing.ts
 /** @effects pure */
-export function calculateTax(order: Order): Money { /* ... */ }
+export function priceOrder(subtotal: number, region: string): number {
+  return applyTax(subtotal, region);
+}
+
+// tax.ts
+export function applyTax(subtotal: number, region: string): number {
+  return Math.round(subtotal * (1 + currentRate(region)));
+}
+
+// rates.ts
+const FALLBACK_RATE = 0.08;
+
+export function currentRate(region: string): number {
+  void fetch(`https://rates.example.com/${region}`);  // <- the agent's one added line
+  return FALLBACK_RATE;
+}
 ```
 
-An agent adds a `fetch()` call inside it. The next check fails:
+The added line is two calls away from the declaration it breaks. The next check
+fails, and prints the way from one to the other:
 
 ```console
-$ node src/cli/main.ts check src
-error: calculateTax declares pure but performs [network] directly (tax.ts:2)
-files=1 functions=1 declared=1
+$ node src/cli/main.ts check test/fixtures/accident; echo "exit=$?"
+error: priceOrder declares pure but calls currentRate which has effects [network] (pricing.ts:4)
+  -> applyTax (tax.ts:3)
+  -> currentRate (rates.ts:3)
+  operation: fetch (rates.ts:4)
+files=3 functions=3 declared=1
+exit=1
 ```
+
+In CI the same run annotates the declaration that broke, carrying the whole
+path into the pull request:
+
+```console
+$ node src/cli/main.ts check test/fixtures/accident --format github; echo "exit=$?"
+::error file=test/fixtures/accident/pricing.ts,line=4,col=17,title=AMB-E001::priceOrder declares pure but calls currentRate which has effects [network]%0A-> applyTax (tax.ts:3)%0A-> currentRate (rates.ts:3)%0Aoperation: fetch (rates.ts:4)
+files=3 functions=3 declared=1
+exit=1
+```
+
+No file here contains both the declaration and the `fetch`. Every file is
+locally unremarkable: `rates.ts` fetches a rate, which is what a rates module
+does, and nothing in it mentions `pure`. The violation exists only in the path
+between the three, which is why a rule that reads one node, one function, or one
+file at a time has nothing to fire on.
 
 TypeScript accepts that edit — the types still line up. It tells you whether a
 value has the type you expect, not whether a function is allowed to do what it
@@ -36,7 +76,8 @@ git clone https://github.com/sano-suguru/ambit.git && cd ambit && pnpm install &
 
 Requires Node.js 24. That last command needs nothing prepared — it checks
 Ambit's own source. Point `check` at your own directory instead, with
-`--coverage`, `--strict`, or `--format json`. `ambit init` proposes `@effects`
+`--coverage`, `--strict`, `--format json`, or `--format github`. `ambit init`
+proposes `@effects`
 for undeclared functions, and proposes nothing for one that reached `unknown`.
 `check` exits 0 when nothing was reported, 1 on an error, and 2 when the
 analysis itself could not run.
@@ -215,6 +256,12 @@ the one that keeps the contract and rewrites the code.
 
 - **`unknown` is not `pure`.** A call Ambit cannot resolve is reported and
   counted, and `--strict` makes it an error.
+- **Widening the declaration silences the check.** An agent that edits the
+  `@effects` tag along with the code — including by applying the `widen` fix
+  Ambit itself offers — gets a green check again: measured on the example
+  above, `pure` → `network` on `priceOrder` takes it from exit 1 to exit 0.
+  Catching that needs a comparison against a base ref, which Ambit does not
+  have.
 - **Four runtime hooks, no more.** `fetch`, `node:fs`, `node:child_process` and
   `pg`. `mysql2`, Prisma and the LLM SDKs have static effects but no hook, so
   calling them is neither blocked nor recorded.

@@ -46,7 +46,9 @@ parsed and carried on the context, and nothing increments them.
 ## Commands and flags
 
 `ambit check` and `ambit init` are implemented, with `--format json`,
-`--coverage`, `--strict`, and `init --config`. `ambit run`, `ambit agent`,
+`--format github`, `--coverage`, `--strict`, and `init --config`. `--format
+github` renders the same diagnostics as GitHub Actions workflow commands, with
+the call path folded into the annotation body; it changes no exit code. `ambit run`, `ambit agent`,
 `ambit stubs`, and `ambit sbom` are planned, not built.
 
 `ambit init` proposes `@effects` JSDoc. `ambit init --config` proposes an
