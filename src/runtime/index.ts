@@ -27,8 +27,6 @@ export interface AmbitSpec {
   /** The entrypoint's `@capabilities`, as written (`db:read:users`). */
   readonly capabilities?: readonly string[];
   readonly budget?: Budget;
-  /** Overrides the process-wide policy for this entrypoint. */
-  readonly unscoped?: UnscopedPolicy;
 }
 
 export class AmbitCapabilityError extends Error {
@@ -50,7 +48,15 @@ export class AmbitBudgetError extends Error {
 
 let unscopedPolicy: UnscopedPolicy = "allow";
 
-/** Set the process-wide `runtime.unscoped` policy (DESIGN.md §4.4). */
+/**
+ * Set the process-wide `runtime.unscoped` policy (DESIGN.md §4.4).
+ *
+ * Process-wide and not per-entrypoint on purpose. The policy only applies
+ * where there is *no* context, so a per-entrypoint override would be read
+ * only by concurrent work running outside every entrypoint — which makes it a
+ * mutable global that unrelated calls observe changing mid-flight, not a
+ * setting scoped to anything. Set it once at startup.
+ */
 export function setUnscopedPolicy(policy: UnscopedPolicy): void {
   unscopedPolicy = policy;
 }
@@ -94,8 +100,6 @@ export function withAmbit<Args extends readonly unknown[], Result>(
       timer.unref?.();
     }
 
-    const previousPolicy = unscopedPolicy;
-    if (spec.unscoped) unscopedPolicy = spec.unscoped;
     try {
       const result = await runInContext(context, () => handler(...args));
       const elapsed = Date.now() - context.startedAt;
@@ -109,7 +113,6 @@ export function withAmbit<Args extends readonly unknown[], Result>(
       return result;
     } finally {
       if (timer) clearTimeout(timer);
-      unscopedPolicy = previousPolicy;
     }
   };
 }
@@ -172,7 +175,13 @@ export function installFetchHook(): () => void {
 
   const hooked: typeof globalThis.fetch = async (input, init) => {
     requireCapability(fetchCapability(input, init));
-    return original(input, init);
+    // `onExceed: "abort"` aborts the entrypoint's signal; without joining it
+    // to the request, the signal would fire and the request would keep going,
+    // making the "abort" row of the README table false.
+    const budgetSignal = currentContext()?.signal;
+    if (!budgetSignal) return original(input, init);
+    const signal = init?.signal ? AbortSignal.any([budgetSignal, init.signal]) : budgetSignal;
+    return original(input, { ...init, signal });
   };
   globalThis.fetch = hooked;
   return () => {

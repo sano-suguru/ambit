@@ -89,6 +89,7 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
         location: locationOf(absoluteRoot, sourceFile, nameOrNode(node)),
         declarationStart: declarationStartOf(absoluteRoot, sourceFile, node),
         ...jsDocRangeOf(absoluteRoot, sourceFile, node),
+        ...(ts.isClassDeclaration(node) ? { implicitConstructor: true as const } : {}),
         jsDoc: extractJsDoc(node, absoluteRoot),
         calls: collectCalls(node, sourceFile, program, checker, declaredNodeToId, absoluteRoot),
       });
@@ -417,6 +418,23 @@ function collectSkippedFunctions(
           kind,
           tag,
           raw,
+        });
+      }
+    }
+    // A contract written on a `class` is inert: the class's construction is
+    // indexed, but `extractJsDoc` refuses to read a class's own comment as
+    // its implicit constructor's contract. Reported for the same reason
+    // AMB-E003 reports every other inert declaration, and not counted in
+    // `skippedFunctions`, which counts function-like nodes.
+    if (ts.isClassDeclaration(node)) {
+      const tags = ts.getJSDocTags(node);
+      for (const tag of tags) {
+        if (!(CONTRACT_TAGS as readonly string[]).includes(tag.tagName.text)) continue;
+        uncarried.push({
+          location: locationOf(absoluteRoot, sourceFile, node.name ?? node),
+          kind: "class-declaration",
+          tag: tag.tagName.text,
+          raw: jsDocTagText(tag),
         });
       }
     }

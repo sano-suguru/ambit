@@ -44,3 +44,13 @@ export function opaque(input: string): unknown {
 export function alreadyDeclared(a: number): number {
   return a;
 }
+
+/**
+ * A class with no constructor written still runs its property initializers,
+ * so the construction has effects — but there is no declaration site to put a
+ * contract on. `init` must report that rather than propose an inert comment
+ * above the class.
+ */
+export class Loader {
+  readonly config = loadConfig("./config.json");
+}

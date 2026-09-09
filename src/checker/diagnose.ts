@@ -457,6 +457,7 @@ function buildInvalidEffectsDiagnostic(
 
 /** Why the node in question cannot carry a contract, for AMB-E003's message. */
 const UNCARRIED_REASON: Record<SkippedFunctionKind, string> = {
+  "class-declaration": "a class declaration — the contract belongs on its constructor",
   "getter-setter": "a getter/setter",
   "object-literal-method": "an object-literal member with no stable declaration path",
   "anonymous-default-export": "an anonymous default export",

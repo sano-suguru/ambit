@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { packedTarball } from "./support/pack.ts";
 
 const execFileAsync = promisify(execFile);
-const REPO_ROOT = path.join(import.meta.dirname, "..");
 
 /**
  * DESIGN.md §6 (`npm install -D`) and P5 (「撤退手順を自動テストする」).
@@ -90,17 +90,7 @@ describe("distribution: pack, install into a clean project, uninstall", () => {
     await fs.writeFile(path.join(consumer, "tsconfig.json"), `${CONSUMER_TSCONFIG}\n`);
     await fs.writeFile(path.join(consumer, "src", "app.ts"), CONSUMER_SOURCE);
 
-    // Remove `dist/` first, so the tarball can only contain what `prepack`
-    // built during this `pnpm pack`. Without this the test would happily pass
-    // on a stale build left behind by a manual `pnpm build` — and then fail in
-    // CI, which starts with no `dist/` at all.
-    await fs.rm(path.join(REPO_ROOT, "dist"), { recursive: true, force: true });
-    const packed = await run("pnpm", ["pack", "--pack-destination", workspace], REPO_ROOT);
-    expect(packed.exitCode, packed.stderr).toBe(0);
-    const entries = await fs.readdir(workspace);
-    const name = entries.find((entry) => entry.endsWith(".tgz"));
-    expect(name, `no tarball produced in ${workspace}`).toBeDefined();
-    tarball = path.join(workspace, name ?? "");
+    tarball = await packedTarball();
 
     // The consumer installs its own compiler, exactly as a real project does.
     // Nothing in this test may resolve a tool out of this repository: a step

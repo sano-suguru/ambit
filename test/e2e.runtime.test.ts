@@ -6,9 +6,9 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { packedTarball } from "./support/pack.ts";
 
 const execFileAsync = promisify(execFile);
-const REPO_ROOT = path.join(import.meta.dirname, "..");
 
 /**
  * Real-connection test for runtime enforcement, as opposed to
@@ -30,6 +30,14 @@ describe("runtime enforcement against a real server, through the installed packa
   beforeAll(async () => {
     server = http.createServer((req, res) => {
       seen.push(req.url ?? "");
+      if (req.url === "/slow") {
+        // Held open so a budget with onExceed=abort has something to cancel.
+        setTimeout(() => {
+          res.writeHead(200, { "content-type": "text/plain" });
+          res.end("late");
+        }, 3_000).unref();
+        return;
+      }
       res.writeHead(200, { "content-type": "text/plain" });
       res.end("pong");
     });
@@ -44,18 +52,9 @@ describe("runtime enforcement against a real server, through the installed packa
       `${JSON.stringify({ name: "ambit-rt-consumer", version: "1.0.0", private: true, type: "module" }, null, 2)}\n`,
     );
 
-    await fs.rm(path.join(REPO_ROOT, "dist"), { recursive: true, force: true });
-    const packed = await execFileAsync("pnpm", ["pack", "--pack-destination", workspace], {
-      cwd: REPO_ROOT,
+    await execFileAsync("npm", ["install", "--no-audit", "--no-fund", await packedTarball()], {
+      cwd: consumer,
     });
-    expect(packed.stdout).toBeDefined();
-    const tarball = (await fs.readdir(workspace)).find((entry) => entry.endsWith(".tgz"));
-    expect(tarball).toBeDefined();
-    await execFileAsync(
-      "npm",
-      ["install", "--no-audit", "--no-fund", path.join(workspace, tarball ?? "")],
-      { cwd: consumer },
-    );
   }, 300_000);
 
   afterAll(async () => {
@@ -123,6 +122,30 @@ const handler = withAmbit({ capabilities: [] }, async () => existsSync(process.c
 console.log("FS:" + (await handler()));
 `);
     expect(stdout.trim()).toBe("FS:true");
+  }, 60_000);
+
+  it("cancels an in-flight request when a timeMs budget aborts", async () => {
+    // The README says `onExceed: "abort"` cancels via AbortSignal. Without
+    // joining the context's signal to the hooked request, the signal would
+    // fire and the request would run to completion — the row would be false.
+    const { stdout } = await runScript(`
+import { withAmbit, installFetchHook } from "ambit/runtime";
+installFetchHook();
+const handler = withAmbit(
+  {
+    capabilities: ["http:get:127.0.0.1:${port}"],
+    budget: { timeMs: 100, onExceed: "abort" },
+  },
+  async () => (await fetch("http://127.0.0.1:${port}/slow")).text(),
+);
+try {
+  console.log("COMPLETED:" + (await handler()));
+} catch (error) {
+  console.log("ABORTED:" + error.name);
+}
+`);
+    expect(stdout).toContain("ABORTED:");
+    expect(stdout).not.toContain("COMPLETED:");
   }, 60_000);
 
   it("stops enforcing once the hook is removed (P5: 撤退できること)", async () => {

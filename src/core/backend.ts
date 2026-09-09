@@ -51,6 +51,12 @@ export type UnresolvedReason =
  * `src/checker/backend/legacy-ts.ts`). Purely descriptive; carries no
  * compiler-specific node, so it can cross the `TsBackend` boundary freely.
  *
+ * `class-declaration` is not a function-like node at all; it appears only as
+ * the reason a contract written on a `class` cannot be carried — the contract
+ * belongs on the class's constructor. It is reported through
+ * `uncarriedContracts` and deliberately not counted in `skippedFunctions`,
+ * which counts function-like nodes.
+ *
  * `object-literal-method` is narrower than its name: a member of a module-scope
  * `const` literal with an identifier name *is* extracted. What remains are the
  * members that have no stable declaration path (a computed, string, or numeric
@@ -58,6 +64,7 @@ export type UnresolvedReason =
  * body, one passed inline as an argument, or one bound by `let`).
  */
 export type SkippedFunctionKind =
+  | "class-declaration"
   | "getter-setter"
   | "object-literal-method"
   | "anonymous-default-export"
@@ -141,6 +148,14 @@ export interface ExtractedFunction {
    * `ambit init` has to add to.
    */
   readonly jsDocRange?: SourceLocation;
+  /**
+   * Set on a class's construction entry when the class writes no constructor.
+   * The entry is real — property initializers and the base constructor still
+   * run, and their effects still propagate — but it has no declaration site,
+   * so no contract can be attached to it. A proposal to declare one would be
+   * a patch that changes nothing, which is worse than no proposal.
+   */
+  readonly implicitConstructor?: true;
   readonly jsDoc: RawJsDoc | undefined;
   readonly calls: readonly CallSite[];
 }

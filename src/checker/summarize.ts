@@ -42,6 +42,7 @@ export function summarizeExtractedFiles(
         tagLocations: fn.jsDoc?.tagLocations ?? new Map(),
         declarationStart: fn.declarationStart,
         ...(fn.jsDocRange ? { jsDocRange: fn.jsDocRange } : {}),
+        ...(fn.implicitConstructor ? { implicitConstructor: true as const } : {}),
         declared: parseDeclaredEffects(fn.jsDoc),
         capabilities: parseDeclaredCapabilities(fn.jsDoc),
         budget: parseDeclaredBudget(fn.jsDoc),

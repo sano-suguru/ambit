@@ -14,7 +14,7 @@ are per row.
 ## Baseline commands
 
 ```sh
-pnpm test                     # 179 tests, 14 files — pass
+pnpm test                     # 182 tests, 14 files — pass
 pnpm exec tsc --noEmit        # pass
 ./node_modules/.bin/biome ci .  # pass
 node src/cli/main.ts check src --coverage   # exit 0
@@ -35,12 +35,12 @@ runs `pnpm exec biome ci .` in GitHub Actions, where no such wrapper exists.
 | functions with a declared `@effects` | 4 |
 | `unknown` rate | 63.2% (86/136) |
 | `boundary` rate | 0.0% (0/136) |
-| call sites | 692 — resolved 193, stub 3, known-pure 208, unresolved 288 |
-| unresolved by reason | `builtin-method` 102, `external-module` 180, `unresolved-symbol` 5, `callback-parameter` 1 |
-| skipped function-like nodes | 60 (`callback-argument` 54, `nested-function` 6) |
+| call sites | 707 — resolved 197, stub 3, known-pure 210, unresolved 297 |
+| unresolved by reason | `builtin-method` 104, `external-module` 184, `unresolved-symbol` 8, `callback-parameter` 1 |
+| skipped function-like nodes | 61 (`callback-argument` 54, `nested-function` 7) |
 | exit code | 0 |
 
-The 63% unknown rate is dominated by `external-module` (180), which is almost
+The 63% unknown rate is dominated by `external-module` (184), which is almost
 entirely calls into the `typescript` compiler API from the connection layer —
 the one file that is meant to be replaceable. It is a real number, not a
 target that has been met: DESIGN.md §10's goal is 30% for an *adopting team*
@@ -50,8 +50,8 @@ after three months, which no one has done.
 
 | Run | Wall clock |
 |---|---|
-| `check src`, five consecutive runs | 0.78 / 0.73 / 0.73 / 0.75 / 0.75 s |
-| `check src` after changing one contract comment | 0.74 s |
+| `check src`, five consecutive runs | 0.80 / 0.74 / 0.84 / 0.78 / 0.74 s |
+| `check src` after changing one contract comment | 0.81 s |
 
 The re-check costs the same as the first check because **nothing is cached**.
 DESIGN.md §6.2's resident/incremental path is not implemented, so "初回検査"
@@ -109,7 +109,7 @@ to compare against.
 | Acceptance | connect one external agent; distinguish analysis failure from contract loosening during iteration |
 | Implemented | `fixes[].edits` for AMB-E001: one applicable `widen` patch with `impact`, marked `consistentWithContract: false` |
 | Evidence | `test/fix.test.ts` — one test applies the emitted edit mechanically and re-checks clean; a separate test fixes the code *without* touching the contract and re-checks clean |
-| Outstanding | **`ambit agent` does not exist** — no NDJSON protocol, no iteration limit, no human-approval gate for loosening fixes, no per-cycle `unknown`-rate tracking. No fix candidates for any diagnostic other than AMB-E001. No contract-preserving candidate (by design — §5.3 forbids fabricating one). |
+| Outstanding | **`ambit agent` does not exist** — no NDJSON protocol, no iteration limit, no human-approval gate for loosening fixes, no per-cycle `unknown`-rate tracking. No fix candidates for any diagnostic other than AMB-E001 and `init`'s AMB-I001. No contract-preserving candidate (by design — §5.3 forbids fabricating one). |
 
 ### M4 — editor integration, SBOM, npm distribution
 

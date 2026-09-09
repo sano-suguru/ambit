@@ -98,11 +98,24 @@ describe("ambit init (DESIGN.md §4.1)", () => {
     expect(named(diagnostics, "alreadyDeclared")).toBeUndefined();
   });
 
+  it("reports a class with no constructor but offers no patch for it", async () => {
+    // The construction has effects, but there is no declaration site: a
+    // comment above `class Loader` would be inert (AMB-E003). Reporting with
+    // no fix beats proposing a patch that changes nothing.
+    const { diagnostics } = await run("init", FIXTURE_ROOT);
+    const proposal = named(diagnostics, "Loader.constructor");
+    expect(proposal?.id).toBe("AMB-I001");
+    expect(proposal?.fixes).toEqual([]);
+    expect(proposal?.message).toContain("write an explicit constructor");
+  });
+
   it("marks its proposals as consistent with the contract", async () => {
     // Adding a declaration where there was none cannot contradict one, and
     // the set proposed is exactly what was observed.
     const { diagnostics } = await run("init", FIXTURE_ROOT);
-    expect(diagnostics.every((d) => d.fixes[0]?.consistentWithContract === true)).toBe(true);
+    expect(
+      diagnostics.flatMap((d) => d.fixes).every((fix) => fix.consistentWithContract === true),
+    ).toBe(true);
   });
 
   it("round-trips: applying every proposal leaves `ambit check` clean", async () => {
@@ -133,13 +146,15 @@ describe("ambit init (DESIGN.md §4.1)", () => {
       expect(after.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
       expect(after.exitCode).toBe(0);
 
-      // Every proposal actually landed, and the still-undeclared functions
-      // stayed undeclared.
+      // Every proposal that carried a patch is consumed. The ones that
+      // carried none (a class with no constructor) stay, which is the point:
+      // they name work only a person can do.
+      const { diagnostics: remainingProposals } = await run("init", dir);
+      expect(remainingProposals.filter((d) => d.fixes.length > 0)).toEqual([]);
+      expect(remainingProposals.length).toBeGreaterThan(0);
       const source = await fs.readFile(path.join(dir, "app.ts"), "utf8");
       expect(source).toContain("/** @effects fs_read */");
       expect(source).toContain("/** @effects network */");
-      const { diagnostics: remaining } = await run("init", dir);
-      expect(remaining).toEqual([]);
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
@@ -181,7 +196,9 @@ describe("ambit init (DESIGN.md §4.1)", () => {
 
       const after = await summaryLine(dir);
       expect(after.functionsExtracted).toBe(before.functionsExtracted);
-      expect(after.functionsDeclared).toBe(before.functionsDeclared + diagnostics.length);
+      expect(after.functionsDeclared).toBe(
+        before.functionsDeclared + diagnostics.filter((d) => d.fixes.length > 0).length,
+      );
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }

@@ -1,4 +1,11 @@
-import type { Diagnostic, DiagnosticEngine, FixEdit, SymbolId } from "../core/index.ts";
+import type {
+  Diagnostic,
+  DiagnosticEngine,
+  DiagnosticFix,
+  FixEdit,
+  KnownEffect,
+  SymbolId,
+} from "../core/index.ts";
 import { KNOWN_EFFECTS } from "../core/index.ts";
 import type { PropagatedFunction } from "./propagate.ts";
 
@@ -38,39 +45,68 @@ export function proposeContracts(
 
     const effects = KNOWN_EFFECTS.filter((effect) => propagated.observed.effects.has(effect));
     const tag = `@effects ${effects.length === 0 ? "pure" : effects.join(", ")}`;
+
+    // A class with no constructor written has no declaration site, so there is
+    // no patch to offer — a comment above the `class` is inert (AMB-E003).
+    // Still reported: the effects are real and the user needs to know they can
+    // be declared, by writing the constructor out (P4 — do not hide it).
+    if (summary.implicitConstructor) {
+      proposals.push(
+        proposal(
+          propagated,
+          effects,
+          `${displayName(summary.id)} runs [${effects.join(", ") || "no effects"}] but has no constructor to declare them on; write an explicit constructor to carry ${tag}`,
+          [],
+        ),
+      );
+      continue;
+    }
+
     const edit = contractEdit(propagated, tag);
     if (!edit) continue;
 
-    proposals.push({
-      id: "AMB-I001",
-      severity: "info",
-      category: "effects",
-      message: `${displayName(summary.id)} has no @effects; its observed effects are [${effects.join(", ") || "none"}]`,
-      location: summary.location,
-      contract: {
-        declared: [],
-        observed: effects,
-        via: [],
-      },
-      fixes: [
-        {
-          rank: 1,
-          kind: "narrow",
-          summary: `Declare ${tag} on ${displayName(summary.id)}`,
-          confidence: 1,
-          // Adding a declaration where there was none cannot contradict a
-          // contract that does not exist, and the set proposed is exactly
-          // what was observed — so this neither loosens nor tightens.
-          consistentWithContract: true,
-          edits: [edit],
-        },
-      ],
-      docs: "docs/diagnostics/README.md#amb-i001",
-      engine,
-    });
+    proposals.push(
+      proposal(
+        propagated,
+        effects,
+        `${displayName(summary.id)} has no @effects; its observed effects are [${effects.join(", ") || "none"}]`,
+        [
+          {
+            rank: 1,
+            kind: "narrow",
+            summary: `Declare ${tag} on ${displayName(summary.id)}`,
+            confidence: 1,
+            // Adding a declaration where there was none cannot contradict a
+            // contract that does not exist, and the set proposed is exactly
+            // what was observed — so this neither loosens nor tightens.
+            consistentWithContract: true,
+            edits: [edit],
+          },
+        ],
+      ),
+    );
   }
 
   return proposals;
+
+  function proposal(
+    propagated: PropagatedFunction,
+    effects: readonly KnownEffect[],
+    message: string,
+    fixes: readonly DiagnosticFix[],
+  ): Diagnostic {
+    return {
+      id: "AMB-I001",
+      severity: "info",
+      category: "effects",
+      message,
+      location: propagated.summary.location,
+      contract: { declared: [], observed: effects, via: [] },
+      fixes,
+      docs: "docs/diagnostics/README.md#amb-i001",
+      engine,
+    };
+  }
 }
 
 /**

@@ -262,19 +262,27 @@ describe("ambit check (CLI)", () => {
       .map((line) => JSON.parse(line))
       .filter((r) => !("kind" in r));
 
-    // A getter, an object-literal member with a non-identifier name, and an
-    // anonymous default export — one diagnostic each, none of them dropped.
-    // Exactly three: the fixture's declared function both carries its own
-    // contract and contains an inline callback, so a fourth would mean either
-    // a false positive on an extractable node or a JSDoc walk-up from the
-    // callback to the enclosing declaration.
+    // A getter, an object-literal member with a non-identifier name, an
+    // anonymous default export, and a contract written on a `class` — one
+    // diagnostic each, none of them dropped. Exactly four: the fixture's
+    // declared function both carries its own contract and contains an inline
+    // callback, so a fifth would mean either a false positive on an
+    // extractable node or a JSDoc walk-up from the callback to the enclosing
+    // declaration.
     const uncarried = diagnostics.filter((d) => d.id === "AMB-E003");
-    expect(uncarried).toHaveLength(3);
+    expect(uncarried).toHaveLength(4);
     for (const diagnostic of uncarried) {
       expect(diagnostic.severity).toBe("error");
       expect(diagnostic.docs).toBe("docs/diagnostics/README.md#amb-e003");
       expect(diagnostic.location.line).toBeGreaterThan(0);
     }
+    // A class's construction *is* analyzed — only the place the contract was
+    // written is wrong, and the message has to say where it belongs.
+    expect(
+      uncarried.some((d: { message: string }) =>
+        d.message.includes("a class declaration — the contract belongs on its constructor"),
+      ),
+    ).toBe(true);
   });
 
   it("every NDJSON diagnostic carries an engine identity", async () => {

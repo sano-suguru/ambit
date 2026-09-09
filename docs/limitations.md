@@ -155,7 +155,10 @@ same rule that applies to `arr.forEach(handler)`.
 
 A class's own JSDoc is never read as its implicit constructor's contract. A
 contract belongs on a declaration, and an implicit constructor has none;
-`/** @effects pure */ class C {}` documents the class.
+`/** @effects pure */ class C {}` documents the class. Writing a contract tag
+there is reported as `AMB-E003` rather than ignored, and `ambit init` reports
+such a class with no patch attached — the effects are real, but only writing
+an explicit constructor gives them somewhere to be declared.
 
 ## `@boundary` and the coverage numbers
 

@@ -88,6 +88,13 @@ object-literal member with no stable declaration path, an anonymous default
 export, a callback passed inline as an argument, or a function declared inside
 another function.
 
+One case is not a function-like node at all: a contract written on a `class`.
+The class's construction *is* analyzed (indexed as `Class.constructor`), but a
+class's own comment is never read as its implicit constructor's contract — a
+comment about the class is not a verified statement about constructing it. The
+message says the contract belongs on the constructor. This case is reported
+but not counted under "skipped", which counts function-like nodes.
+
 Example: `/** @effects fs_read */ get value() { … }`.
 
 Note this is narrower than it was: an object-literal member *can* carry a
@@ -217,6 +224,13 @@ declaration's existing JSDoc block when it has exactly one, otherwise as a new
 block above it — and is `consistentWithContract: true`: adding a declaration
 where there was none cannot contradict one, and the set proposed is exactly
 what was observed.
+
+A class that writes no constructor gets a proposal with **no** patch: its
+construction has real effects (property initializers, the base constructor),
+but there is no declaration site to attach a contract to, and a comment above
+the `class` would be inert (AMB-E003). The message says to write an explicit
+constructor. Reporting it with no fix beats either proposing a patch that
+changes nothing or staying silent about effects that are real.
 
 No proposal is made when the function's effects reached `unknown`. Declaring
 `@effects pure` for a function the analysis could not resolve would convert

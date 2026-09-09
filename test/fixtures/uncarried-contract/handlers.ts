@@ -32,3 +32,13 @@ export default function (): number {
 export function carriesItsOwn(values: readonly number[]): number {
   return values.map((v) => v)[0] ?? 1;
 }
+
+/**
+ * A contract on a `class` is inert: the class's construction is indexed, but a
+ * class's own comment is never read as its implicit constructor's contract.
+ * Reported rather than dropped.
+ * @effects network
+ */
+export class TaggedClass {
+  readonly ready = true;
+}

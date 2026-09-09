@@ -112,6 +112,8 @@ export interface FunctionSummary {
   readonly declarationStart: SourceLocation;
   /** The existing JSDoc block, when there is exactly one — a tag can be added to it. */
   readonly jsDocRange?: SourceLocation;
+  /** A class's construction with no constructor written: real, but with nowhere to hang a contract. */
+  readonly implicitConstructor?: true;
   readonly declared: DeclaredEffects;
   readonly capabilities: DeclaredCapabilities;
   readonly budget: DeclaredBudget;
