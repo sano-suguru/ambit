@@ -25,16 +25,18 @@ import { withAmbit } from "./index.ts";
  *
  * The three arguments are the decision §4.4 records, not a convenience:
  *
- * - `spec` sits in the same call as `handler`, so `ambit check` can compare
- *   what the runtime will establish with what the handler declares: the
- *   capability list against `@capabilities` (`AMB-E010`), and `spec.budget`
- *   against `@budget` (`AMB-E011`, with an omitted `onExceed` defaulted to
- *   `throw` on both sides). The two halves are judged independently — a spec
- *   may write one as a literal and build the other at runtime — and
- *   `AMB-W004` reports whichever half could not be compared. Explicit
- *   registration was chosen over generated contract data because the contract
- *   is then a value in the module — it survives a build that strips comments,
- *   and a bundler that renames everything.
+ * - `spec` sits in the same call as `handler`, so a literal one *is* that
+ *   handler's `@capabilities` and `@budget`: the tags need not repeat what the
+ *   registration already says. Where both are written, `ambit check` compares
+ *   them — the capability list against `@capabilities` (`AMB-E010`), and
+ *   `spec.budget` against `@budget` (`AMB-E011`, with an omitted `onExceed`
+ *   defaulted to `throw` on both sides) — and a disagreement is an error. The
+ *   two halves are judged independently: a spec may write one as a literal and
+ *   build the other at runtime, and `AMB-W004` reports whichever half could
+ *   neither declare nor be compared, where the handler's own JSDoc is then the
+ *   only declaration. Explicit registration was chosen over generated contract
+ *   data because the contract is then a value in the module — it survives a
+ *   build that strips comments, and a bundler that renames everything.
  * - `decode` keeps the framework out of `handler`. Hono's `Context` is in no
  *   stub table, so a `c.req.json()` inside a contract-bearing function would
  *   make that function's requirement partly `unknown` (`AMB-W003`). Isolated

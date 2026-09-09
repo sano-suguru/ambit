@@ -29,15 +29,26 @@ table-level permission for arbitrary SQL, so no `db:` capability is read out
 of a statement.
 
 A `withAmbit(spec, handler)`, or an adapter's `ambitHandler(spec, handler,
-decode)`, is compared with the handler's `@capabilities` when the spec's array
-is literal and the handler is declared in the same file (`AMB-E010`). Anything
-else — a list built at runtime, a handler from another module, a handler with
-no contract — is reported as `AMB-W004`. `spec.budget` is compared with the
-handler's `@budget` under the same conditions (`AMB-E011`), independently of
-the capability half. The comparison is on the source. What
-reaches the *running* handler is the spec, which is a value in the module and
-therefore survives a build and a bundler (DESIGN.md §4.4); the duplication
-itself is what remains open.
+decode)`, whose `capabilities` is a literal array and whose `handler` names a
+declaration in the same file *is* that handler's `@capabilities` (DESIGN.md
+§4.4). `spec.budget` is the handler's `@budget` under the same conditions,
+independently of the capability half. Writing the tag as well is still
+allowed and still checked: the two disagreeing is `AMB-E010` / `AMB-E011`,
+an error.
+
+Two cases fall outside that, and in both the JSDoc tag is still required:
+
+- **a spec Ambit cannot read** — a capability list built at runtime, a budget
+  that is not an object literal of literal limits;
+- **a handler from another module** — the registration names no declaration in
+  the file, so there is no summary to attach the declaration to. This is
+  DESIGN.md §12's 「契約とハンドラの対応付け」 (3), still open.
+
+Either is reported as `AMB-W004`, whose message says that the handler's own
+JSDoc is the only declaration there. Neither is silently treated as unknown:
+an entrypoint left with no capability set is `AMB-W002` as well. Ambit has no
+measurement of how often either case occurs in general code — in
+`test/fixtures/realistic-api` every registration names a same-file handler.
 
 Runtime enforcement covers `globalThis.fetch`, `node:fs`/`node:fs/promises`,
 `node:child_process`, `pg`, and `@budget timeMs`. `costUsd` and `llmCalls` are

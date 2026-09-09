@@ -246,11 +246,12 @@ hook rather than to the checker.
 **Severity:** error
 **Category:** capabilities
 
-DESIGN.md §4.4 chose explicit registration, so the capability set is written
-twice — as `@capabilities` on the handler, and again in the `withAmbit(spec,
-handler)` or `ambitHandler(spec, handler, decode)` (the `ambit/runtime/hono`
-adapter) beside it. This reports the two disagreeing, as sets of the text each
-one wrote. The message names the call the source actually wrote. Order does not matter; anything else does, including a glob on one
+DESIGN.md §4.4 chose explicit registration, so the capability set that reaches
+the runtime is the one in the `withAmbit(spec, handler)` or `ambitHandler(spec,
+handler, decode)` (the `ambit/runtime/hono` adapter) beside the handler. A
+literal one *is* the handler's `@capabilities`, so the tag need not repeat it.
+Writing both is still allowed, and this reports the two disagreeing, as sets of
+the text each one wrote. The message names the call the source actually wrote. Order does not matter; anything else does, including a glob on one
 side only, since `db:read:*` and `db:read:users` are different grants.
 
 Reported at the call. Neither side is privileged: whichever half an
@@ -263,8 +264,12 @@ Compared only when all of this holds — otherwise `AMB-W004`:
   literal array of string literals (a missing `capabilities` key counts as an
   empty grant, which can still disagree);
 - the handler is an identifier naming a declaration in the same file that the
-  analysis extracted;
-- that declaration carries `@entrypoint` or `@capabilities`.
+  analysis extracted.
+
+A handler that declares neither `@entrypoint` nor `@capabilities` still has a
+declaration when the spec beside it is literal — that spec — so there is
+something to compare and the two agree by construction. It is `AMB-W004` only
+when the spec is not literal, where nothing was declared on either side.
 
 A handler whose `@capabilities` failed to parse is skipped here: `AMB-E004`
 already reports that tag, and comparing against a declaration Ambit rejected
@@ -284,10 +289,9 @@ the decision being reported (§5.3).
 **Severity:** error
 **Category:** budget
 
-The budget half of DESIGN.md §4.4's duplication: the limits are written twice,
-as `@budget` on the handler and again as `spec.budget` in the `withAmbit(spec,
-handler)` or `ambitHandler(spec, handler, decode)` beside it. `spec.budget` is
-what the runtime applies; `@budget` is what the source declares. This reports
+The budget half of the same rule: `spec.budget` is what the runtime applies,
+and a literal one is also what the source declares, so `@budget` on the handler
+is optional beside it. Where both are written, this reports
 the two disagreeing — a different `timeMs`, a different `onExceed`, or a limit
 present on one side only.
 
@@ -329,9 +333,16 @@ decision being reported.
 A `withAmbit(spec, handler)` or an adapter's `ambitHandler(spec, handler,
 decode)` was found, but one of `AMB-E010`'s or `AMB-E011`'s conditions does not
 hold: the capability list is built at runtime, the budget is not an object
-literal of literal limits, the handler is not a declaration in the same file,
-or the handler declares neither `@entrypoint` nor `@capabilities`. The message
-names which.
+literal of literal limits, or the handler is not a declaration in the same
+file. The message names which.
+
+A spec Ambit cannot read declares nothing. So this warning is also the place
+where the single-source rule stops: everywhere else a literal spec supplies the
+handler's `@capabilities` / `@budget`, and here it does not, which leaves the
+handler's own JSDoc as the only declaration there is. Dropping the tag beside
+one of these registrations does not make the contract implicit — it makes it
+missing, and the entrypoint is then reported as capability-less (`AMB-W002`)
+on top of this warning.
 
 The two halves are reported independently, so one registration can produce a
 compared capability set and an uncompared budget, or the reverse. Collapsing

@@ -710,12 +710,18 @@ const HANDLER_NOT_IN_THIS_FILE =
   "its handler is not a declaration in this file, so there is no JSDoc contract beside it to compare";
 
 /**
- * DESIGN.md §4.4: the contract is written twice — once as `@capabilities` and
- * `@budget` on the handler, once in the `withAmbit(spec, handler)` or
- * `ambitHandler(spec, handler, decode)` beside it. Explicit registration is
- * what §4.4 chose, so the duplication stays; nothing checked that the two
- * agree, and an agent adding `db:write:users` to one of them — or widening
- * `timeMs` in one of them — expanded authority silently.
+ * DESIGN.md §4.4: a literal spec on a `withAmbit(spec, handler)` or
+ * `ambitHandler(spec, handler, decode)` naming a handler in the same file *is*
+ * that handler's `@capabilities` / `@budget` (`summarize.ts`'s
+ * `specContracts`). Writing the tag too stays legal, and this is what stops it
+ * from being free: an agent adding `db:write:users` to one of them — or
+ * widening `timeMs` in one of them — expanded authority silently.
+ *
+ * Where the spec is *not* the declaration — a list built at runtime, a budget
+ * that is not an object literal, a handler from another module — there is
+ * nothing to compare and nothing was declared by the spec either. That is
+ * `AMB-W004`, and its message says so: the handler's own JSDoc is then the
+ * only declaration there is.
  *
  * This compares the two **as source**, half by half: the capability set
  * (`AMB-E010`) and the budget (`AMB-E011`) are fixed by the source
@@ -875,7 +881,7 @@ function uncomparedWrapper(
     id: "AMB-W004",
     severity: "warning",
     category: "capabilities",
-    message: `${wrapper.wrapper} here was not compared with a declared contract: ${reason}. The check is on the source only (DESIGN.md §4.4)`,
+    message: `${wrapper.wrapper} here was not compared with a declared contract: ${reason}. A spec Ambit cannot read declares nothing, so the handler's own @capabilities / @budget is the only declaration here. The check is on the source only (DESIGN.md §4.4)`,
     location: wrapper.location,
     fixes: [],
     docs: "docs/diagnostics/README.md#amb-w004",
