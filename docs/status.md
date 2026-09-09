@@ -120,7 +120,8 @@ a realistic backend rather than a padded one. The rate went **up**, from 5.3%
 to 21.6%, and the reason is the point of recording it: `mysql2` hands out its
 pool through the `createPool` factory, and a factory result has no
 module-qualified name for a stub table to key on (see
-`docs/limitations.md`, "Call resolution"). The fixture uses the factory
+`docs/limitations.md`, "The database and LLM client table": a client
+"returned by a factory is not matched and reports `unknown`"). The fixture uses the factory
 because that is how the package is actually used.
 
 Five entries were added to the pure-builtin allowlist in the same
@@ -173,6 +174,11 @@ DESIGN.md §6.2's resident/incremental path is not implemented, so "初回検査
 and "変更後の再検査" are the same operation. That is the honest reading of
 these numbers, and the reason no threshold has been set: there is nothing yet
 to compare against.
+
+Every row is labelled with the tree it was measured on, and none has been
+re-measured since the runtime hooks were added: `src/` is now 26 files and 193
+functions, so these are timings for a smaller tree than the one in the
+repository today. No new number is claimed for the current tree.
 
 The first two rows are the original measurement and have **not** been
 superseded; the 2026-09-09 row is a second five-run measurement on the same
