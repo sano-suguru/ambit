@@ -14,7 +14,7 @@ row.
 ## Baseline commands
 
 ```sh
-pnpm test                     # 227 tests, 17 files — pass
+pnpm test                     # 242 tests, 18 files — pass
 pnpm exec tsc --noEmit        # pass
 ./node_modules/.bin/biome ci .  # pass
 node src/cli/main.ts check src --coverage   # exit 0
@@ -31,28 +31,45 @@ runs `pnpm exec biome ci .` in GitHub Actions, where no such wrapper exists.
 
 | Figure | Value |
 |---|---|
-| files analyzed | 19 |
-| functions extracted | 163 |
-| functions with a declared `@effects` | 4 |
-| `unknown` rate | 68.7% (112/163) |
-| `boundary` rate | 0.0% (0/163) |
-| call sites | 851 — resolved 243, stub 3, known-pure 244, unresolved 361 |
-| unresolved by reason | `builtin-method` 131, `external-module` 221, `unresolved-symbol` 8, `callback-parameter` 1 |
-| skipped function-like nodes | 74 (`callback-argument` 66, `nested-function` 8) |
-| exit code | 0 |
+| Figure | Before local mutation | After |
+|---|---|---|
+| files analyzed | 19 | 21 |
+| functions extracted | 163 | 176 |
+| functions with a declared `@effects` | 4 | 4 |
+| `unknown` rate | 68.7% (112/163) | **63.1% (111/176)** |
+| `boundary` rate | 0.0% (0/163) | 0.0% (0/176) |
+| call sites | 851 — resolved 243, stub 3, known-pure 244, unresolved 361 | 924 — resolved 268, stub 3, known-pure 244, mutation 81, unresolved 328 |
+| unresolved by reason | `builtin-method` 131, `external-module` 221, `unresolved-symbol` 8, `callback-parameter` 1 | `builtin-method` 62, `external-module` 257, `unresolved-symbol` 8, `callback-parameter` 1 |
+| skipped function-like nodes | 74 (`callback-argument` 66, `nested-function` 8) | 75 (`callback-argument` 67, `nested-function` 8) |
+| exit code | 0 | 0 |
 
-The 69% unknown rate is dominated by `external-module` (221), which is almost
+The "after" column is DESIGN.md §4.2's local-mutation rule (「ローカル変異と
+`pure`」) in place. `builtin-method` unresolved dropped 131 → 62: 81 sites
+became mutation sites, and `Array.push`, `Map.set` and `Set.add` left
+`top-unresolved-names` entirely — every one of them is now either a local
+mutation with no effect or a `state_write`. The two columns' denominators
+differ because the change added two source files
+(`src/stubs/mutating-builtins.ts`, and `src/core/summary.ts` gained its first
+function) plus the locality helpers; `external-module` grew 221 → 257 for the
+same reason, since those helpers call more of the `typescript` API. The rate
+is a per-function ratio, so the added, mostly-unknown connection-layer helpers
+work against it: the drop from 68.7% is what remains after paying for them.
+
+Nothing in `src/` declares `state_write`, and nothing needed to: no declared
+function in Ambit's own source mutates a value reachable from outside it, so
+the change added no AMB-E001.
+
+The remaining 63% unknown rate is dominated by `external-module` (257), which is almost
 entirely calls into the `typescript` compiler API from the connection layer —
 the one file that is meant to be replaceable. It is a real number, not a
 target that has been met: DESIGN.md §10's goal is 30% for an *adopting team*
 after three months, which no one has done.
 
-It went **up** from 63.2% (86/136), measured before the client stubs and the
-capability work. That is not an analysis regression. The denominator grew by 27
-functions (two new stub modules, plus the connection layer's new helpers), and
-those helpers use `Array.push` and `Map.set`, which the pure-builtin allowlist
-deliberately excludes: DESIGN.md §12 leaves local mutation outside the effect
-model, and this work did not decide it.
+It had gone **up** from 63.2% (86/136) before local mutation was decided —
+measured before the client stubs and the capability work — because the
+denominator grew by 27 functions whose helpers use `Array.push` and `Map.set`,
+which the pure-builtin allowlist deliberately excludes. That is what §4.2's
+decision addressed; the figure is now at 63.1%, marginally below the 63.2% it started from.
 
 `String.slice`, which the same measurement surfaced at 8 occurrences, **was**
 added to the allowlist afterwards — a missing non-mutating entry, and the exact
@@ -78,18 +95,21 @@ months. It is the fixture that makes the number measurable at all.
 | functions extracted | 19 | 19 |
 | `unknown` rate | 47.4% (9/19) | **10.5% (2/19)** |
 | `boundary` rate | 0.0% | 0.0% |
-| call sites | 31 — resolved 12, stub 1, pure 9, unresolved 9 | 31 — resolved 12, stub 8, pure 9, unresolved 2 |
-| unresolved by reason | `builtin-method` 1, `unresolved-symbol` 8 | `builtin-method` 1, `ambient-declaration` 1 |
-| top unresolved names | `Map.set` 1 | `Map.set` 1 |
+| call sites | 31 — resolved 12, stub 1, pure 9, unresolved 9 | 31 — resolved 12, stub 8, pure 9, mutation 1, unresolved 1 |
+| unresolved by reason | `builtin-method` 1, `unresolved-symbol` 8 | `ambient-declaration` 1 |
+| top unresolved names | `Map.set` 1 | (none) |
 | exit code | 0 | 0 |
 
-Both remaining `unknown`s are accounted for:
+The "After" column now also carries DESIGN.md §4.2's local-mutation rule. It
+moved the fixture's `unknown` rate from 10.5% (2/19) to **5.3% (1/19)**:
+`putRate` in `src/lib/cache.ts` writes into a module-scope `Map`, which is
+now inferred as `state_write` instead of leaving the function `unknown`. It
+declares no `@effects` at all, so nothing is diagnosed — an undeclared
+function is a coverage concern, not a violation (§4.3) — but its effects are
+now known rather than unknown.
 
-- `Map.set` (`builtin-method`) — an in-memory cache writing to a `Map`. The
-  pure-builtin allowlist deliberately excludes mutating methods, and how far
-  `pure` extends to local mutation is an open design question (DESIGN.md §12,
-  「pure の検証範囲」). **This goal did not decide it**, and the allowlist was
-  not widened to reach 30%.
+The one remaining `unknown` is accounted for:
+
 - one `ambient-declaration` — `(await fetch(url)).json()`. The method is
   declared on a type from a `.d.ts`, and the pure-builtin allowlist covers only
   the compiler's own lib, so the call cannot be named.
@@ -161,7 +181,7 @@ machine, and §3.5's performance gate has not run either way.
 | Acceptance | conformance tests for the planned hook targets; contract-to-handler mapping; 50 bundled stub packages |
 | Implemented | `@capabilities` narrowing (static, crosses undeclared functions, target globs), the static half of §4.4's 二重強制 for literal HTTP targets (`AMB-E009`), source-level `withAmbit` ↔ `@entrypoint` agreement (`AMB-E010`/`AMB-W004`), `@entrypoint` warning, `@boundary` with mandatory reason and separate coverage accounting, `@budget` parsing/validation, runtime `withAmbit` + `globalThis.fetch` blocking + `timeMs` enforcement + `runtime.unscoped`, `db_read`/`db_write`/`llm` stubs for `pg`/`mysql2`/Prisma/OpenAI/Anthropic |
 | Evidence | `test/contracts.test.ts` (26), `test/runtime.test.ts` (mock-level, 13), `test/e2e.runtime.test.ts` (real socket, through the installed package, 4), `test/e2e.realistic.test.ts` (15 — all six agent-accident scenarios), `test/stubs.data-clients.test.ts`, `test/stubs.http-capabilities.test.ts` |
-| Outstanding | **Only `fetch` is hooked at runtime.** `node:fs`, `node:http`/`https`/`net`, `child_process`, `pg`/`mysql2`/Prisma/Drizzle/MongoDB, OpenAI/Anthropic/Vercel AI — none. **`costUsd` and `llmCalls` are not enforced**; nothing increments them. **No framework adapters** (Express/Hono/Next.js/BullMQ). **Contract-to-handler mapping is source-level only** — a literal capability array is compared with the JSDoc of a handler declared in the same file; a list built at runtime, a handler from another module, or a build/bundle that moves either half is reported as uncompared (`AMB-W004`), and §12's 「契約とハンドラの対応付け」 stays open. **Only HTTP targets are read from source** — no `db:` capability is derived from SQL (§4.4's caveat). **No `@budget` loop-pattern warnings.** Bundled stubs: 52 call entries across 9 namespaces (`fetch`, `globalThis`, `undici`, `node:http`, `node:https`, `node:net`, `node:fs`, `node:fs/promises`, `node:child_process`), 43 constructor entries, 29 pure-builtin methods, 35 database/LLM client rules across 5 packages (`pg`, `mysql2`, `@prisma/client`, `openai`, `@anthropic-ai/sdk`), and 7 HTTP capability rules — **not** 50 packages. All eight effects now have at least one bundled source. |
+| Outstanding | **Only `fetch` is hooked at runtime.** `node:fs`, `node:http`/`https`/`net`, `child_process`, `pg`/`mysql2`/Prisma/Drizzle/MongoDB, OpenAI/Anthropic/Vercel AI — none. **`costUsd` and `llmCalls` are not enforced**; nothing increments them. **No framework adapters** (Express/Hono/Next.js/BullMQ). **Contract-to-handler mapping is source-level only** — a literal capability array is compared with the JSDoc of a handler declared in the same file; a list built at runtime, a handler from another module, or a build/bundle that moves either half is reported as uncompared (`AMB-W004`), and §12's 「契約とハンドラの対応付け」 stays open. **Only HTTP targets are read from source** — no `db:` capability is derived from SQL (§4.4's caveat). **No `@budget` loop-pattern warnings.** Bundled stubs: 52 call entries across 9 namespaces (`fetch`, `globalThis`, `undici`, `node:http`, `node:https`, `node:net`, `node:fs`, `node:fs/promises`, `node:child_process`), 43 constructor entries, 29 pure-builtin methods, 19 in-place-mutation methods, 35 database/LLM client rules across 5 packages (`pg`, `mysql2`, `@prisma/client`, `openai`, `@anthropic-ai/sdk`), and 7 HTTP capability rules — **not** 50 packages. All nine effects now have at least one bundled source. |
 
 ### M3 — concrete fix patches, agent protocol
 

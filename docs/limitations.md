@@ -112,7 +112,19 @@ module-specifier one.
 It is deliberately narrow:
 
 - Anything that mutates is excluded — `Array.push`, `Array.sort`, `Map.set`,
-  `Set.add`.
+  `Set.add`. Those live in a separate table, `src/stubs/mutating-builtins.ts`,
+  because a name alone does not decide their effect: mutating a value the
+  function itself allocated carries none, and mutating anything reachable from
+  outside is `state_write` (DESIGN.md §4.2, 「ローカル変異と `pure`」). What
+  counts as "allocated here" is deliberately narrow — a `const` bound to an
+  array literal, object literal, or `new` expression inside the function — and
+  every other receiver, including a `let` binding nothing reassigns, is
+  over-approximated to `state_write`. A `this` is local in two cases only: a
+  constructor of a class with no `extends` clause (with `erasableSyntaxOnly`
+  there are no parameter properties, so `this.x = x` is the only way to write
+  a field), and a function that is the direct operand of `new`. There is no
+  alias analysis: a fresh value handed to something else and mutated
+  afterwards still reads as local.
 - A method that can take a callback (`map`, `filter`, `reduce`, …) is trusted
   only when that callback is written inline. `arr.map(x => ...)` is walked and
   its effects attributed to the enclosing function; `arr.map(namedFn)` passes
@@ -304,17 +316,20 @@ warning: extractProject declares fs_read but calls something that could not be r
 warning: loadProjectConfig declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:124)
 warning: collectTsFiles declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:171)
 warning: main declares fs_read but calls something that could not be resolved (cli/main.ts:31)
-files=19 functions=163 declared=4
-unknown-rate=68.7% (112/163 functions) boundary-rate=0.0% (0/163 functions)
+files=21 functions=176 declared=4
+unknown-rate=63.1% (111/176 functions) boundary-rate=0.0% (0/176 functions)
 entrypoints=0 (without-capabilities=0)
-skipped=74 (callback-argument=66, nested-function=8)
-call-sites: total=851 resolved=243 stub=3 pure=244 unresolved=361
-unresolved-by-reason: builtin-method=131, external-module=221, unresolved-symbol=8, callback-parameter=1
-top-unresolved-names: Array.push=50, typescript.isIdentifier=17, Map.set=13, ...
+skipped=75 (callback-argument=67, nested-function=8)
+call-sites: total=924 resolved=268 stub=3 pure=244 mutation=81 unresolved=328
+unresolved-by-reason: builtin-method=62, external-module=257, unresolved-symbol=8, callback-parameter=1
+top-unresolved-names: typescript.isIdentifier=19, typescript.isVariableDeclaration=12, ...
 ```
 
 - `unknown-rate` — the share of extracted functions whose effects could not be
   fully determined.
+- `mutation` — in-place mutation sites, counted apart from `pure`: a local one
+  carries no effect but is not the same evidence as a call proven pure, and an
+  escaping one is a `state_write` no stub table produced.
 - `skipped` — function-like nodes that cannot carry a contract, by kind (see
   above).
 - `unresolved-by-reason` and `top-unresolved-names` are the signal for what to

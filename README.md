@@ -293,10 +293,10 @@ Representative cases where analysis is narrower than the model suggests:
 
 - **Small bundled effect tables.** 52 call entries (`fetch`, `undici`'s
   `fetch`, and Node.js builtins), 43 constructor entries, a 29-entry
-  pure-builtin allowlist, and 35 database/LLM client rules (`pg`, `mysql2`,
-  `@prisma/client`, `openai`, `@anthropic-ai/sdk`) — covering all eight
-  effects. Everything outside those five packages and the Node.js builtins
-  still reports `unknown`.
+  pure-builtin allowlist, a 19-entry in-place-mutation table, and 35
+  database/LLM client rules (`pg`, `mysql2`, `@prisma/client`, `openai`,
+  `@anthropic-ai/sdk`) — covering all nine effects. Everything outside those
+  five packages and the Node.js builtins still reports `unknown`.
 - **Client calls are matched through the value, not the type.** A method on a
   database or LLM client is recognized when the receiver is a `const` built
   from an imported class (`const pool = new Pool(...)` from `"pg"` gives
