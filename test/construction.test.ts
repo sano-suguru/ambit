@@ -5,6 +5,7 @@ import { diagnose } from "../src/checker/diagnose.ts";
 import { propagate } from "../src/checker/propagate.ts";
 import { summarizeExtractedFiles } from "../src/checker/summarize.ts";
 import type { Diagnostic } from "../src/core/index.ts";
+import { observedEffects } from "./support/summary.ts";
 
 const FIXTURE_ROOT = path.join(import.meta.dirname, "fixtures", "construction");
 const ENGINE = { name: "test", version: "0" };
@@ -35,7 +36,7 @@ describe("construction (new X / super) is part of the call graph", () => {
     const { diagnostics } = await check(FIXTURE_ROOT);
     const [diagnostic] = forFunction(diagnostics, "constructsDirectly");
     expect(diagnostic?.id).toBe("AMB-E001");
-    expect(diagnostic?.contract?.observed).toContain("network");
+    expect(observedEffects(diagnostic)).toContain("network");
     expect(diagnostic?.message).toContain("HttpClient.constructor");
   });
 
@@ -89,7 +90,7 @@ describe("a class property holding a function is a method, not construction work
     expect([...state.keys()]).toContain("sample.ts#Controller.handle");
     const [diagnostic] = forFunction(diagnostics, "callsArrowMethod");
     expect(diagnostic?.id).toBe("AMB-E001");
-    expect(diagnostic?.contract?.observed).toContain("network");
+    expect(observedEffects(diagnostic)).toContain("network");
   });
 
   it("still treats a non-function property initializer as construction work", async () => {
@@ -106,7 +107,7 @@ describe("constructor stub table", () => {
 
   it("treats new Date() as env but new Date(y, m, d) as effect-free", async () => {
     const { diagnostics } = await check(FIXTURE_ROOT);
-    expect(forFunction(diagnostics, "readsClock")[0]?.contract?.observed).toEqual(["env"]);
+    expect(observedEffects(forFunction(diagnostics, "readsClock")[0])).toEqual(["env"]);
     expect(forFunction(diagnostics, "fixedDate")).toEqual([]);
   });
 

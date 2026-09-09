@@ -35,6 +35,41 @@ async function runCli(
   }
 }
 
+describe("ambit check --strict", () => {
+  it("promotes the unknown warning to an error and exits 1", async () => {
+    // DESIGN.md §4.2 rule 3: 「Ambit の `strict: true` でエラーに昇格できる」.
+    const plain = await runCli(["check", WARNINGS_ONLY_FIXTURES]);
+    expect(plain.exitCode).toBe(0);
+    expect(plain.stdout).toContain("warning:");
+
+    const strict = await runCli(["check", WARNINGS_ONLY_FIXTURES, "--strict"]);
+    expect(strict.exitCode).toBe(1);
+    expect(strict.stdout).toContain("error:");
+    expect(strict.stdout).not.toContain("warning:");
+  });
+
+  it("keeps the same diagnostic id when promoting severity", async () => {
+    const { stdout } = await runCli([
+      "check",
+      WARNINGS_ONLY_FIXTURES,
+      "--format",
+      "json",
+      "--strict",
+    ]);
+    const diagnostics = stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((record) => record.kind === undefined);
+    expect(diagnostics.length).toBeGreaterThan(0);
+    for (const diagnostic of diagnostics) {
+      expect(diagnostic.id).toBe("AMB-W001");
+      expect(diagnostic.severity).toBe("error");
+    }
+  });
+});
+
 describe("ambit check (CLI)", () => {
   it("exits 1 and emits one NDJSON line per diagnostic when errors are found", async () => {
     const { stdout, exitCode } = await runCli(["check", PROPAGATION_FIXTURES, "--format", "json"]);

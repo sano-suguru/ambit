@@ -1,0 +1,214 @@
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { legacyTsBackend } from "../src/checker/backend/legacy-ts.ts";
+import { computeCoverage } from "../src/checker/coverage.ts";
+import { diagnose } from "../src/checker/diagnose.ts";
+import { propagate } from "../src/checker/propagate.ts";
+import { summarizeExtractedFiles } from "../src/checker/summarize.ts";
+import type { Diagnostic } from "../src/core/index.ts";
+import {
+  formatBudget,
+  isCapabilitiesContract,
+  parseBudgetTag,
+  parseCapabilitiesTag,
+  parseCapability,
+} from "../src/core/index.ts";
+
+const FIXTURE_ROOT = path.join(import.meta.dirname, "fixtures", "contracts");
+const ENGINE = { name: "test", version: "0" };
+
+async function analyze(root: string) {
+  const project = await legacyTsBackend.extractProject(root);
+  const summaries = summarizeExtractedFiles(project.files);
+  const state = propagate(summaries);
+  return {
+    project,
+    summaries,
+    state,
+    diagnostics: diagnose(state, ENGINE),
+    coverage: computeCoverage({
+      filesAnalyzed: project.files.length,
+      skippedFunctions: project.skippedFunctions,
+      summaries,
+      state,
+    }),
+  };
+}
+
+function forFunction(diagnostics: readonly Diagnostic[], name: string): readonly Diagnostic[] {
+  return diagnostics.filter((d) => d.message.startsWith(`${name} `));
+}
+
+describe("capability parsing (DESIGN.md §4.4)", () => {
+  it("parses <resource>:<action>:<target>", () => {
+    expect(parseCapability("db:read:users")).toEqual({
+      resource: "db",
+      action: "read",
+      target: "users",
+    });
+  });
+
+  it("keeps a colon inside the target", () => {
+    expect(parseCapability("http:get:localhost:8080")?.target).toBe("localhost:8080");
+  });
+
+  it("rejects a token that is not three non-empty segments", () => {
+    expect(parseCapability("db:read")).toBeUndefined();
+    expect(parseCapability("db::users")).toBeUndefined();
+    expect(parseCapability(":read:users")).toBeUndefined();
+    expect(parseCapability("db:read:")).toBeUndefined();
+  });
+
+  it("rejects a glob outside the target segment", () => {
+    // A `*` in resource or action reads as a restriction while meaning the
+    // opposite; §4.4 makes only the target globbable.
+    expect(parseCapability("*:read:users")).toBeUndefined();
+    expect(parseCapability("db:*:users")).toBeUndefined();
+    expect(parseCapability("db:read:*")).toBeDefined();
+  });
+
+  it("rejects the whole list when one token is malformed", () => {
+    expect(parseCapabilitiesTag("db:read:users, broken")).toBeUndefined();
+  });
+});
+
+describe("budget parsing (DESIGN.md §4.5)", () => {
+  it("parses limits and defaults onExceed to throw", () => {
+    expect(parseBudgetTag("timeMs=500 costUsd=0.01 llmCalls=2")).toEqual({
+      timeMs: 500,
+      costUsd: 0.01,
+      llmCalls: 2,
+      onExceed: "throw",
+    });
+  });
+
+  it("round-trips through formatBudget", () => {
+    const budget = parseBudgetTag("timeMs=500 onExceed=abort");
+    expect(budget && formatBudget(budget)).toBe("timeMs=500 onExceed=abort");
+  });
+
+  it("rejects malformed budgets rather than applying them in part", () => {
+    for (const text of [
+      "timeMs=notANumber",
+      "timeMs=-1",
+      "llmCalls=1.5",
+      "onExceed=explode timeMs=1",
+      "unknownKey=1",
+      "timeMs=1 timeMs=2",
+      "onExceed=warn",
+      "",
+    ]) {
+      expect(parseBudgetTag(text), text).toBeUndefined();
+    }
+  });
+});
+
+describe("@capabilities narrowing (DESIGN.md §4.4)", () => {
+  it("reports a callee requiring a capability the caller does not grant", async () => {
+    const { diagnostics } = await analyze(FIXTURE_ROOT);
+    const [diagnostic] = forFunction(diagnostics, "readsThenWrites");
+    expect(diagnostic?.id).toBe("AMB-E005");
+    expect(diagnostic?.severity).toBe("error");
+    expect(diagnostic?.category).toBe("capabilities");
+    const contract = diagnostic?.contract;
+    expect(contract && isCapabilitiesContract(contract)).toBe(true);
+    if (contract && isCapabilitiesContract(contract)) {
+      expect(contract.declared).toEqual(["db:read:users"]);
+      expect(contract.excess).toEqual(["db:write:users"]);
+      expect(contract.via.map((v) => v.symbol)).toEqual(["sample.ts#writeUser"]);
+    }
+  });
+
+  it("accepts a target glob that covers the callee's concrete target", async () => {
+    const { diagnostics } = await analyze(FIXTURE_ROOT);
+    expect(forFunction(diagnostics, "readsUnderGlob")).toEqual([]);
+  });
+
+  it("checks through an undeclared middle function", async () => {
+    // A(grants X) → B(undeclared) → C(declares Y): Y must still be checked
+    // against X, or an undeclared hop would launder any escalation.
+    const { diagnostics } = await analyze(FIXTURE_ROOT);
+    const [diagnostic] = forFunction(diagnostics, "callsThroughMiddle");
+    expect(diagnostic?.id).toBe("AMB-E005");
+    expect(diagnostic?.message).toContain("db:write:users");
+  });
+
+  it("rejects a malformed @capabilities tag instead of honouring part of it", async () => {
+    const { diagnostics, summaries } = await analyze(FIXTURE_ROOT);
+    expect(forFunction(diagnostics, "malformedCapability")[0]?.id).toBe("AMB-E004");
+    expect(forFunction(diagnostics, "globInResourceSegment")[0]?.id).toBe("AMB-E004");
+    // …and the function is treated as undeclared, not as granting something.
+    const summary = summaries.find((s) => s.id === "sample.ts#malformedCapability");
+    expect(summary?.capabilities.kind).toBe("invalid");
+  });
+});
+
+describe("@entrypoint (DESIGN.md §4.4)", () => {
+  it("warns when an entrypoint declares no capabilities", async () => {
+    const { diagnostics } = await analyze(FIXTURE_ROOT);
+    const [diagnostic] = forFunction(diagnostics, "entrypointWithoutCapabilities");
+    expect(diagnostic?.id).toBe("AMB-W002");
+    expect(diagnostic?.severity).toBe("warning");
+  });
+
+  it("stays quiet when the entrypoint declares both", async () => {
+    const { diagnostics } = await analyze(FIXTURE_ROOT);
+    expect(forFunction(diagnostics, "declaredEntrypoint")).toEqual([]);
+  });
+
+  it("counts entrypoints and uncovered entrypoints in coverage", async () => {
+    const { coverage } = await analyze(FIXTURE_ROOT);
+    expect(coverage.functionsEntrypoint).toBe(2);
+    expect(coverage.entrypointsWithoutCapabilities).toBe(1);
+  });
+});
+
+describe("@boundary (DESIGN.md §4.6)", () => {
+  it("takes the declared contract instead of analyzing the body", async () => {
+    const { state, diagnostics } = await analyze(FIXTURE_ROOT);
+    // The body performs `fetch`, and `understatedBoundary` declares `pure`.
+    // §4.6 says the body is not checked — that is what the tag buys and what
+    // it costs. It must not produce AMB-E001.
+    expect(forFunction(diagnostics, "understatedBoundary")).toEqual([]);
+    const understated = state.get("sample.ts#understatedBoundary" as never);
+    expect(understated?.observed.effects.size).toBe(0);
+  });
+
+  it("propagates the declared contract, not the body, to callers", async () => {
+    const { diagnostics } = await analyze(FIXTURE_ROOT);
+    expect(forFunction(diagnostics, "callsBoundary")).toEqual([]);
+  });
+
+  it("rejects a @boundary with no reason", async () => {
+    const { diagnostics } = await analyze(FIXTURE_ROOT);
+    expect(forFunction(diagnostics, "boundaryWithoutReason")[0]?.id).toBe("AMB-E006");
+  });
+
+  it("rejects a @boundary with nothing declared in the body's place", async () => {
+    const { diagnostics } = await analyze(FIXTURE_ROOT);
+    expect(forFunction(diagnostics, "boundaryWithoutEffects")[0]?.id).toBe("AMB-E007");
+  });
+
+  it("counts boundaries apart from analysis successes", async () => {
+    // §4.3: 「境界への移行は解析成功と区別して集計する」.
+    const { coverage } = await analyze(FIXTURE_ROOT);
+    expect(coverage.functionsBoundary).toBe(3);
+  });
+});
+
+describe("@budget (DESIGN.md §4.5)", () => {
+  it("rejects a malformed budget", async () => {
+    const { diagnostics } = await analyze(FIXTURE_ROOT);
+    expect(forFunction(diagnostics, "malformedBudget")[0]?.id).toBe("AMB-E008");
+    expect(forFunction(diagnostics, "malformedOnExceed")[0]?.id).toBe("AMB-E008");
+  });
+
+  it("carries a well-formed budget on the summary", async () => {
+    const { summaries } = await analyze(FIXTURE_ROOT);
+    const entrypoint = summaries.find((s) => s.id === "sample.ts#declaredEntrypoint");
+    expect(entrypoint?.budget).toEqual({
+      kind: "declared",
+      budget: { timeMs: 500, costUsd: 0.01, llmCalls: 2, onExceed: "warn" },
+    });
+  });
+});

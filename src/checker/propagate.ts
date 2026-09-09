@@ -1,5 +1,21 @@
-import type { EffectSet, FunctionSummary, KnownEffect, SymbolId } from "../core/index.ts";
-import { effectSetOf, effectSetsEqual, unionEffectSets, unknownEffectSet } from "../core/index.ts";
+import type {
+  CapabilitySet,
+  EffectSet,
+  FunctionSummary,
+  KnownEffect,
+  SymbolId,
+} from "../core/index.ts";
+import {
+  capabilitySetsEqual,
+  effectSetOf,
+  effectSetsEqual,
+  emptyCapabilitySet,
+  formatCapability,
+  unionCapabilitySets,
+  unionEffectSets,
+  unknownCapabilitySet,
+  unknownEffectSet,
+} from "../core/index.ts";
 
 /** One function's propagated (transitive) effects, plus provenance for diagnostics. */
 export interface PropagatedFunction {
@@ -13,6 +29,23 @@ export interface PropagatedFunction {
   readonly effectWitness: ReadonlyMap<KnownEffect, SymbolId>;
   /** The immediate callee `unknown` was inherited through, if not direct. */
   readonly unknownWitness?: SymbolId;
+  /**
+   * The capabilities this function's body needs (DESIGN.md §4.4). A second
+   * lattice over the same call graph, with the same trust rule as effects: a
+   * callee that declares `@capabilities` contributes what it declared, and an
+   * undeclared one contributes what its own body was inferred to need — so a
+   * grant checks through an undeclared middle function.
+   *
+   * Nothing produces a capability requirement directly yet. §4.4's static
+   * side ("リテラル URL や既知クライアントなど静的に判定できる違反") needs
+   * the connector layer to surface a stub call's literal arguments, which it
+   * does not do; until then every requirement is inherited from a declaration
+   * somewhere below, and the check that runs is the 縮小則 between a caller's
+   * grant and a callee's declaration.
+   */
+  readonly required: CapabilitySet;
+  /** For a required capability this function does not declare itself, the immediate callee it came through. */
+  readonly capabilityWitness: ReadonlyMap<string, SymbolId>;
 }
 
 /**
@@ -34,6 +67,8 @@ export function propagate(
       summary,
       observed: directEffects(summary),
       effectWitness: new Map(),
+      required: emptyCapabilitySet(),
+      capabilityWitness: new Map(),
     });
   }
 
@@ -43,7 +78,11 @@ export function propagate(
     for (const summary of summaries) {
       const next = deriveState(summary, byId, state);
       const previous = state.get(summary.id);
-      if (!previous || !effectSetsEqual(previous.observed, next.observed)) {
+      if (
+        !previous ||
+        !effectSetsEqual(previous.observed, next.observed) ||
+        !capabilitySetsEqual(previous.required, next.required)
+      ) {
         changed = true;
       }
       state.set(summary.id, next);
@@ -90,16 +129,55 @@ function contributionOf(
   return calleeState.observed;
 }
 
+/** The capability requirement a caller inherits from a resolved call. Same trust rule as {@link contributionOf}. */
+function capabilityContributionOf(
+  calleeSummary: FunctionSummary,
+  calleeState: PropagatedFunction,
+): CapabilitySet {
+  if (calleeSummary.capabilities.kind === "declared") return calleeSummary.capabilities.capabilities;
+  return calleeState.required;
+}
+
+/**
+ * A `@boundary` function's contract is taken as written and its body is not
+ * propagated through (DESIGN.md §4.6: 「この関数の中は静的検査しない。外側に
+ * 対して宣言したエフェクト・ケイパビリティを信じる」).
+ *
+ * What it declares is what it contributes. What it does *not* declare is
+ * `unknown`, not empty: the body was excluded from analysis, so an
+ * undeclared dimension is unexamined, and calling it "requires nothing"
+ * would turn an explicit hole into a guarantee (P4).
+ */
+function boundaryState(summary: FunctionSummary): PropagatedFunction {
+  return {
+    summary,
+    observed:
+      summary.declared.kind === "declared" ? summary.declared.effects : unknownEffectSet(),
+    effectWitness: new Map(),
+    required:
+      summary.capabilities.kind === "declared"
+        ? summary.capabilities.capabilities
+        : unknownCapabilitySet(),
+    capabilityWitness: new Map(),
+  };
+}
+
 function deriveState(
   summary: FunctionSummary,
   byId: ReadonlyMap<SymbolId, FunctionSummary>,
   state: ReadonlyMap<SymbolId, PropagatedFunction>,
 ): PropagatedFunction {
+  if (summary.boundary.kind === "declared") return boundaryState(summary);
+
   const direct = directEffects(summary);
   const hasDirectUnresolved = summary.calls.some((call) => call.kind === "unresolved");
 
   let merged: EffectSet = direct;
+  let required: CapabilitySet = hasDirectUnresolved
+    ? unknownCapabilitySet()
+    : emptyCapabilitySet();
   const effectWitness = new Map<KnownEffect, SymbolId>();
+  const capabilityWitness = new Map<string, SymbolId>();
   let unknownWitness: SymbolId | undefined;
 
   for (const call of summary.calls) {
@@ -119,6 +197,13 @@ function deriveState(
     if (contribution.unknown && !hasDirectUnresolved && unknownWitness === undefined) {
       unknownWitness = call.callee;
     }
+
+    const capabilityContribution = capabilityContributionOf(calleeSummary, calleeState);
+    required = unionCapabilitySets(required, capabilityContribution);
+    for (const capability of capabilityContribution.capabilities) {
+      const key = formatCapability(capability);
+      if (!capabilityWitness.has(key)) capabilityWitness.set(key, call.callee);
+    }
   }
 
   return {
@@ -126,6 +211,8 @@ function deriveState(
     observed: merged,
     effectWitness,
     unknownWitness: hasDirectUnresolved ? undefined : unknownWitness,
+    required,
+    capabilityWitness,
   };
 }
 
@@ -140,6 +227,24 @@ export function witnessChain(
   const visited = new Set<SymbolId>([current]);
   for (;;) {
     const next = state.get(current)?.effectWitness.get(effect);
+    if (next === undefined || visited.has(next)) return chain;
+    chain.push(next);
+    visited.add(next);
+    current = next;
+  }
+}
+
+/** Walk `capabilityWitness` chains from `start` to the function that declares `capability`. */
+export function capabilityWitnessChain(
+  start: SymbolId,
+  capability: string,
+  state: ReadonlyMap<SymbolId, PropagatedFunction>,
+): readonly SymbolId[] {
+  const chain: SymbolId[] = [];
+  let current = start;
+  const visited = new Set<SymbolId>([current]);
+  for (;;) {
+    const next = state.get(current)?.capabilityWitness.get(capability);
     if (next === undefined || visited.has(next)) return chain;
     chain.push(next);
     visited.add(next);

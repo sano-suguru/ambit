@@ -430,7 +430,7 @@ function collectSkippedFunctions(
  * enforced today, but a contract tag on a node that cannot carry one is dead
  * whichever tag it is, so all four are reported.
  */
-const CONTRACT_TAGS = ["effects", "capabilities", "budget", "entrypoint"] as const;
+const CONTRACT_TAGS = ["effects", "capabilities", "budget", "entrypoint", "boundary"] as const;
 
 /**
  * The declaration-path segment a class's construction is indexed under

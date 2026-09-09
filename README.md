@@ -58,6 +58,7 @@ npx ambit check src
 ```sh
 npx ambit check src --format json   # NDJSON, one diagnostic per line
 npx ambit check src --coverage      # unknown rate and why calls stayed unresolved
+npx ambit check src --strict        # treat unresolved paths as errors, not warnings
 ```
 
 Removing it is `npm remove ambit`. The `@effects` declarations left behind are
@@ -87,13 +88,18 @@ analysis itself could not run.
   effects through the call graph. Diagnostics are available as text or NDJSON,
   and every run reports how many files and functions it analyzed, so a check
   that saw nothing is never indistinguishable from a check that found nothing.
-- **Not yet:** `@capabilities`, `@budget`, and `@entrypoint` are specified in
-  the design doc as part of the contract model, but nothing parses or checks
-  them.
-  Runtime enforcement has not been started — everything Ambit checks today is
-  static. `ambit init`, `ambit run`, `ambit agent`, `ambit stubs`, and
-  `ambit sbom` are planned, not built. `check --strict` is rejected (exit 2)
-  rather than silently ignored.
+- **Also works:** `@capabilities` is checked statically — a callee may not
+  require a capability its caller does not grant, and the check crosses
+  undeclared functions. `@entrypoint` warns when it declares no capability
+  set. `@boundary reason="…"` stops checking a body and trusts the declared
+  contract instead, counted separately in `--coverage`. `@budget` is parsed
+  and validated. `--strict` promotes the `unknown` warnings to errors.
+- **Not yet:** nothing *enforces* `@capabilities` or `@budget` at runtime —
+  everything above is static. The static half of §4.4's 二重強制 (rejecting a
+  literal URL outside the granted target) is not implemented either; only the
+  declaration-to-declaration narrowing check runs. `@budget`'s
+  loop-pattern warnings are not implemented. `ambit init`, `ambit run`,
+  `ambit agent`, `ambit stubs`, and `ambit sbom` are planned, not built.
 - **Safety posture:** a call Ambit cannot resolve is reported as `unknown`,
   not assumed safe. The bundled effect tables are deliberately small, so a lot
   of real code lands in `unknown` today — see
@@ -136,7 +142,7 @@ This is the part `ambit check` enforces today: it stops a call to `fetch` or
 `node:fs` inside a function declared `pure`, and propagates effects through
 the call graph.
 
-### Capabilities *(designed, not yet implemented)*
+### Capabilities *(statically checked; not enforced at runtime)*
 
 Which specific resource may it access?
 
@@ -147,7 +153,29 @@ Which specific resource may it access?
 export async function getUser(id: UserId) { /* ... */ }
 ```
 
-### Budgets *(designed, not yet implemented)*
+Capabilities may only narrow from caller to callee. A function granting
+`db:read:users` that reaches one requiring `db:write:users` is an error, even
+through an undeclared function in between. Only the `target` segment may be a
+glob: `db:read:*` covers `db:read:users`.
+
+### Boundaries
+
+Where the analysis stops, say so:
+
+```ts
+/**
+ * @boundary reason="legacy SDK, not annotated"
+ * @effects network
+ */
+export function callLegacySdk(payload: Payload) { return legacy.send(payload); }
+```
+
+The body is not checked; the declared contract is trusted in its place, and
+`--coverage` counts boundaries apart from functions the analysis actually
+resolved. `reason` is required, and so is a contract to trust — a `@boundary`
+with no `@effects` only removes checking, and is reported.
+
+### Budgets *(parsed and validated; not enforced at runtime)*
 
 How much execution time or cost may an entrypoint consume?
 
@@ -247,7 +275,9 @@ replaceable until measurement and compatibility testing justify them. See
 
 Direction, not commitments — nothing here is scheduled.
 
-- `@capabilities` and `@budget` enforcement, and runtime enforcement
+- Runtime enforcement of `@capabilities` and `@budget` at entrypoints
+- The static half of capability enforcement: rejecting a literal URL or table
+  name outside the granted target
 - Stable diagnostic ids (from the first public release)
 - Suggested fixes (`fixes[].edits` — patches that are actually applicable)
 - Impact analysis and incremental re-checking

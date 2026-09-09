@@ -6,6 +6,7 @@ import { diagnose } from "../src/checker/diagnose.ts";
 import { propagate } from "../src/checker/propagate.ts";
 import { summarizeExtractedFiles } from "../src/checker/summarize.ts";
 import type { Diagnostic } from "../src/core/index.ts";
+import { NO_OTHER_CONTRACTS, observedEffects } from "./support/summary.ts";
 
 const FIXTURE_ROOT = path.join(import.meta.dirname, "fixtures", "propagation");
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "..");
@@ -64,7 +65,7 @@ describe("diagnose (end-to-end: backend -> summarize -> propagate -> diagnose)",
     const diagnostics = await diagnoseFixtures();
     const diag = byFunction(diagnostics, "calculateTaxDeclaredCallee");
     expect(diag?.id).toBe("AMB-E001");
-    expect(diag?.contract?.observed).toEqual(["network"]);
+    expect(observedEffects(diag)).toEqual(["network"]);
     expect(diag?.contract?.via.map((v) => v.symbol)).toEqual([
       "rule1-declared-callee.ts#fetchRateDeclared",
     ]);

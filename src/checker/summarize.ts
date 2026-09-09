@@ -1,6 +1,9 @@
 import type {
   Call,
   CallSite,
+  DeclaredBoundary,
+  DeclaredBudget,
+  DeclaredCapabilities,
   DeclaredEffects,
   EffectSet,
   ExtractedFile,
@@ -8,7 +11,13 @@ import type {
   KnownEffect,
   RawJsDoc,
 } from "../core/index.ts";
-import { effectSetOf, emptyEffectSet, isKnownEffect } from "../core/index.ts";
+import {
+  effectSetOf,
+  emptyEffectSet,
+  isKnownEffect,
+  parseBudgetTag,
+  parseCapabilitiesTag,
+} from "../core/index.ts";
 import {
   isConstructorKey,
   isKnownPureConstructor,
@@ -31,6 +40,10 @@ export function summarizeExtractedFiles(
         id: fn.id,
         location: fn.location,
         declared: parseDeclaredEffects(fn.jsDoc),
+        capabilities: parseDeclaredCapabilities(fn.jsDoc),
+        budget: parseDeclaredBudget(fn.jsDoc),
+        boundary: parseDeclaredBoundary(fn.jsDoc),
+        entrypoint: fn.jsDoc?.tags.has("entrypoint") ?? false,
         calls: fn.calls.map(toCall),
       });
     }
@@ -44,6 +57,42 @@ function parseDeclaredEffects(jsDoc: RawJsDoc | undefined): DeclaredEffects {
   const effects = parseEffectsTag(tagText);
   if (effects === undefined) return { kind: "invalid", raw: tagText };
   return { kind: "declared", effects };
+}
+
+function parseDeclaredCapabilities(jsDoc: RawJsDoc | undefined): DeclaredCapabilities {
+  const tagText = jsDoc?.tags.get("capabilities");
+  if (tagText === undefined) return { kind: "none" };
+  const capabilities = parseCapabilitiesTag(tagText);
+  if (capabilities === undefined) return { kind: "invalid", raw: tagText };
+  return { kind: "declared", capabilities };
+}
+
+function parseDeclaredBudget(jsDoc: RawJsDoc | undefined): DeclaredBudget {
+  const tagText = jsDoc?.tags.get("budget");
+  if (tagText === undefined) return { kind: "none" };
+  const budget = parseBudgetTag(tagText);
+  if (budget === undefined) return { kind: "invalid", raw: tagText };
+  return { kind: "declared", budget };
+}
+
+/**
+ * `@boundary reason="..."`. DESIGN.md §4.6 makes `reason` mandatory, so a tag
+ * without one does not declare a boundary — it declares an unexplained hole,
+ * which is exactly what the tag exists to prevent. Both quoted and bare
+ * `reason=` forms are accepted; anything else is `"invalid"`.
+ */
+export function parseBoundaryTag(text: string): string | undefined {
+  const match = /^reason\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))\s*$/.exec(text.trim());
+  const reason = match?.[1] ?? match?.[2] ?? match?.[3];
+  return reason !== undefined && reason.trim().length > 0 ? reason.trim() : undefined;
+}
+
+function parseDeclaredBoundary(jsDoc: RawJsDoc | undefined): DeclaredBoundary {
+  const tagText = jsDoc?.tags.get("boundary");
+  if (tagText === undefined) return { kind: "none" };
+  const reason = parseBoundaryTag(tagText);
+  if (reason === undefined) return { kind: "invalid", raw: tagText };
+  return { kind: "declared", reason };
 }
 
 /**

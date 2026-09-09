@@ -1,4 +1,5 @@
 import type {
+  Capability,
   ContractViaEntry,
   Diagnostic,
   DiagnosticEngine,
@@ -7,9 +8,14 @@ import type {
   SymbolId,
   UncarriedContract,
 } from "../core/index.ts";
-import { excessEffects, KNOWN_EFFECTS } from "../core/index.ts";
+import {
+  excessCapabilities,
+  excessEffects,
+  formatCapability,
+  KNOWN_EFFECTS,
+} from "../core/index.ts";
 import type { PropagatedFunction } from "./propagate.ts";
-import { unknownWitnessChain, witnessChain } from "./propagate.ts";
+import { capabilityWitnessChain, unknownWitnessChain, witnessChain } from "./propagate.ts";
 
 /**
  * Compare declared vs. observed effects for every declared function and
@@ -27,29 +33,225 @@ export function diagnose(
   const diagnostics: Diagnostic[] = [];
 
   for (const propagated of state.values()) {
-    const { summary } = propagated;
-
-    if (summary.declared.kind === "invalid") {
-      diagnostics.push(buildInvalidEffectsDiagnostic(propagated, summary.declared.raw, engine));
-      continue;
-    }
-    if (summary.declared.kind !== "declared") continue;
-
-    const declaredEffects = summary.declared.effects;
-    const excess = excessEffects(declaredEffects, propagated.observed);
-
-    if (excess.size > 0) {
-      diagnostics.push(
-        buildExcessDiagnostic(propagated, declaredEffects.effects, excess, state, engine),
-      );
-    }
-
-    if (propagated.observed.unknown) {
-      diagnostics.push(buildUnknownDiagnostic(propagated, declaredEffects.effects, state, engine));
-    }
+    diagnostics.push(...diagnoseEffects(propagated, state, engine));
+    diagnostics.push(...diagnoseCapabilities(propagated, state, engine));
+    diagnostics.push(...diagnoseBoundary(propagated, engine));
+    diagnostics.push(...diagnoseBudget(propagated, engine));
+    diagnostics.push(...diagnoseEntrypoint(propagated, engine));
   }
 
   return diagnostics;
+}
+
+function diagnoseEffects(
+  propagated: PropagatedFunction,
+  state: ReadonlyMap<SymbolId, PropagatedFunction>,
+  engine: DiagnosticEngine,
+): readonly Diagnostic[] {
+  const { summary } = propagated;
+  if (summary.declared.kind === "invalid") {
+    return [buildInvalidEffectsDiagnostic(propagated, summary.declared.raw, engine)];
+  }
+  if (summary.declared.kind !== "declared") return [];
+
+  const diagnostics: Diagnostic[] = [];
+  const declaredEffects = summary.declared.effects;
+  const excess = excessEffects(declaredEffects, propagated.observed);
+
+  if (excess.size > 0) {
+    diagnostics.push(
+      buildExcessDiagnostic(propagated, declaredEffects.effects, excess, state, engine),
+    );
+  }
+  if (propagated.observed.unknown) {
+    diagnostics.push(buildUnknownDiagnostic(propagated, declaredEffects.effects, state, engine));
+  }
+  return diagnostics;
+}
+
+/**
+ * DESIGN.md §4.4's 縮小則: a callee may not require a capability its caller
+ * does not grant. A function's own declaration is the grant; what its body
+ * reaches is the requirement.
+ */
+function diagnoseCapabilities(
+  propagated: PropagatedFunction,
+  state: ReadonlyMap<SymbolId, PropagatedFunction>,
+  engine: DiagnosticEngine,
+): readonly Diagnostic[] {
+  const { summary } = propagated;
+  if (summary.capabilities.kind === "invalid") {
+    return [
+      {
+        id: "AMB-E004",
+        severity: "error",
+        category: "capabilities",
+        message: `${displayName(summary.id)} declares @capabilities "${summary.capabilities.raw}", which is not a comma-separated list of <resource>:<action>:<target>`,
+        location: summary.location,
+        fixes: [],
+        docs: "docs/diagnostics/README.md#amb-e004",
+        engine,
+      },
+    ];
+  }
+  if (summary.capabilities.kind !== "declared") return [];
+
+  const granted = summary.capabilities.capabilities.capabilities;
+  const excess = excessCapabilities(granted, propagated.required.capabilities);
+  const diagnostics: Diagnostic[] = [];
+
+  if (excess.length > 0) {
+    diagnostics.push(buildCapabilityEscalation(propagated, granted, excess, state, engine));
+  }
+  if (propagated.required.unknown) {
+    const chain = unknownWitnessChain(summary.id, state);
+    diagnostics.push({
+      id: "AMB-W003",
+      severity: "warning",
+      category: "capabilities",
+      message: `${displayName(summary.id)} declares @capabilities but reaches a call that could not be resolved, so its capability requirement is not fully known`,
+      location: summary.location,
+      contract: {
+        declared: granted.map(formatCapability),
+        required: propagated.required.capabilities.map(formatCapability),
+        excess: [],
+        via: chainToVia(chain, state),
+      },
+      fixes: [],
+      docs: "docs/diagnostics/README.md#amb-w003",
+      engine,
+    });
+  }
+  return diagnostics;
+}
+
+function buildCapabilityEscalation(
+  propagated: PropagatedFunction,
+  granted: readonly Capability[],
+  excess: readonly Capability[],
+  state: ReadonlyMap<SymbolId, PropagatedFunction>,
+  engine: DiagnosticEngine,
+): Diagnostic {
+  const { summary } = propagated;
+  // Deterministic choice of which excess capability's path to show, so the
+  // same code always produces the same diagnostic.
+  const primary = [...excess].sort((a, b) =>
+    formatCapability(a).localeCompare(formatCapability(b)),
+  )[0];
+  const chain = primary ? capabilityWitnessChain(summary.id, formatCapability(primary), state) : [];
+  const via = chainToVia(chain, state);
+  const grantedList = granted.map(formatCapability);
+  const excessList = excess.map(formatCapability);
+
+  const message =
+    via.length > 0
+      ? `${displayName(summary.id)} grants [${grantedList.join(", ")}] but calls ${displayName(via[via.length - 1]?.symbol ?? summary.id)} which requires [${excessList.join(", ")}]`
+      : `${displayName(summary.id)} grants [${grantedList.join(", ")}] but requires [${excessList.join(", ")}]`;
+
+  return {
+    id: "AMB-E005",
+    severity: "error",
+    category: "capabilities",
+    message,
+    location: summary.location,
+    contract: {
+      declared: grantedList,
+      required: propagated.required.capabilities.map(formatCapability),
+      excess: excessList,
+      via,
+    },
+    fixes: [],
+    docs: "docs/diagnostics/README.md#amb-e005",
+    engine,
+  };
+}
+
+/**
+ * `@boundary` is an explicit trust declaration (DESIGN.md §4.6). Two ways to
+ * write one that does nothing, both reported rather than accepted:
+ * a missing `reason`, and no contract to trust in its place.
+ */
+function diagnoseBoundary(
+  propagated: PropagatedFunction,
+  engine: DiagnosticEngine,
+): readonly Diagnostic[] {
+  const { summary } = propagated;
+  if (summary.boundary.kind === "invalid") {
+    return [
+      {
+        id: "AMB-E006",
+        severity: "error",
+        category: "boundary",
+        message: `${displayName(summary.id)} declares @boundary "${summary.boundary.raw}", which does not give the required reason= (DESIGN.md §4.6)`,
+        location: summary.location,
+        fixes: [],
+        docs: "docs/diagnostics/README.md#amb-e006",
+        engine,
+      },
+    ];
+  }
+  if (summary.boundary.kind !== "declared") return [];
+  if (summary.declared.kind === "declared") return [];
+
+  return [
+    {
+      id: "AMB-E007",
+      severity: "error",
+      category: "boundary",
+      message: `${displayName(summary.id)} declares @boundary but no @effects, so its body is not checked and nothing was declared in its place`,
+      location: summary.location,
+      fixes: [],
+      docs: "docs/diagnostics/README.md#amb-e007",
+      engine,
+    },
+  ];
+}
+
+function diagnoseBudget(
+  propagated: PropagatedFunction,
+  engine: DiagnosticEngine,
+): readonly Diagnostic[] {
+  const { summary } = propagated;
+  if (summary.budget.kind !== "invalid") return [];
+  return [
+    {
+      id: "AMB-E008",
+      severity: "error",
+      category: "budget",
+      message: `${displayName(summary.id)} declares @budget "${summary.budget.raw}", which is not a space-separated list of timeMs/costUsd/llmCalls limits with an optional onExceed=throw|warn|abort`,
+      location: summary.location,
+      fixes: [],
+      docs: "docs/diagnostics/README.md#amb-e008",
+      engine,
+    },
+  ];
+}
+
+/**
+ * DESIGN.md §4.4: 「エントリポイントは `@entrypoint` と `@capabilities` を…
+ * 明示する。未指定は unknown 相当として警告」. An entrypoint is where the
+ * runtime establishes a capability context; one with no capability set
+ * establishes nothing to check against.
+ */
+function diagnoseEntrypoint(
+  propagated: PropagatedFunction,
+  engine: DiagnosticEngine,
+): readonly Diagnostic[] {
+  const { summary } = propagated;
+  if (!summary.entrypoint) return [];
+  if (summary.capabilities.kind !== "none") return [];
+  return [
+    {
+      id: "AMB-W002",
+      severity: "warning",
+      category: "capabilities",
+      message: `${displayName(summary.id)} is an @entrypoint with no @capabilities, so the runtime has no capability set to establish for it`,
+      location: summary.location,
+      fixes: [],
+      docs: "docs/diagnostics/README.md#amb-w002",
+      engine,
+    },
+  ];
 }
 
 function buildExcessDiagnostic(

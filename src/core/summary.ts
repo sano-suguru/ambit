@@ -1,4 +1,6 @@
 import type { UnresolvedReason } from "./backend.ts";
+import type { Budget } from "./budget.ts";
+import type { CapabilitySet } from "./capability.ts";
 import type { EffectSet, KnownEffect } from "./effects.ts";
 import type { SourceLocation } from "./location.ts";
 import type { SymbolId } from "./symbol-id.ts";
@@ -65,10 +67,46 @@ export type DeclaredEffects =
   | { readonly kind: "invalid"; readonly raw: string }
   | { readonly kind: "declared"; readonly effects: EffectSet };
 
+/**
+ * Whether a function declared `@capabilities`, and what. Mirrors
+ * {@link DeclaredEffects}: `"invalid"` is a tag that was present but did not
+ * parse, and is treated as undeclared everywhere except diagnosis, so a broken
+ * declaration never reads as a narrower grant than was written.
+ */
+export type DeclaredCapabilities =
+  | { readonly kind: "none" }
+  | { readonly kind: "invalid"; readonly raw: string }
+  | { readonly kind: "declared"; readonly capabilities: CapabilitySet };
+
+/** Whether a function declared `@budget`, and what. */
+export type DeclaredBudget =
+  | { readonly kind: "none" }
+  | { readonly kind: "invalid"; readonly raw: string }
+  | { readonly kind: "declared"; readonly budget: Budget };
+
+/**
+ * Whether a function declared `@boundary` (DESIGN.md §4.6) — an explicit
+ * statement that its body is not statically checked and that the contract it
+ * declares to the outside is to be trusted instead.
+ *
+ * `reason` is required by §4.6, so a tag without one is `"invalid"`: an
+ * unexplained hole in the analysis is the thing the tag exists to make
+ * visible.
+ */
+export type DeclaredBoundary =
+  | { readonly kind: "none" }
+  | { readonly kind: "invalid"; readonly raw: string }
+  | { readonly kind: "declared"; readonly reason: string };
+
 /** Ambit's own representation of one function, independent of any backend. */
 export interface FunctionSummary {
   readonly id: SymbolId;
   readonly location: SourceLocation;
   readonly declared: DeclaredEffects;
+  readonly capabilities: DeclaredCapabilities;
+  readonly budget: DeclaredBudget;
+  readonly boundary: DeclaredBoundary;
+  /** `@entrypoint` (DESIGN.md §4.1): where the runtime establishes a context. */
+  readonly entrypoint: boolean;
   readonly calls: readonly Call[];
 }

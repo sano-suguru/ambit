@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { propagate, unknownWitnessChain, witnessChain } from "../src/checker/propagate.ts";
 import type { FunctionSummary, SourceLocation, SymbolId } from "../src/core/index.ts";
 import { effectSetOf, emptyEffectSet } from "../src/core/index.ts";
+import { NO_OTHER_CONTRACTS } from "./support/summary.ts";
 
 const LOC: SourceLocation = { file: "f.ts", line: 1, col: 1, endLine: 1, endCol: 1 };
 
@@ -16,6 +17,7 @@ describe("propagate", () => {
         id: id("f.ts#pureCallsFetch"),
         location: LOC,
         declared: { kind: "declared", effects: emptyEffectSet() },
+        ...NO_OTHER_CONTRACTS,
         calls: [{ kind: "stub", location: LOC, effect: "network", qualifiedName: "fetch" }],
       },
     ];
@@ -29,6 +31,7 @@ describe("propagate", () => {
         id: id("f.ts#usesSetHas"),
         location: LOC,
         declared: { kind: "declared", effects: emptyEffectSet() },
+        ...NO_OTHER_CONTRACTS,
         calls: [{ kind: "known-pure", location: LOC, qualifiedName: "Set.has" }],
       },
     ];
@@ -44,12 +47,14 @@ describe("propagate", () => {
         id: id("f.ts#fetchRate"),
         location: LOC,
         declared: { kind: "declared", effects: effectSetOf("network") },
+        ...NO_OTHER_CONTRACTS,
         calls: [{ kind: "stub", location: LOC, effect: "network", qualifiedName: "fetch" }],
       },
       {
         id: id("f.ts#calculateTax"),
         location: LOC,
         declared: { kind: "declared", effects: emptyEffectSet() },
+        ...NO_OTHER_CONTRACTS,
         calls: [{ kind: "resolved", location: LOC, callee: id("f.ts#fetchRate") }],
       },
     ];
@@ -67,12 +72,14 @@ describe("propagate", () => {
         id: id("f.ts#fetchRateUndeclared"),
         location: LOC,
         declared: { kind: "none" },
+        ...NO_OTHER_CONTRACTS,
         calls: [{ kind: "stub", location: LOC, effect: "network", qualifiedName: "fetch" }],
       },
       {
         id: id("f.ts#calculateTax"),
         location: LOC,
         declared: { kind: "declared", effects: emptyEffectSet() },
+        ...NO_OTHER_CONTRACTS,
         calls: [{ kind: "resolved", location: LOC, callee: id("f.ts#fetchRateUndeclared") }],
       },
     ];
@@ -89,6 +96,7 @@ describe("propagate", () => {
         id: id("f.ts#fetchRate"),
         location: LOC,
         declared: { kind: "declared", effects: effectSetOf("network") },
+        ...NO_OTHER_CONTRACTS,
         calls: [
           { kind: "stub", location: LOC, effect: "network", qualifiedName: "fetch" },
           { kind: "unresolved", location: LOC, reason: "any-typed" },
@@ -98,6 +106,7 @@ describe("propagate", () => {
         id: id("f.ts#calculateTax"),
         location: LOC,
         declared: { kind: "declared", effects: emptyEffectSet() },
+        ...NO_OTHER_CONTRACTS,
         calls: [{ kind: "resolved", location: LOC, callee: id("f.ts#fetchRate") }],
       },
     ];
@@ -113,12 +122,14 @@ describe("propagate", () => {
         id: id("f.ts#callsUnresolved"),
         location: LOC,
         declared: { kind: "none" },
+        ...NO_OTHER_CONTRACTS,
         calls: [{ kind: "unresolved", location: LOC, reason: "eval" }],
       },
       {
         id: id("f.ts#pureReachesUnknown"),
         location: LOC,
         declared: { kind: "declared", effects: emptyEffectSet() },
+        ...NO_OTHER_CONTRACTS,
         calls: [{ kind: "resolved", location: LOC, callee: id("f.ts#callsUnresolved") }],
       },
     ];
@@ -136,18 +147,21 @@ describe("propagate", () => {
         id: id("f.ts#entry"),
         location: LOC,
         declared: { kind: "declared", effects: emptyEffectSet() },
+        ...NO_OTHER_CONTRACTS,
         calls: [{ kind: "resolved", location: LOC, callee: id("f.ts#a") }],
       },
       {
         id: id("f.ts#a"),
         location: LOC,
         declared: { kind: "none" },
+        ...NO_OTHER_CONTRACTS,
         calls: [{ kind: "resolved", location: LOC, callee: id("f.ts#b") }],
       },
       {
         id: id("f.ts#b"),
         location: LOC,
         declared: { kind: "none" },
+        ...NO_OTHER_CONTRACTS,
         calls: [
           { kind: "stub", location: LOC, effect: "network", qualifiedName: "fetch" },
           { kind: "resolved", location: LOC, callee: id("f.ts#a") },
@@ -165,6 +179,7 @@ describe("propagate", () => {
         id: id("f.ts#callLlm"),
         location: LOC,
         declared: { kind: "none" },
+        ...NO_OTHER_CONTRACTS,
         calls: [
           {
             kind: "stub",
@@ -178,6 +193,7 @@ describe("propagate", () => {
         id: id("f.ts#pureCaller"),
         location: LOC,
         declared: { kind: "declared", effects: emptyEffectSet() },
+        ...NO_OTHER_CONTRACTS,
         calls: [{ kind: "resolved", location: LOC, callee: id("f.ts#callLlm") }],
       },
     ];

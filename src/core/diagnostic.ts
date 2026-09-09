@@ -1,3 +1,4 @@
+import type { Capability } from "./capability.ts";
 import type { KnownEffect } from "./effects.ts";
 import type { SourceLocation } from "./location.ts";
 import type { SymbolId } from "./symbol-id.ts";
@@ -26,6 +27,39 @@ export interface EffectsContract {
   readonly declared: readonly (KnownEffect | "pure")[];
   readonly observed: readonly KnownEffect[];
   readonly via: readonly ContractViaEntry[];
+}
+
+/**
+ * DESIGN.md §5.1 `contract` field for the `capabilities` category. Same
+ * declared/observed/via shape as {@link EffectsContract}; `required` is the
+ * capability set the body actually needs, and `excess` narrows it to the ones
+ * the declaration does not grant (§4.4: capabilities may only narrow from
+ * caller to callee).
+ */
+export interface CapabilitiesContract {
+  readonly declared: readonly string[];
+  readonly required: readonly string[];
+  readonly excess: readonly string[];
+  readonly via: readonly ContractViaEntry[];
+}
+
+export type DiagnosticContract = EffectsContract | CapabilitiesContract;
+
+/**
+ * Narrow a diagnostic's `contract` to the effects shape. The union carries no
+ * discriminant field on purpose: DESIGN.md §5.1 fixes the wire shape of a
+ * `contract`, and an extra key invented for TypeScript's convenience would be
+ * a schema change nobody asked for. `category` already tells a consumer which
+ * shape to expect; this is the in-process equivalent.
+ */
+export function isEffectsContract(contract: DiagnosticContract): contract is EffectsContract {
+  return "observed" in contract;
+}
+
+export function isCapabilitiesContract(
+  contract: DiagnosticContract,
+): contract is CapabilitiesContract {
+  return "required" in contract;
 }
 
 export interface FixEdit {
@@ -76,7 +110,7 @@ export interface Diagnostic {
   readonly category: DiagnosticCategory;
   readonly message: string;
   readonly location: SourceLocation;
-  readonly contract?: EffectsContract;
+  readonly contract?: DiagnosticContract;
   /** Empty when no concrete, applicable patch could be generated (§5.3). */
   readonly fixes: readonly DiagnosticFix[];
   readonly docs?: string;

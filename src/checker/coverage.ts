@@ -20,6 +20,17 @@ export interface CoverageReport {
   readonly filesAnalyzed: number;
   readonly functionsExtracted: number;
   readonly functionsDeclared: number;
+  /**
+   * Functions whose body is excluded from static analysis by `@boundary`
+   * (DESIGN.md §4.6). Counted apart from everything else because §4.3
+   * requires it: 「境界への移行は解析成功と区別して集計する」. A boundary is a
+   * declared hole, and a coverage figure that folded it into the resolved
+   * count would report the hole as progress.
+   */
+  readonly functionsBoundary: number;
+  /** Functions marked `@entrypoint`, and how many of those declare no `@capabilities`. */
+  readonly functionsEntrypoint: number;
+  readonly entrypointsWithoutCapabilities: number;
   readonly functionsSkipped: number;
   readonly skippedByKind: ReadonlyMap<SkippedFunctionKind, number>;
   /**
@@ -45,6 +56,11 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
 
   const functionsExtracted = summaries.length;
   const functionsDeclared = summaries.filter((s) => s.declared.kind === "declared").length;
+  const functionsBoundary = summaries.filter((s) => s.boundary.kind === "declared").length;
+  const entrypoints = summaries.filter((s) => s.entrypoint);
+  const entrypointsWithoutCapabilities = entrypoints.filter(
+    (s) => s.capabilities.kind !== "declared",
+  ).length;
 
   let unknownCount = 0;
   for (const summary of summaries) {
@@ -88,6 +104,9 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
     filesAnalyzed,
     functionsExtracted,
     functionsDeclared,
+    functionsBoundary,
+    functionsEntrypoint: entrypoints.length,
+    entrypointsWithoutCapabilities,
     functionsSkipped,
     skippedByKind: skippedFunctions,
     functionUnknownRate,

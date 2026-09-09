@@ -26,13 +26,13 @@ export async function main(argv: readonly string[]): Promise<number> {
   const args = parseArgs(argv);
   if (args.error) {
     process.stderr.write(
-      `ambit check: ${args.error}\nUsage: ambit check <dir> [--format json] [--coverage]\n`,
+      `ambit check: ${args.error}\nUsage: ambit check <dir> [--format json] [--coverage] [--strict]\n`,
     );
     return EXIT_ANALYSIS_FAILED;
   }
   if (args.command !== "check") {
     process.stderr.write(
-      `Unknown command: ${args.command}\nUsage: ambit check <dir> [--format json] [--coverage]\n`,
+      `Unknown command: ${args.command}\nUsage: ambit check <dir> [--format json] [--coverage] [--strict]\n`,
     );
     return EXIT_ANALYSIS_FAILED;
   }
@@ -52,10 +52,10 @@ export async function main(argv: readonly string[]): Promise<number> {
     const summaries = summarizeExtractedFiles(project.files);
     const state = propagate(summaries);
     const engine = { name: legacyTsBackend.name, version: legacyTsBackend.version };
-    diagnostics = [
-      ...diagnose(state, engine),
-      ...diagnoseUncarriedContracts(project.uncarriedContracts, engine),
-    ];
+    diagnostics = applyStrict(
+      [...diagnose(state, engine), ...diagnoseUncarriedContracts(project.uncarriedContracts, engine)],
+      args.strict,
+    );
     coverage = computeCoverage({
       filesAnalyzed: project.files.length,
       skippedFunctions: project.skippedFunctions,
@@ -92,17 +92,41 @@ interface Args {
   readonly dir: string;
   readonly format: "json" | "text";
   readonly coverage: boolean;
+  /** `--strict`: promote the `unknown` warnings to errors (DESIGN.md §4.2 rule 3). */
+  readonly strict: boolean;
   /** Set when argv could not be parsed; `main` reports it and exits 2 rather than running with a silently-ignored option (DESIGN.md §3.4). */
   readonly error?: string;
 }
 
-const KNOWN_FLAGS = new Set(["--format", "--coverage"]);
+const KNOWN_FLAGS = new Set(["--format", "--coverage", "--strict"]);
+
+/**
+ * The diagnostics `--strict` promotes to errors: the two that say "analysis
+ * reached something it could not resolve" (DESIGN.md §4.2 rule 3 — 「Ambit の
+ * `strict: true` でエラーに昇格できる」). Deliberately not every warning:
+ * `--strict` means "an unverified path is not acceptable here", which is a
+ * different claim from promoting, say, an entrypoint's missing capability set.
+ */
+const STRICT_PROMOTED_IDS: ReadonlySet<string> = new Set(["AMB-W001", "AMB-W003"]);
+
+function applyStrict(
+  diagnostics: readonly Diagnostic[],
+  strict: boolean,
+): readonly Diagnostic[] {
+  if (!strict) return diagnostics;
+  return diagnostics.map((diagnostic) =>
+    STRICT_PROMOTED_IDS.has(diagnostic.id)
+      ? { ...diagnostic, severity: "error" as const }
+      : diagnostic,
+  );
+}
 
 function parseArgs(argv: readonly string[]): Args {
   const [command = "check", ...rest] = argv;
   let dir = ".";
   let format: "json" | "text" = "text";
   let coverage = false;
+  let strict = false;
 
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
@@ -114,6 +138,7 @@ function parseArgs(argv: readonly string[]): Args {
           dir,
           format,
           coverage,
+          strict,
           error: `--format expects "json" or "text", got ${value === undefined ? "nothing" : JSON.stringify(value)}`,
         };
       }
@@ -121,16 +146,18 @@ function parseArgs(argv: readonly string[]): Args {
       i++;
     } else if (arg === "--coverage") {
       coverage = true;
+    } else if (arg === "--strict") {
+      strict = true;
     } else if (arg?.startsWith("--")) {
       if (!KNOWN_FLAGS.has(arg)) {
-        return { command, dir, format, coverage, error: `unknown option: ${arg}` };
+        return { command, dir, format, coverage, strict, error: `unknown option: ${arg}` };
       }
     } else if (arg) {
       dir = arg;
     }
   }
 
-  return { command, dir, format, coverage };
+  return { command, dir, format, coverage, strict };
 }
 
 function formatJson(diagnostic: Diagnostic): string {
@@ -160,6 +187,7 @@ function formatCoverageText(coverage: CoverageReport): string {
   const unknownPct = (coverage.functionUnknownRate * 100).toFixed(1);
   const lines = [
     `unknown-rate=${unknownPct}% (${Math.round(coverage.functionUnknownRate * coverage.functionsExtracted)}/${coverage.functionsExtracted} functions)`,
+    `boundary=${coverage.functionsBoundary} entrypoints=${coverage.functionsEntrypoint} (without-capabilities=${coverage.entrypointsWithoutCapabilities})`,
     `skipped=${coverage.functionsSkipped} (${mapEntries(coverage.skippedByKind)})`,
     `call-sites: total=${coverage.callSitesTotal} resolved=${coverage.callSitesResolved} stub=${coverage.callSitesStub} pure=${coverage.callSitesPure} unresolved=${coverage.callSitesUnresolved}`,
     `unresolved-by-reason: ${mapEntries(coverage.unresolvedByReason)}`,
@@ -176,6 +204,9 @@ function formatCoverageJson(coverage: CoverageReport): string {
   return `${JSON.stringify({
     kind: "coverage",
     functionUnknownRate: coverage.functionUnknownRate,
+    functionsBoundary: coverage.functionsBoundary,
+    functionsEntrypoint: coverage.functionsEntrypoint,
+    entrypointsWithoutCapabilities: coverage.entrypointsWithoutCapabilities,
     functionsSkipped: coverage.functionsSkipped,
     skippedByKind: Object.fromEntries(coverage.skippedByKind),
     callSitesTotal: coverage.callSitesTotal,
