@@ -53,6 +53,10 @@ export function totalPrice(unitPrice: number, quantity: number): number {
 export async function fetchRate(): Promise<Response> {
   return fetch("https://rates.example.test");
 }
+
+export function applyDiscount(total: number, pct: number): number {
+  return total * (1 - pct);
+}
 `;
 
 const CONSUMER_TSCONFIG = JSON.stringify(
@@ -144,7 +148,7 @@ describe("distribution: pack, install into a clean project, uninstall", () => {
     expect(result.stdout).toContain("fetchRate declares pure but performs [network] directly");
     // A run that analyzed nothing must never look like a clean run
     // (DESIGN.md §3.4) — the summary line is the evidence it did work.
-    expect(result.stdout).toContain("files=1 functions=2 declared=2");
+    expect(result.stdout).toContain("files=1 functions=3 declared=2");
   }, 120_000);
 
   it("emits NDJSON through the installed bin", async () => {
@@ -164,6 +168,15 @@ describe("distribution: pack, install into a clean project, uninstall", () => {
       engine: { name: "typescript-legacy" },
     });
     expect(diagnostics[0].location.file).toBe("app.ts");
+  }, 120_000);
+
+  it("proposes contracts through the installed bin and exits 0", async () => {
+    // `ambit init` is the first command a consumer runs; it has to work from
+    // the package, not only from a clone.
+    const result = await run(path.join("node_modules", ".bin", "ambit"), ["init", "src"], consumer);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("applyDiscount has no @effects");
+    expect(result.stdout).toContain("files=1 functions=3 declared=2");
   }, 120_000);
 
   it("runs `ambit` through npx, the way a consumer actually invokes it", async () => {
