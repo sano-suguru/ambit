@@ -305,3 +305,157 @@ describe("summarizeExtractedFiles", () => {
     expect(summary?.calls).toEqual([{ kind: "resolved", location: LOC, callee: "f.ts#other" }]);
   });
 });
+
+/**
+ * DESIGN.md §4.4: a literal `withAmbit` / `ambitHandler` spec beside a handler
+ * declared in the same file *is* that handler's `@capabilities` / `@budget`.
+ * The tags stay legal, and stay in force when written — the spec is the last
+ * side consulted, never an override.
+ */
+describe("summarizeExtractedFiles: a spec as the declaration (DESIGN.md §4.4)", () => {
+  function fileWith(
+    jsDocTags: readonly (readonly [string, string])[] | undefined,
+    wrapper: ExtractedFile["runtimeWrappers"][number],
+  ): ExtractedFile[] {
+    return [
+      {
+        filePath: "f.ts",
+        runtimeWrappers: [wrapper],
+        functions: [
+          {
+            id: "f.ts#handler" as never,
+            location: LOC,
+            declarationStart: LOC,
+            jsDoc: jsDocTags
+              ? { tagLocations: new Map(), tags: new Map(jsDocTags.map(([k, v]) => [k, v])) }
+              : undefined,
+            calls: [],
+          },
+        ],
+      },
+    ];
+  }
+
+  const SPEC: ExtractedFile["runtimeWrappers"][number] = {
+    location: LOC,
+    wrapper: "ambitHandler",
+    capabilities: ["db:read:orders"],
+    budget: { kind: "literal", timeMs: 500 },
+    handler: "f.ts#handler" as never,
+  };
+
+  it("supplies @capabilities the JSDoc does not declare, recorded as declaredBy.capabilities", () => {
+    const [summary] = summarizeExtractedFiles(fileWith([["entrypoint", ""]], SPEC));
+    expect(summary?.capabilities).toEqual({
+      kind: "declared",
+      capabilities: {
+        capabilities: [{ resource: "db", action: "read", target: "orders" }],
+        unknown: false,
+      },
+    });
+    expect(summary?.declaredBy?.capabilities).toBe("spec");
+  });
+
+  it("supplies @budget with onExceed defaulted, as a parsed tag already is", () => {
+    const [summary] = summarizeExtractedFiles(fileWith([["entrypoint", ""]], SPEC));
+    expect(summary?.budget).toEqual({
+      kind: "declared",
+      budget: { timeMs: 500, onExceed: "throw" },
+    });
+    expect(summary?.declaredBy?.budget).toBe("spec");
+  });
+
+  it("does not override a JSDoc tag: the written declaration stays in force", () => {
+    const [summary] = summarizeExtractedFiles(
+      fileWith(
+        [
+          ["entrypoint", ""],
+          ["capabilities", "db:write:orders"],
+          ["budget", "timeMs=800"],
+        ],
+        SPEC,
+      ),
+    );
+    expect(summary?.capabilities).toEqual({
+      kind: "declared",
+      capabilities: {
+        capabilities: [{ resource: "db", action: "write", target: "orders" }],
+        unknown: false,
+      },
+    });
+    expect(summary?.budget).toEqual({
+      kind: "declared",
+      budget: { timeMs: 800, onExceed: "throw" },
+    });
+    expect(summary?.declaredBy?.capabilities).toBe("jsdoc");
+    expect(summary?.declaredBy?.budget).toBe("jsdoc");
+  });
+
+  it("does not stand in for a JSDoc tag that failed to parse", () => {
+    const [summary] = summarizeExtractedFiles(
+      fileWith(
+        [
+          ["entrypoint", ""],
+          ["capabilities", "db:read"],
+        ],
+        SPEC,
+      ),
+    );
+    expect(summary?.capabilities.kind).toBe("invalid");
+    expect(summary?.declaredBy?.capabilities).toBeUndefined();
+  });
+
+  it("declares nothing from a half the source does not fix as a literal", () => {
+    const [summary] = summarizeExtractedFiles(
+      fileWith([["entrypoint", ""]], {
+        location: LOC,
+        wrapper: "ambitHandler",
+        handler: "f.ts#handler" as never,
+      }),
+    );
+    expect(summary?.capabilities).toEqual({ kind: "none" });
+    expect(summary?.budget).toEqual({ kind: "none" });
+    expect(summary?.declaredBy).toBeUndefined();
+  });
+
+  it("declares nothing for a handler the registration does not name", () => {
+    const [summary] = summarizeExtractedFiles(
+      fileWith([["entrypoint", ""]], {
+        location: LOC,
+        wrapper: "ambitHandler",
+        capabilities: ["db:read:orders"],
+        unmatchedReason: "handler-not-in-this-file",
+      }),
+    );
+    expect(summary?.capabilities).toEqual({ kind: "none" });
+  });
+
+  it("lets the first registration naming a handler declare for it", () => {
+    const files: ExtractedFile[] = [
+      {
+        filePath: "f.ts",
+        runtimeWrappers: [
+          SPEC,
+          { ...SPEC, wrapper: "withAmbit", capabilities: ["db:write:orders"] },
+        ],
+        functions: [
+          {
+            id: "f.ts#handler" as never,
+            location: LOC,
+            declarationStart: LOC,
+            jsDoc: { tagLocations: new Map(), tags: new Map([["entrypoint", ""]]) },
+            calls: [],
+          },
+        ],
+      },
+    ];
+    const [summary] = summarizeExtractedFiles(files);
+    expect(summary?.capabilities).toEqual({
+      kind: "declared",
+      capabilities: {
+        capabilities: [{ resource: "db", action: "read", target: "orders" }],
+        unknown: false,
+      },
+    });
+  });
+});

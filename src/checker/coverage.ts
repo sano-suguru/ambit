@@ -86,7 +86,7 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
   const declaredSummaries = summaries.filter((s) => s.declared.kind === "declared");
   const functionsDeclared = declaredSummaries.length;
   const functionsDeclaredByConfig = declaredSummaries.filter(
-    (s) => s.declaredBy === "config",
+    (s) => s.declaredBy?.effects === "config",
   ).length;
   const functionsDeclaredByJsDoc = functionsDeclared - functionsDeclaredByConfig;
   const functionsBoundary = summaries.filter((s) => s.boundary.kind === "declared").length;

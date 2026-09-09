@@ -296,14 +296,33 @@ describe("contract-to-handler agreement (DESIGN.md §4.4「契約とハンドラ
   it("reports an adapter registration it cannot compare as AMB-W004 rather than passing it", async () => {
     const { diagnostics } = await analyze(WRAPPER_ROOT);
     // Filtered by reason, not counted: the two halves are reported
-    // independently, so the fixture now holds one uncompared capability list
-    // and one uncompared budget.
+    // independently, so the fixture holds two uncompared capability lists —
+    // one beside a handler that declares `@capabilities` and one beside a
+    // handler that does not — and one uncompared budget.
     const found = diagnostics.filter(
       (d) => d.id === "AMB-W004" && d.message.includes("not a literal array of strings"),
     );
-    expect(found).toHaveLength(1);
-    expect(found[0]?.message).toContain("ambitHandler here was not compared");
-    expect(found[0]?.severity).toBe("warning");
+    expect(found).toHaveLength(2);
+    for (const diagnostic of found) {
+      expect(diagnostic.message).toContain("ambitHandler here was not compared");
+      expect(diagnostic.severity).toBe("warning");
+    }
+  });
+
+  /**
+   * A spec declares only what the source fixes as a literal. Where it does
+   * not, the JSDoc is still the only declaration there is, and a handler with
+   * neither is reported twice — the registration went uncompared (AMB-W004)
+   * *and* the entrypoint establishes no capability set (AMB-W002). Never
+   * silently unknown.
+   */
+  it("still requires the JSDoc where the spec is not a literal", async () => {
+    const { diagnostics } = await analyze(WRAPPER_ROOT);
+    expect(
+      diagnostics.filter(
+        (d) => d.id === "AMB-W002" && d.message.includes("specNotLiteral is an @entrypoint"),
+      ),
+    ).toHaveLength(1);
   });
 
   /**

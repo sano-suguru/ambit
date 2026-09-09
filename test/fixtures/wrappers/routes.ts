@@ -144,3 +144,51 @@ export const DYNAMIC_BUDGET = ambitHandler(
   dynamicBudget,
   () => [""],
 );
+
+// --- The spec as the declaration (DESIGN.md §4.4) -------------------------
+
+/**
+ * @entrypoint
+ * @effects pure
+ */
+export function specOnly(id: string): string {
+  return id;
+}
+
+// No `@capabilities` and no `@budget` beside the handler: the literal spec is
+// the declaration. Nothing to disagree with, so no AMB-E010/E011, and the
+// entrypoint is not capability-less, so no AMB-W002 either.
+export const SPEC_ONLY = ambitHandler(
+  { capabilities: ["db:read:orders"], budget: { timeMs: 500, onExceed: "throw" } },
+  specOnly,
+  () => [""],
+);
+
+/**
+ * @entrypoint
+ * @capabilities db:read:orders
+ * @effects pure
+ */
+export function specOnlyBudget(id: string): string {
+  return id;
+}
+
+// Halves are independent: the JSDoc declares the capability set, the spec
+// declares the budget, and neither repeats the other.
+export const SPEC_ONLY_BUDGET = withAmbit(
+  { capabilities: ["db:read:orders"], budget: { timeMs: 500 } },
+  specOnlyBudget,
+);
+
+/**
+ * @entrypoint
+ * @effects pure
+ */
+export function specNotLiteral(id: string): string {
+  return id;
+}
+
+// The spec is built at runtime, so it declares nothing readable. Dropping the
+// JSDoc here does not make the contract implicit — it makes it missing, and
+// that stays visible as AMB-W004 plus AMB-W002.
+export const SPEC_NOT_LITERAL = ambitHandler({ capabilities: built }, specNotLiteral, () => [""]);

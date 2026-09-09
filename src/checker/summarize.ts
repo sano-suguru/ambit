@@ -5,6 +5,8 @@ import type {
   CapabilitySet,
   ConfigContract,
   ContractDivergence,
+  ContractOrigins,
+  DeclarationOrigin,
   DeclaredBoundary,
   DeclaredBudget,
   DeclaredCapabilities,
@@ -15,8 +17,11 @@ import type {
   KnownEffect,
   LiteralArgument,
   RawJsDoc,
+  RuntimeWrapper,
+  SymbolId,
 } from "../core/index.ts";
 import {
+  budgetFrom,
   capabilitySetsEqual,
   DEFAULT_ON_EXCEED,
   effectSetOf,
@@ -52,6 +57,7 @@ export function summarizeExtractedFiles(
   const aliases = config?.effectAliases;
   const summaries: FunctionSummary[] = [];
   for (const file of files) {
+    const specs = specContracts(file.runtimeWrappers);
     for (const fn of file.functions) {
       const jsDoc = {
         declared: parseDeclaredEffects(fn.jsDoc, aliases),
@@ -61,7 +67,7 @@ export function summarizeExtractedFiles(
         entrypoint: fn.jsDoc?.tags.has("entrypoint") ?? false,
       };
       const declaredContract = config?.contractFor(fn.id);
-      const merged = mergeContract(jsDoc, declaredContract, aliases);
+      const merged = mergeContract(jsDoc, declaredContract, specs.get(fn.id), aliases);
       summaries.push({
         id: fn.id,
         location: fn.location,
@@ -88,53 +94,94 @@ interface JsDocContract {
 }
 
 /**
- * Combine a JSDoc contract with the one `ambit.config.ts` declares for the
- * same symbol (DESIGN.md §4.1).
+ * The `capabilities` and `budget` a `withAmbit` / `ambitHandler` spec fixes as
+ * literals, in the same shape a JSDoc tag parses to. A half the source builds
+ * at runtime is absent: nothing was declared there that can be read.
+ */
+interface SpecContract {
+  readonly capabilities?: CapabilitySet;
+  readonly budget?: Budget;
+}
+
+/**
+ * The declarations the registrations in one file make about the handlers they
+ * name (DESIGN.md §4.4).
  *
- * Two rules, both from §4.1. JSDoc wins per tag — a tag JSDoc declares is the
- * one that propagates, and config fills only the tags JSDoc left out, so
- * `@effects` in the code plus `capabilities` in the config is one complete
- * contract rather than a conflict. Where both declare the *same* tag and the
- * two parse to different values, the difference is recorded as a
- * {@link ContractDivergence} and reported (`AMB-W005`) rather than resolved
- * silently.
+ * Only a registration whose `handler` is a declaration in this same file says
+ * anything here — one naming a handler from elsewhere has no summary to attach
+ * to, and stays `AMB-W004`'s business. A half the source does not fix as a
+ * literal is left out, so it is `AMB-W004` too rather than a declaration
+ * invented from a value nobody can read.
+ *
+ * The first registration naming a handler is the one that declares for it.
+ * A second one is not merged: whatever it says is compared against this one's
+ * declaration like any other spec, so a pair that disagrees is `AMB-E010` /
+ * `AMB-E011` rather than a silent last-write-wins.
+ */
+function specContracts(wrappers: readonly RuntimeWrapper[]): ReadonlyMap<SymbolId, SpecContract> {
+  const contracts = new Map<SymbolId, SpecContract>();
+  for (const wrapper of wrappers) {
+    const handler = wrapper.handler;
+    if (handler === undefined || contracts.has(handler)) continue;
+    const capabilities = wrapper.capabilities ? capabilitySetOf(wrapper.capabilities) : undefined;
+    const budget = wrapper.budget?.kind === "literal" ? budgetFrom(wrapper.budget) : undefined;
+    contracts.set(handler, {
+      ...(capabilities ? { capabilities } : {}),
+      ...(budget ? { budget } : {}),
+    });
+  }
+  return contracts;
+}
+
+/**
+ * Combine a JSDoc contract with the one `ambit.config.ts` declares for the
+ * same symbol and the one the registration beside it fixes (DESIGN.md §4.1,
+ * §4.4).
+ *
+ * JSDoc wins per tag — a tag JSDoc declares is the one that propagates, and the
+ * other sides fill only the tags JSDoc left out, so `@effects` in the code plus
+ * `capabilities` in the spec is one complete contract rather than a conflict.
+ * Where JSDoc and config declare the *same* tag and the two parse to different
+ * values, the difference is recorded as a {@link ContractDivergence} and
+ * reported (`AMB-W005`) rather than resolved silently.
+ *
+ * A spec is the last side consulted, and needs no divergence record of its own:
+ * `diagnoseRuntimeWrappers` compares every literal spec against whatever this
+ * merge settled on, so a spec disagreeing with a JSDoc *or* a config
+ * declaration is still `AMB-E010` / `AMB-E011` — an error, not a warning. Only
+ * the case where no other side declared anything is silent, and there the two
+ * being compared are the same declaration.
  *
  * A JSDoc tag that failed to parse still counts as "JSDoc declared this":
- * config must not quietly stand in for a tag the author wrote and misspelled,
- * or `AMB-E002` would be reported against a contract that is not the one in
- * force.
+ * neither config nor a spec must quietly stand in for a tag the author wrote
+ * and misspelled, or `AMB-E002` would be reported against a contract that is
+ * not the one in force.
  */
 function mergeContract(
   jsDoc: JsDocContract,
   config: ConfigContract | undefined,
+  spec: SpecContract | undefined,
   aliases: EffectAliases,
 ): Pick<
   FunctionSummary,
   "declared" | "capabilities" | "budget" | "boundary" | "entrypoint" | "declaredBy" | "divergences"
 > {
-  if (config === undefined) {
-    return {
-      ...jsDoc,
-      ...(jsDoc.declared.kind === "declared" ? { declaredBy: "jsdoc" as const } : {}),
-    };
-  }
-
   const divergences: ContractDivergence[] = [];
-  const configEffects = config.effects ? expandConfigEffects(config.effects, aliases) : undefined;
-  const configCapabilities = config.capabilities
-    ? configCapabilitySet(config.capabilities)
+  const configEffects = config?.effects ? expandConfigEffects(config.effects, aliases) : undefined;
+  const configCapabilities = config?.capabilities
+    ? capabilitySetOf(config.capabilities)
     : undefined;
-  const configBudget: Budget | undefined = config.budget
+  const configBudget: Budget | undefined = config?.budget
     ? { ...config.budget, onExceed: config.budget.onExceed ?? DEFAULT_ON_EXCEED }
     : undefined;
 
   let declared = jsDoc.declared;
-  let declaredBy: "jsdoc" | "config" | undefined =
+  let effectsBy: DeclarationOrigin | undefined =
     jsDoc.declared.kind === "declared" ? "jsdoc" : undefined;
   if (configEffects) {
     if (jsDoc.declared.kind === "none") {
       declared = { kind: "declared", effects: configEffects };
-      declaredBy = "config";
+      effectsBy = "config";
     } else if (
       jsDoc.declared.kind === "declared" &&
       !effectSetsEqual(jsDoc.declared.effects, configEffects)
@@ -148,9 +195,12 @@ function mergeContract(
   }
 
   let capabilities = jsDoc.capabilities;
+  let capabilitiesBy: DeclarationOrigin | undefined =
+    jsDoc.capabilities.kind === "declared" ? "jsdoc" : undefined;
   if (configCapabilities) {
     if (jsDoc.capabilities.kind === "none") {
       capabilities = { kind: "declared", capabilities: configCapabilities };
+      capabilitiesBy = "config";
     } else if (
       jsDoc.capabilities.kind === "declared" &&
       !capabilitySetsEqual(jsDoc.capabilities.capabilities, configCapabilities)
@@ -162,11 +212,18 @@ function mergeContract(
       });
     }
   }
+  if (spec?.capabilities && capabilities.kind === "none") {
+    capabilities = { kind: "declared", capabilities: spec.capabilities };
+    capabilitiesBy = "spec";
+  }
 
   let budget = jsDoc.budget;
+  let budgetBy: DeclarationOrigin | undefined =
+    jsDoc.budget.kind === "declared" ? "jsdoc" : undefined;
   if (configBudget) {
     if (jsDoc.budget.kind === "none") {
       budget = { kind: "declared", budget: configBudget };
+      budgetBy = "config";
     } else if (
       jsDoc.budget.kind === "declared" &&
       formatBudget(jsDoc.budget.budget) !== formatBudget(configBudget)
@@ -178,9 +235,19 @@ function mergeContract(
       });
     }
   }
+  if (spec?.budget && budget.kind === "none") {
+    budget = { kind: "declared", budget: spec.budget };
+    budgetBy = "spec";
+  }
+
+  const declaredBy: ContractOrigins = {
+    ...(effectsBy ? { effects: effectsBy } : {}),
+    ...(capabilitiesBy ? { capabilities: capabilitiesBy } : {}),
+    ...(budgetBy ? { budget: budgetBy } : {}),
+  };
 
   let boundary = jsDoc.boundary;
-  if (config.boundary !== undefined) {
+  if (config?.boundary !== undefined) {
     if (jsDoc.boundary.kind === "none") {
       boundary = { kind: "declared", reason: config.boundary };
     } else if (jsDoc.boundary.kind === "declared" && jsDoc.boundary.reason !== config.boundary) {
@@ -195,7 +262,7 @@ function mergeContract(
   // No `@entrypoint` is not a declaration that the function is *not* one, so
   // only an explicit `entrypoint: false` beside the tag is a disagreement.
   let entrypoint = jsDoc.entrypoint;
-  if (config.entrypoint !== undefined) {
+  if (config?.entrypoint !== undefined) {
     if (!jsDoc.entrypoint && config.entrypoint) entrypoint = true;
     else if (jsDoc.entrypoint && !config.entrypoint) {
       divergences.push({ tag: "entrypoint", jsDoc: "true", config: "false" });
@@ -208,7 +275,7 @@ function mergeContract(
     budget,
     boundary,
     entrypoint,
-    ...(declaredBy ? { declaredBy } : {}),
+    ...(Object.keys(declaredBy).length > 0 ? { declaredBy } : {}),
     ...(divergences.length > 0 ? { divergences } : {}),
   };
 }
@@ -229,7 +296,16 @@ function expandConfigEffects(names: readonly string[], aliases: EffectAliases): 
   return effectSetOf(...effects);
 }
 
-function configCapabilitySet(tokens: readonly string[]): CapabilitySet {
+/**
+ * A list of capability strings — a config `capabilities` list, or a spec's
+ * literal array — turned into a {@link CapabilitySet}.
+ *
+ * A token that does not parse is dropped rather than guessed at. It is not
+ * lost: `validateConfig` rejects a malformed config token, and a malformed
+ * spec token leaves the set narrower than the text the spec wrote, which
+ * `diagnoseRuntimeWrappers` then reports as `AMB-E010` against that text.
+ */
+function capabilitySetOf(tokens: readonly string[]): CapabilitySet {
   const capabilities = tokens
     .map(parseCapability)
     .filter((capability): capability is NonNullable<typeof capability> => capability !== undefined);

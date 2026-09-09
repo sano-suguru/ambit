@@ -41,6 +41,28 @@ export function isOnExceed(value: string): value is OnExceed {
   return (ON_EXCEED as readonly string[]).includes(value);
 }
 
+/**
+ * A {@link BudgetInput} with its omitted policy resolved, so a spec's budget
+ * and a parsed `@budget` are the same shape.
+ *
+ * `parseBudgetTag` already writes `throw` into a tag that omits it, so the
+ * JSDoc side has no absent state; leaving a spec's key absent would make
+ * `@budget timeMs=500` and `{ timeMs: 500 }` disagree over a policy both sides
+ * apply identically. The numeric limits are *not* defaulted: there `timeMs=500`
+ * against no `timeMs` is a real disagreement.
+ *
+ * Field by field rather than a spread: the input may carry a discriminant
+ * (`WrapperBudget`'s `kind`) that has no business in a {@link Budget}.
+ */
+export function budgetFrom(input: BudgetInput): Budget {
+  return {
+    ...(input.timeMs === undefined ? {} : { timeMs: input.timeMs }),
+    ...(input.costUsd === undefined ? {} : { costUsd: input.costUsd }),
+    ...(input.llmCalls === undefined ? {} : { llmCalls: input.llmCalls }),
+    onExceed: input.onExceed ?? DEFAULT_ON_EXCEED,
+  };
+}
+
 const NUMERIC_KEYS = ["timeMs", "costUsd", "llmCalls"] as const;
 type NumericKey = (typeof NUMERIC_KEYS)[number];
 

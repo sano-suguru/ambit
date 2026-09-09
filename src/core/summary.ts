@@ -170,8 +170,34 @@ export interface ContractDivergence {
   readonly config: string;
 }
 
-/** Where a declaration came from, for `--coverage`'s `declared-by` breakdown. */
-export type DeclarationOrigin = "jsdoc" | "config";
+/**
+ * Where one declaration came from.
+ *
+ * `"spec"` is a `withAmbit` / `ambitHandler` registration in the same file as
+ * the handler it names, whose `capabilities` / `budget` the source fixes as
+ * literals (DESIGN.md §4.4). It is a declaration, not an observation: the
+ * runtime establishes exactly that set, so the source has already said what
+ * the contract is and the JSDoc tag beside it would only repeat it.
+ *
+ * Only `"jsdoc"` and `"config"` can ever appear on {@link
+ * ContractOrigins.effects}: `@effects` is never delivered to the runtime and
+ * so has no place in a spec.
+ */
+export type DeclarationOrigin = "jsdoc" | "config" | "spec";
+
+/**
+ * Which side supplied each contract tag, for the tags anything supplied.
+ *
+ * Per tag rather than per function because the sides fill different tags: a
+ * function can take `@effects` from its JSDoc and its capability set from the
+ * registration beside it, and `--coverage`'s `declared-by` breakdown counts
+ * the `effects` half (DESIGN.md §4.1「コード外宣言」).
+ */
+export interface ContractOrigins {
+  readonly effects?: DeclarationOrigin;
+  readonly capabilities?: DeclarationOrigin;
+  readonly budget?: DeclarationOrigin;
+}
 
 /** Ambit's own representation of one function, independent of any backend. */
 export interface FunctionSummary {
@@ -192,12 +218,12 @@ export interface FunctionSummary {
   /** Only `ambit.config.ts` can declare this symbol — see {@link ExtractedFunction.configOnly}. */
   readonly configOnly?: true;
   /**
-   * Which side supplied {@link FunctionSummary.declared}, when anything did.
-   * Absent for an undeclared function. `--coverage` counts the two apart so a
-   * codebase can see how much of its contract surface lives outside the code
-   * (DESIGN.md §4.1「コード外宣言」).
+   * Which side supplied each declared tag, when anything did. Absent for a
+   * function nothing declared anything for. `--coverage` counts the `effects`
+   * half apart so a codebase can see how much of its contract surface lives
+   * outside the code (DESIGN.md §4.1「コード外宣言」).
    */
-  readonly declaredBy?: DeclarationOrigin;
+  readonly declaredBy?: ContractOrigins;
   /** Tags JSDoc and config both declared and disagreed on. JSDoc is what {@link FunctionSummary} carries. */
   readonly divergences?: readonly ContractDivergence[];
   readonly declared: DeclaredEffects;

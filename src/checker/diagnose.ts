@@ -15,11 +15,10 @@ import type {
   StubCall,
   SymbolId,
   UncarriedContract,
-  WrapperBudget,
 } from "../core/index.ts";
 import {
+  budgetFrom,
   callLeavesUnknown,
-  DEFAULT_ON_EXCEED,
   displayName,
   excessCapabilities,
   excessEffects,
@@ -835,8 +834,7 @@ function diagnoseWrapperBudget(
   }
 
   const declared = handler.budget.kind === "declared" ? handler.budget.budget : undefined;
-  const wrapped =
-    wrapper.budget.kind === "literal" ? withDefaultOnExceed(wrapper.budget) : undefined;
+  const wrapped = wrapper.budget.kind === "literal" ? budgetFrom(wrapper.budget) : undefined;
   if (sameBudget(declared, wrapped)) return [];
 
   return [
@@ -851,24 +849,6 @@ function diagnoseWrapperBudget(
       engine,
     },
   ];
-}
-
-/**
- * The spec's budget with `onExceed` defaulted, so the two sides are comparable.
- *
- * `parseBudgetTag` already writes `throw` into a `@budget` that omits it, so
- * the JSDoc side has no absent state; leaving the spec's key absent would make
- * `@budget timeMs=500` and `{ timeMs: 500 }` disagree over a policy both sides
- * apply identically. The numeric limits are not defaulted: there `timeMs=500`
- * against no `timeMs` is a real disagreement.
- */
-function withDefaultOnExceed(budget: Extract<WrapperBudget, { kind: "literal" }>): Budget {
-  return {
-    ...(budget.timeMs === undefined ? {} : { timeMs: budget.timeMs }),
-    ...(budget.costUsd === undefined ? {} : { costUsd: budget.costUsd }),
-    ...(budget.llmCalls === undefined ? {} : { llmCalls: budget.llmCalls }),
-    onExceed: budget.onExceed ?? DEFAULT_ON_EXCEED,
-  };
 }
 
 /** Field-by-field equality; a limit present on one side only is a disagreement. */
