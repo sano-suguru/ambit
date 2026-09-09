@@ -126,6 +126,7 @@ of `unknown` in the fixture.
 |---|---|
 | `check src`, five consecutive runs | 0.80 / 0.74 / 0.84 / 0.78 / 0.74 s |
 | `check src` after changing one contract comment | 0.81 s |
+| `check src`, five consecutive runs, 2026-09-09 (21 files, 176 functions) | 0.90 / 0.77 / 0.92 / 0.78 / 0.78 s |
 
 The re-check costs the same as the first check because **nothing is cached**.
 DESIGN.md §6.2's resident/incremental path is not implemented, so "初回検査"
@@ -133,8 +134,9 @@ and "変更後の再検査" are the same operation. That is the honest reading o
 these numbers, and the reason no threshold has been set: there is nothing yet
 to compare against.
 
-The table above is the original measurement and has **not** been superseded.
-Re-running the same command while adding the client stubs gave 1.72–3.20 s, and
+The first two rows are the original measurement and have **not** been
+superseded; the 2026-09-09 row is a second five-run measurement on the same
+machine, and 0.77–0.92 s is the range README quotes. Re-running the same command while adding the client stubs gave 1.72–3.20 s, and
 re-running it on the pre-change tree in the same session gave 2.58–3.63 s —
 both far above the recorded range, and the older tree the slower of the two.
 That is machine load, not a change in the analysis, and neither range is
