@@ -48,7 +48,9 @@ enters, and `@boundary reason="…"` stops analysis of a body and trusts its
 declared contract in its place.
 
 ```ts
-import { withAmbit } from "ambit/runtime";
+import { installFetchHook, withAmbit } from "ambit/runtime";
+
+installFetchHook();
 
 /**
  * @entrypoint
@@ -56,25 +58,28 @@ import { withAmbit } from "ambit/runtime";
  * @capabilities http:get:api.example.com
  * @budget timeMs=500 costUsd=0.01
  */
-async function handler(req: Request): Promise<void> {
-  await fetch("https://api.example.com/rates");   // granted
-  await fetch("https://elsewhere.example/steal"); // AMB-E009 at check time
+async function refreshRates(): Promise<void> {
+  await fetch("https://api.example.com/rates");
+  // await fetch("https://elsewhere.example/steal"); // AMB-E009 if this line is added
 }
 
-export const GET = withAmbit(
+export const refresh = withAmbit(
   { capabilities: ["http:get:api.example.com"], budget: { timeMs: 500, onExceed: "throw" } },
-  handler,
+  refreshRates,
 );
 ```
 
-`ambit check` reads the JSDoc: it rejects the second `fetch` against the
-granted target, and compares the literal array in `withAmbit` with the
-handler's `@capabilities`. `withAmbit` enforces the same set while the code
-runs — with `installFetchHook()` installed, a `fetch` to an ungranted host
-throws before reaching the socket, and `timeMs` is measured against the wall
-clock. Outside any entrypoint `setUnscopedPolicy("allow" | "warn" | "deny")`
-decides, defaulting to `allow`, so adopting the runtime does not break code
-that has no contracts yet.
+That file passes `ambit check` as written; uncommenting the second `fetch`
+fails it. The capability list appears twice on purpose: the JSDoc is what the
+checker reads, the literal array is what the runtime enforces, and `AMB-E010`
+fails the check if the two ever disagree.
+
+At run time `withAmbit` puts that same set on the context. With
+`installFetchHook()` called, a `fetch` to an ungranted host throws
+`AmbitCapabilityError` before it reaches the socket, and `timeMs` is measured
+against the wall clock. Outside any entrypoint
+`setUnscopedPolicy("allow" | "warn" | "deny")` decides, defaulting to `allow`,
+so adopting the runtime does not break code that has no contracts yet.
 
 | | Static check | Runtime block | Audit only | Unsupported |
 |---|---|---|---|---|
