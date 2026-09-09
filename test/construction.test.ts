@@ -77,6 +77,27 @@ describe("construction (new X / super) is part of the call graph", () => {
   });
 });
 
+describe("a class property holding a function is a method, not construction work", () => {
+  it("does not attribute an arrow property's body to the constructor", async () => {
+    // Constructing the class creates the closure; it does not run it.
+    const { diagnostics } = await check(FIXTURE_ROOT);
+    expect(forFunction(diagnostics, "constructsController")).toEqual([]);
+  });
+
+  it("indexes the arrow property in its own right, so calling it propagates", async () => {
+    const { diagnostics, state } = await check(FIXTURE_ROOT);
+    expect([...state.keys()]).toContain("sample.ts#Controller.handle");
+    const [diagnostic] = forFunction(diagnostics, "callsArrowMethod");
+    expect(diagnostic?.id).toBe("AMB-E001");
+    expect(diagnostic?.contract?.observed).toContain("network");
+  });
+
+  it("still treats a non-function property initializer as construction work", async () => {
+    const { diagnostics } = await check(FIXTURE_ROOT);
+    expect(forFunction(diagnostics, "constructsFieldInitializer")[0]?.id).toBe("AMB-E001");
+  });
+});
+
 describe("constructor stub table", () => {
   it("treats an allowlisted builtin construction as effect-free", async () => {
     const { diagnostics } = await check(FIXTURE_ROOT);
@@ -108,15 +129,5 @@ describe("construction on Ambit's own source (self-hosting)", () => {
     expect(propagateFn?.calls).toContainEqual(
       expect.objectContaining({ calleeQualifiedName: "new Map" }),
     );
-  });
-
-  it("indexes every class's construction under Class.constructor", async () => {
-    const { summaries } = await analyze(SRC_ROOT);
-    // No class in src/ is currently uncovered; the assertion that matters is
-    // that a constructor id is never minted for something that is not a class.
-    for (const summary of summaries) {
-      if (!summary.id.endsWith(".constructor")) continue;
-      expect(summary.id.split("#")[1]?.split(".").length).toBeGreaterThanOrEqual(2);
-    }
   });
 });

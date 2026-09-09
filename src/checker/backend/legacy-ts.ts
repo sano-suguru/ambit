@@ -186,6 +186,7 @@ type FunctionLikeDeclaration =
    */
   | ts.ConstructorDeclaration
   | ts.ClassDeclaration
+  | (ts.PropertyDeclaration & { readonly initializer: ts.FunctionExpression | ts.ArrowFunction })
   | (ts.VariableDeclaration & { readonly initializer: ts.FunctionExpression | ts.ArrowFunction })
   | (ts.PropertyAssignment & { readonly initializer: ts.FunctionExpression | ts.ArrowFunction });
 
@@ -214,6 +215,14 @@ function collectFunctionLikeDeclarations(
       const classPath = [...containerPath, node.name.text];
       for (const member of node.members) {
         if (ts.isMethodDeclaration(member) && member.name && ts.isIdentifier(member.name)) {
+          results.push([member, [...classPath, member.name.text]]);
+        }
+        // `handle = async (req) => { … }` is a method written as a property.
+        // It must be indexed in its own right, or its body would be
+        // attributed to the constructor — construction creates the closure,
+        // it does not run it, and a class of arrow-shaped request handlers
+        // would make every `new Controller()` look like it hit the network.
+        if (isFunctionValuedProperty(member)) {
           results.push([member, [...classPath, member.name.text]]);
         }
       }
@@ -442,7 +451,9 @@ function isIndexedInitializer(node: ts.Node, indexed: ReadonlyMap<ts.Node, Symbo
   const parent = node.parent;
   return (
     parent !== undefined &&
-    (ts.isVariableDeclaration(parent) || ts.isPropertyAssignment(parent)) &&
+    (ts.isVariableDeclaration(parent) ||
+      ts.isPropertyAssignment(parent) ||
+      ts.isPropertyDeclaration(parent)) &&
     parent.initializer === node &&
     indexed.has(parent)
   );
@@ -504,7 +515,7 @@ function isNestedInAnotherFunction(node: ts.Node): boolean {
 }
 
 function nameOrNode(decl: FunctionLikeDeclaration): ts.Node {
-  if (ts.isVariableDeclaration(decl)) return decl.name;
+  if (ts.isVariableDeclaration(decl) || ts.isPropertyDeclaration(decl)) return decl.name;
   return decl.name ?? decl;
 }
 
@@ -518,7 +529,11 @@ function nameOrNode(decl: FunctionLikeDeclaration): ts.Node {
  * from a single symbol.
  */
 function bodiesOf(decl: FunctionLikeDeclaration): readonly ts.Node[] {
-  if (ts.isVariableDeclaration(decl) || ts.isPropertyAssignment(decl)) {
+  if (
+    ts.isVariableDeclaration(decl) ||
+    ts.isPropertyAssignment(decl) ||
+    ts.isPropertyDeclaration(decl)
+  ) {
     return decl.initializer ? [decl.initializer] : [];
   }
   if (ts.isClassDeclaration(decl)) return propertyInitializersOf(decl);
@@ -532,11 +547,36 @@ function bodiesOf(decl: FunctionLikeDeclaration): readonly ts.Node[] {
   return decl.body ? [decl.body] : [];
 }
 
+/**
+ * The property initializers that actually run when the class is constructed.
+ *
+ * A property holding a function *value* is excluded: constructing the class
+ * creates the closure, it does not call it. Those bodies belong to the
+ * property's own entry (`isFunctionValuedProperty`), or — when the name has no
+ * stable declaration path — to nothing, where `collectSkippedFunctions`
+ * counts them, as it did before constructions were indexed at all.
+ */
 function propertyInitializersOf(node: ts.ClassLikeDeclaration): readonly ts.Node[] {
   return node.members
     .filter(ts.isPropertyDeclaration)
     .map((member) => member.initializer)
-    .filter((initializer): initializer is ts.Expression => initializer !== undefined);
+    .filter((initializer): initializer is ts.Expression => initializer !== undefined)
+    .filter(
+      (initializer) => !ts.isArrowFunction(initializer) && !ts.isFunctionExpression(initializer),
+    );
+}
+
+/** `name = () => {…}` / `name = function () {…}` on a class: a method written as a property. */
+function isFunctionValuedProperty(member: ts.ClassElement): member is ts.PropertyDeclaration & {
+  readonly name: ts.Identifier;
+  readonly initializer: ts.FunctionExpression | ts.ArrowFunction;
+} {
+  return (
+    ts.isPropertyDeclaration(member) &&
+    ts.isIdentifier(member.name) &&
+    member.initializer !== undefined &&
+    (ts.isArrowFunction(member.initializer) || ts.isFunctionExpression(member.initializer))
+  );
 }
 
 // ---- JSDoc extraction ---------------------------------------------------

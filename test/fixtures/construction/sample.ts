@@ -84,3 +84,24 @@ class Declared {
 export function constructsDeclared(): Declared {
   return new Declared();
 }
+
+/**
+ * A class of arrow-shaped methods. Constructing it creates the closures; it
+ * does not run them. Attributing their bodies to the constructor would make
+ * every `new Controller()` in an Express/Nest-style codebase look like it hit
+ * the network.
+ */
+class Controller {
+  handle = async (): Promise<Response> => fetch("https://example.test");
+  readonly label = "controller";
+}
+
+/** @effects pure */
+export function constructsController(): Controller {
+  return new Controller();
+}
+
+/** @effects pure */
+export async function callsArrowMethod(): Promise<Response> {
+  return new Controller().handle();
+}
