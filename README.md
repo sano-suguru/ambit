@@ -68,6 +68,27 @@ and `--strict` turns those warnings into errors. Linking a contract to the
 handler that actually runs, after a build or bundler moves either half, is
 DESIGN.md §12 and still open.
 
+## Why not ESLint / Effect-TS / dependency-cruiser
+
+**ESLint custom rules.** A lint rule fires on the AST node in front of it.
+Ambit's unit is the call graph: an `@effects pure` function that calls an
+undeclared helper that calls `fetch` is an error at the declaration, with the
+path reported. Where a call cannot be resolved, Ambit reports `unknown`
+instead of passing it, so the frontier of the analysis stays visible rather
+than silently counting as safe.
+
+**Effect systems such as Effect-TS.** There, effects live in the types of the
+values you construct, so the code is written in that style throughout. Ambit's
+contracts are JSDoc comments on ordinary TypeScript: adding them changes no
+runtime behavior, removing Ambit is a small diff, and the code still
+type-checks and runs either way.
+
+**dependency-cruiser.** Its rules constrain the import edges between modules.
+Ambit constrains what one function may do and which resource it may touch, and
+it answers to an agent: `check --format json` is NDJSON,
+one diagnostic per line, carrying the declared and observed contract, the
+propagation path, and applicable edits.
+
 ## Quick start
 
 Requires Node.js 24.
