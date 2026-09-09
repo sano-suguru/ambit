@@ -97,7 +97,23 @@ describe("distribution: pack, install into a clean project, uninstall", () => {
     // that only works from a clone is not a distribution.
     const installed = await run(
       "npm",
-      ["install", "--no-audit", "--no-fund", "-D", tarball, "typescript@6.0.3", "hono@4"],
+      [
+        "install",
+        "--no-audit",
+        "--no-fund",
+        "-D",
+        tarball,
+        "typescript@6.0.3",
+        "hono@4",
+        // README's Next.js snippets are checked against the real `next` types,
+        // not against a locally declared shape: `ambit/runtime/next` types its
+        // `decode` with `NextRequest`, and `skipLibCheck` would quietly turn an
+        // unresolved one into `any` — a snippet that type-checks for the wrong
+        // reason. `@types/node` is what `process.env.NEXT_RUNTIME` needs, and
+        // TypeScript 6 only picks it up where `types` names it.
+        "next@16",
+        "@types/node@24",
+      ],
       consumer,
     );
     expect(installed.exitCode, installed.stderr).toBe(0);
@@ -314,21 +330,40 @@ export default defineConfig({
       .map((match) => match[1] ?? "")
       .filter((source) => source.includes('from "ambit/'));
 
-    // The examples are one program across two blocks — the adapter block calls
-    // `refreshRates`, which the block above it declares — so they are checked
-    // concatenated, in document order, rather than one at a time.
-    const program = examples.join("\n");
+    // A block whose first line names a file (`// app/rates/route.ts`) is that
+    // file: Next.js decides what a module means by where it sits, so a
+    // `route.ts` and an `instrumentation.ts` cannot be one program without
+    // saying something false about both. Every other block is one program
+    // across its blocks — the Hono block calls `refreshRates`, which the block
+    // above it declares — concatenated in document order.
+    const named = new Map<string, string>();
+    const unnamed: string[] = [];
+    for (const source of examples) {
+      const marker = /^\/\/ ([\w./[\]-]+\.ts)\n/.exec(source);
+      if (marker?.[1]) named.set(marker[1], source);
+      else unnamed.push(source);
+    }
+    const program = unnamed.join("\n");
 
     // A run that extracted nothing must never look like a clean run
-    // (DESIGN.md §3.4): an empty program type-checks. Both registration paths
-    // README documents have to be in what was extracted.
+    // (DESIGN.md §3.4): an empty program type-checks. Every registration path
+    // README documents has to be in what was extracted.
     expect(examples.length).toBeGreaterThan(0);
     expect(program).toContain("withAmbit(");
     expect(program).toContain("ambitHandler(");
+    expect([...named.keys()]).toEqual(
+      expect.arrayContaining(["app/rates/route.ts", "instrumentation.ts"]),
+    );
+    expect(named.get("app/rates/route.ts")).toContain("ambitRoute(");
 
     // Outside `src/`, for the reason the adapter test is: the uninstall test
     // type-checks `src/` after the package is gone.
     await fs.writeFile(path.join(consumer, "readme.ts"), program);
+    for (const [file, source] of named) {
+      const full = path.join(consumer, "readme", file);
+      await fs.mkdir(path.dirname(full), { recursive: true });
+      await fs.writeFile(full, source);
+    }
     await fs.writeFile(
       path.join(consumer, "tsconfig.readme.json"),
       `${JSON.stringify(
@@ -338,11 +373,12 @@ export default defineConfig({
             module: "NodeNext",
             moduleResolution: "nodenext",
             lib: ["ES2023", "DOM"],
+            types: ["node"],
             strict: true,
             noEmit: true,
             skipLibCheck: true,
           },
-          include: ["readme.ts"],
+          include: ["readme.ts", "readme/**/*.ts"],
         },
         null,
         2,

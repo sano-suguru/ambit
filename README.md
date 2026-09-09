@@ -211,6 +211,60 @@ app.get("/rates", ambitHandler(
 ));
 ```
 
+### Next.js (App Router)
+
+On Next.js the adapter registers a Route Handler. `app/**/route.ts` exports one
+function per HTTP method, so the contract goes in the `ambitRoute` call the
+method is assigned from:
+
+```ts
+// app/rates/route.ts
+import { ambitRoute } from "ambit/runtime/next";
+
+/**
+ * @entrypoint
+ * @effects network
+ */
+async function currentRate(currency: string): Promise<{ readonly rate: number }> {
+  const response = await fetch(`https://api.example.com/rates?base=${currency}`);
+  return (await response.json()) as { readonly rate: number };
+}
+
+export const GET = ambitRoute(
+  { capabilities: ["http:get:api.example.com"], budget: { timeMs: 500 } },
+  currentRate,
+  (request) => [request.nextUrl.searchParams.get("base") ?? "USD"] as const,
+);
+```
+
+The hooks have to be installed once per server process, before any route runs.
+Next.js has one place for that — `instrumentation.ts` at the project root, whose
+`register()` it calls once at startup:
+
+```ts
+// instrumentation.ts
+import {
+  installChildProcessHook,
+  installFetchHook,
+  installFsHook,
+} from "ambit/runtime";
+
+export function register(): void {
+  // `register()` runs on the Edge runtime too, where none of these hooks
+  // apply — `node:fs` and `node:child_process` do not exist there and nothing
+  // would be enforced. The Node.js runtime is the only one that gets them.
+  if (process.env.NEXT_RUNTIME !== "nodejs") return;
+
+  installFetchHook();
+  installFsHook();
+  installChildProcessHook();
+}
+```
+
+`installPgHook(pg)` goes there too where the app uses `pg`; it takes the module
+from the caller rather than importing it, so it is left out above to keep the
+snippet dependency-free.
+
 At run time `withAmbit` puts that same set on the context, and four hooks check
 operations against it — `installFetchHook()`, `installFsHook()`,
 `installChildProcessHook()`, `installPgHook(pg)`. An ungranted operation throws
