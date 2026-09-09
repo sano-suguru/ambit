@@ -11,11 +11,12 @@ import { applyEdits } from "./support/apply-edits.ts";
  * The accidents this fixture exists to stop, run end to end against a project
  * shaped like one a coding agent would produce: HTTP handlers with
  * `@entrypoint` contracts, a `pg` pool and a Prisma client, an LLM SDK, a
- * barrel file, and pure domain logic. The six accidents are the ones a coding
+ * barrel file, and pure domain logic. The seven accidents are the ones a coding
  * agent actually causes: a side effect added to a `pure` function (`fetch`, a
  * database query, an LLM call), a network call reached through a barrel file, a
- * literal URL outside the granted capability, and a `ambitHandler` capability list
- * that drifts from the handler's JSDoc.
+ * literal URL outside the granted capability, a `ambitHandler` capability list
+ * that drifts from the handler's JSDoc, and a `spec.budget` widened away from
+ * the handler's `@budget`.
  *
  * The fixture depends on nothing installed: `pg`, `@prisma/client`, `openai`,
  * `hono` and `ambit/runtime` are declared under `types/` and the tsconfig sets
@@ -403,6 +404,32 @@ export const GET = ambitHandler(`,
         // Not knowing is not a violation: it must not fail the build.
         expect(errors(result)).toEqual([]);
         expect(result.exitCode).toBe(0);
+      },
+    );
+  }, 60_000);
+
+  it("accident 7: a spec.budget widened away from the handler's @budget is AMB-E011", async () => {
+    // The half of §4.4's duplication that is not the capability set. Widening
+    // `timeMs` in the spec alone moves the limit the runtime applies without
+    // touching the limit the source declares.
+    await withVariant(
+      [
+        {
+          file: "src/routes/orders.ts",
+          find: '{ capabilities: ["db:write:orders"], budget: { timeMs: 800, onExceed: "throw" } },',
+          replace:
+            '{ capabilities: ["db:write:orders"], budget: { timeMs: 5000, onExceed: "throw" } },',
+        },
+      ],
+      (result) => {
+        const diagnostic = at(result, "AMB-E011", "src/routes/orders.ts", 28);
+        expect(diagnostic?.message).toContain("timeMs=5000");
+        expect(diagnostic?.message).toContain("timeMs=800");
+        expect(diagnostic?.message).toContain("createOrder");
+        expect(diagnostic?.fixes).toEqual([]);
+        // The capability half still agrees, so it must stay quiet.
+        expect(result.diagnostics.filter((d) => d.id === "AMB-E010")).toEqual([]);
+        expect(result.exitCode).toBe(1);
       },
     );
   }, 60_000);
