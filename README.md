@@ -89,6 +89,27 @@ it answers to an agent: `check --format json` is NDJSON,
 one diagnostic per line, carrying the declared and observed contract, the
 propagation path, and applicable edits.
 
+## Designed for coding agents
+
+`check --format json` emits NDJSON: one diagnostic per line, then a summary
+line, meant to be piped into an agent loop:
+
+```console
+$ node src/cli/main.ts check src --format json
+{"id":"AMB-E001","severity":"error","contract":{"declared":["pure"],"observed":["network"]},"fixes":[{"kind":"widen","consistentWithContract":false,"edits":[{"file":"tax.ts","range":[[0,4],[0,17]],"replacement":"@effects network"}]}], ...}
+{"kind":"summary","filesAnalyzed":1,"functionsExtracted":1,"functionsDeclared":1}
+$ apply fixes[0].edits                            # 0-based, end-exclusive
+$ node src/cli/main.ts check src --format json    # re-check
+```
+
+The patch Ambit offers widens the contract to what the code actually does. It
+is marked `consistentWithContract: false` and carries the callers it would
+affect, so the agent — or the human reading its output — can tell "the contract
+was wrong" from "the code was wrong". Ambit does not invent the other patch,
+the one that keeps the contract and rewrites the code. `ambit init` proposes
+`@effects` the same way, and proposes nothing for a function that reached
+`unknown`.
+
 ## Quick start
 
 Requires Node.js 24.
