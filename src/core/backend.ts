@@ -220,9 +220,10 @@ export interface ExtractedFunction {
 }
 
 /**
- * A hand-written `withAmbit(spec, handler)` from `ambit/runtime`, as the source
- * shows it (DESIGN.md §4.4: 「アダプタがない場合は `withAmbit(spec, handler)`
- * を手動で挟む」).
+ * A call that establishes an entrypoint's context, as the source shows it: a
+ * hand-written `withAmbit(spec, handler)` from `ambit/runtime`, or a framework
+ * adapter's registration (`ambitHandler(spec, handler, decode)` from
+ * `ambit/runtime/hono`) — DESIGN.md §4.4「契約とハンドラの対応付け（決定）」.
  *
  * Ambit reads it to check one thing only: that the capability list the runtime
  * would establish is the one the handler's JSDoc declares. Written twice, the
@@ -234,8 +235,14 @@ export interface ExtractedFunction {
  * cannot reach is reported rather than passed over.
  */
 export interface RuntimeWrapper {
-  /** The `withAmbit(...)` call itself: where a mismatch is reported. */
+  /** The call itself: where a mismatch is reported. */
   readonly location: SourceLocation;
+  /**
+   * The exported name that was called (`withAmbit`, `ambitHandler`), so a
+   * diagnostic names what the source actually wrote. Not the module specifier:
+   * the reader is looking at the call, not the import.
+   */
+  readonly wrapper: string;
   /**
    * The capability strings in the spec's literal `capabilities` array. An
    * empty array is a real grant of nothing, not a missing one — that case is

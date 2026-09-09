@@ -659,12 +659,21 @@ function isFunctionValuedProperty(member: ts.ClassElement): member is ts.Propert
 // ---- runtime wrappers ---------------------------------------------------
 
 /**
- * The export `withAmbit` is imported from. Matched by module specifier and
- * exported name, the same way the stub tables match everything else — a local
- * `as` alias or a re-export chain does not hide it, and a `withAmbit` of one's
- * own from somewhere else is not mistaken for it.
+ * The calls that establish an entrypoint context. Matched by module specifier
+ * and exported name, the same way the stub tables match everything else — a
+ * local `as` alias or a re-export chain does not hide one, and a `withAmbit`
+ * of one's own from somewhere else is not mistaken for it.
+ *
+ * The framework adapter is here because DESIGN.md §4.4 chose explicit
+ * registration, which leaves the contract written twice; the source-level
+ * agreement check has to reach the adapter's registrations or the choice would
+ * cost a check without saying so. Both take `(spec, handler, …)` in the same
+ * two positions, which is what makes one extraction serve both.
  */
-const RUNTIME_WRAPPER_NAME = "ambit/runtime.withAmbit";
+const RUNTIME_WRAPPER_NAMES: ReadonlyMap<string, string> = new Map([
+  ["ambit/runtime.withAmbit", "withAmbit"],
+  ["ambit/runtime/hono.ambitHandler", "ambitHandler"],
+]);
 
 /**
  * Every `withAmbit(spec, handler)` in the file, with what the source fixes
@@ -683,8 +692,13 @@ function collectRuntimeWrappers(
   const wrappers: RuntimeWrapper[] = [];
 
   function visit(node: ts.Node): void {
-    if (ts.isCallExpression(node) && isRuntimeWrapperCallee(checker, node.expression)) {
-      wrappers.push(runtimeWrapperOf(node, sourceFile, checker, declaredNodeToId, absoluteRoot));
+    if (ts.isCallExpression(node)) {
+      const wrapper = runtimeWrapperNameOf(checker, node.expression);
+      if (wrapper !== undefined) {
+        wrappers.push(
+          runtimeWrapperOf(node, wrapper, sourceFile, checker, declaredNodeToId, absoluteRoot),
+        );
+      }
     }
     ts.forEachChild(node, visit);
   }
@@ -693,12 +707,14 @@ function collectRuntimeWrappers(
   return wrappers;
 }
 
-function isRuntimeWrapperCallee(checker: ts.TypeChecker, callee: ts.Expression): boolean {
-  return importedQualifiedNameOf(checker, callee) === RUNTIME_WRAPPER_NAME;
+function runtimeWrapperNameOf(checker: ts.TypeChecker, callee: ts.Expression): string | undefined {
+  const qualified = importedQualifiedNameOf(checker, callee);
+  return qualified === undefined ? undefined : RUNTIME_WRAPPER_NAMES.get(qualified);
 }
 
 function runtimeWrapperOf(
   node: ts.CallExpression,
+  wrapper: string,
   sourceFile: ts.SourceFile,
   checker: ts.TypeChecker,
   declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
@@ -709,12 +725,12 @@ function runtimeWrapperOf(
   const handler = sameFileHandlerOf(node.arguments[1], sourceFile, checker, declaredNodeToId);
 
   if (capabilities === undefined) {
-    return { location, unmatchedReason: "dynamic-capabilities" };
+    return { location, wrapper, unmatchedReason: "dynamic-capabilities" };
   }
   if (handler === undefined) {
-    return { location, capabilities, unmatchedReason: "handler-not-in-this-file" };
+    return { location, wrapper, capabilities, unmatchedReason: "handler-not-in-this-file" };
   }
-  return { location, capabilities, handler };
+  return { location, wrapper, capabilities, handler };
 }
 
 /**

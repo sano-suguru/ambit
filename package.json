@@ -25,6 +25,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",
     "@types/node": "^24.13.3",
+    "hono": "^4.13.7",
     "vite": "^8.2.2",
     "vitest": "^4.1.11"
   },
@@ -49,6 +50,10 @@
     "./runtime": {
       "types": "./dist/runtime/index.d.ts",
       "import": "./dist/runtime/index.js"
+    },
+    "./runtime/hono": {
+      "types": "./dist/runtime/hono.d.ts",
+      "import": "./dist/runtime/hono.js"
     }
   }
 }

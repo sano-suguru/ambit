@@ -604,10 +604,12 @@ const UNCOMPARED_WRAPPER_REASON: Record<NonNullable<RuntimeWrapper["unmatchedRea
 };
 
 /**
- * DESIGN.md §4.4: with no framework adapter, the capability set is written
- * twice — once as `@capabilities` on the handler, once in the
- * `withAmbit(spec, handler)` beside it. Nothing checked that the two agree, so
- * an agent adding `db:write:users` to one of them expanded authority silently.
+ * DESIGN.md §4.4: the capability set is written twice — once as
+ * `@capabilities` on the handler, once in the `withAmbit(spec, handler)` or
+ * `ambitHandler(spec, handler, decode)` beside it. Explicit registration is
+ * what §4.4 chose, so the duplication stays; nothing checked that the two
+ * agree, and an agent adding `db:write:users` to one of them expanded
+ * authority silently.
  *
  * This compares the two **as source**. §12's 「契約とハンドラの対応付け」 —
  * matching a contract to a handler after a build strips the comments, or after
@@ -664,7 +666,7 @@ export function diagnoseRuntimeWrappers(
       id: "AMB-E010",
       severity: "error",
       category: "capabilities",
-      message: `withAmbit grants [${wrapped.join(", ")}] but ${displayName(handler.id)} declares @capabilities [${declared.join(", ")}]`,
+      message: `${wrapper.wrapper} grants [${wrapped.join(", ")}] but ${displayName(handler.id)} declares @capabilities [${declared.join(", ")}]`,
       location: wrapper.location,
       contract: {
         declared,
@@ -690,7 +692,7 @@ function uncomparedWrapper(
     id: "AMB-W004",
     severity: "warning",
     category: "capabilities",
-    message: `withAmbit here was not compared with a declared contract: ${reason}. The check is on the source only (DESIGN.md §12)`,
+    message: `${wrapper.wrapper} here was not compared with a declared contract: ${reason}. The check is on the source only (DESIGN.md §4.4)`,
     location: wrapper.location,
     fixes: [],
     docs: "docs/diagnostics/README.md#amb-w004",
