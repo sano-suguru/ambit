@@ -16,12 +16,14 @@ import { isEffectsContract } from "../../src/core/index.ts";
  */
 export const NO_OTHER_CONTRACTS: {
   readonly tagLocations: ReadonlyMap<string, SourceLocation>;
+  readonly declarationStart: SourceLocation;
   readonly capabilities: DeclaredCapabilities;
   readonly budget: DeclaredBudget;
   readonly boundary: DeclaredBoundary;
   readonly entrypoint: false;
 } = {
   tagLocations: new Map(),
+  declarationStart: { file: "f.ts", line: 1, col: 1, endLine: 1, endCol: 1 },
   capabilities: { kind: "none" },
   budget: { kind: "none" },
   boundary: { kind: "none" },

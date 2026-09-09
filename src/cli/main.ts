@@ -8,6 +8,7 @@ import {
   diagnoseUncarriedContracts,
   legacyTsBackend,
   propagate,
+  proposeContracts,
   summarizeExtractedFiles,
 } from "../checker/index.ts";
 import type { Diagnostic } from "../core/index.ts";
@@ -17,6 +18,10 @@ import type { Diagnostic } from "../core/index.ts";
  * from "the check itself could not run" (DESIGN.md §3.4 — never turn an
  * analysis failure into "no violations").
  */
+const USAGE = `Usage: ambit check <dir> [--format json] [--coverage] [--strict]
+       ambit init  <dir> [--format json]   propose @effects for undeclared functions
+`;
+
 const EXIT_OK = 0;
 const EXIT_VIOLATIONS = 1;
 const EXIT_ANALYSIS_FAILED = 2;
@@ -25,15 +30,11 @@ const EXIT_ANALYSIS_FAILED = 2;
 export async function main(argv: readonly string[]): Promise<number> {
   const args = parseArgs(argv);
   if (args.error) {
-    process.stderr.write(
-      `ambit check: ${args.error}\nUsage: ambit check <dir> [--format json] [--coverage] [--strict]\n`,
-    );
+    process.stderr.write(`ambit: ${args.error}\n${USAGE}`);
     return EXIT_ANALYSIS_FAILED;
   }
-  if (args.command !== "check") {
-    process.stderr.write(
-      `Unknown command: ${args.command}\nUsage: ambit check <dir> [--format json] [--coverage] [--strict]\n`,
-    );
+  if (args.command !== "check" && args.command !== "init") {
+    process.stderr.write(`Unknown command: ${args.command}\n${USAGE}`);
     return EXIT_ANALYSIS_FAILED;
   }
 
@@ -52,13 +53,16 @@ export async function main(argv: readonly string[]): Promise<number> {
     const summaries = summarizeExtractedFiles(project.files);
     const state = propagate(summaries);
     const engine = { name: legacyTsBackend.name, version: legacyTsBackend.version };
-    diagnostics = applyStrict(
-      [
-        ...diagnose(state, engine),
-        ...diagnoseUncarriedContracts(project.uncarriedContracts, engine),
-      ],
-      args.strict,
-    );
+    diagnostics =
+      args.command === "init"
+        ? proposeContracts(state, engine)
+        : applyStrict(
+            [
+              ...diagnose(state, engine),
+              ...diagnoseUncarriedContracts(project.uncarriedContracts, engine),
+            ],
+            args.strict,
+          );
     coverage = computeCoverage({
       filesAnalyzed: project.files.length,
       skippedFunctions: project.skippedFunctions,
@@ -66,7 +70,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       state,
     });
   } catch (error) {
-    process.stderr.write(`ambit check: analysis failed: ${errorMessage(error)}\n`);
+    process.stderr.write(`ambit: analysis failed: ${errorMessage(error)}\n`);
     return EXIT_ANALYSIS_FAILED;
   }
 
@@ -85,6 +89,10 @@ export async function main(argv: readonly string[]): Promise<number> {
       args.format === "json" ? formatCoverageJson(coverage) : formatCoverageText(coverage),
     );
   }
+
+  // `init` reports proposals, not violations: a codebase with contracts left
+  // to write has not failed a check, so it must not exit non-zero.
+  if (args.command === "init") return EXIT_OK;
 
   const hasError = diagnostics.some((d) => d.severity === "error");
   return hasError ? EXIT_VIOLATIONS : EXIT_OK;
@@ -264,7 +272,7 @@ if (isProcessEntryPoint()) {
       process.exitCode = code;
     })
     .catch((error: unknown) => {
-      process.stderr.write(`ambit check: unexpected failure: ${errorMessage(error)}\n`);
+      process.stderr.write(`ambit: unexpected failure: ${errorMessage(error)}\n`);
       process.exitCode = EXIT_ANALYSIS_FAILED;
     });
 }

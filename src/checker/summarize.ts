@@ -40,6 +40,8 @@ export function summarizeExtractedFiles(
         id: fn.id,
         location: fn.location,
         tagLocations: fn.jsDoc?.tagLocations ?? new Map(),
+        declarationStart: fn.declarationStart,
+        ...(fn.jsDocRange ? { jsDocRange: fn.jsDocRange } : {}),
         declared: parseDeclaredEffects(fn.jsDoc),
         capabilities: parseDeclaredCapabilities(fn.jsDoc),
         budget: parseDeclaredBudget(fn.jsDoc),

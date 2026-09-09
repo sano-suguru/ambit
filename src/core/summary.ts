@@ -108,6 +108,10 @@ export interface FunctionSummary {
    * instead of guessing at a line (DESIGN.md §5.3).
    */
   readonly tagLocations: ReadonlyMap<string, SourceLocation>;
+  /** Where a new contract comment would go (see {@link ExtractedFunction.declarationStart}). */
+  readonly declarationStart: SourceLocation;
+  /** The existing JSDoc block, when there is exactly one — a tag can be added to it. */
+  readonly jsDocRange?: SourceLocation;
   readonly declared: DeclaredEffects;
   readonly capabilities: DeclaredCapabilities;
   readonly budget: DeclaredBudget;

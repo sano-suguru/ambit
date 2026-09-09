@@ -14,7 +14,7 @@ are per row.
 ## Baseline commands
 
 ```sh
-pnpm test                     # 172 tests, 13 files — pass
+pnpm test                     # 179 tests, 14 files — pass
 pnpm exec tsc --noEmit        # pass
 ./node_modules/.bin/biome ci .  # pass
 node src/cli/main.ts check src --coverage   # exit 0
@@ -30,17 +30,17 @@ runs `pnpm exec biome ci .` in GitHub Actions, where no such wrapper exists.
 
 | Figure | Value |
 |---|---|
-| files analyzed | 14 |
-| functions extracted | 121 |
+| files analyzed | 17 |
+| functions extracted | 136 |
 | functions with a declared `@effects` | 4 |
-| `unknown` rate | 62.0% (75/121) |
-| `boundary` rate | 0.0% (0/121) |
-| call sites | 629 — resolved 171, stub 3, known-pure 192, unresolved 263 |
-| unresolved by reason | `builtin-method` 93, `external-module` 166, `unresolved-symbol` 4 |
-| skipped function-like nodes | 52 (`callback-argument` 49, `nested-function` 3) |
+| `unknown` rate | 63.2% (86/136) |
+| `boundary` rate | 0.0% (0/136) |
+| call sites | 692 — resolved 193, stub 3, known-pure 208, unresolved 288 |
+| unresolved by reason | `builtin-method` 102, `external-module` 180, `unresolved-symbol` 5, `callback-parameter` 1 |
+| skipped function-like nodes | 60 (`callback-argument` 54, `nested-function` 6) |
 | exit code | 0 |
 
-The 62% unknown rate is dominated by `external-module` (166), which is almost
+The 63% unknown rate is dominated by `external-module` (180), which is almost
 entirely calls into the `typescript` compiler API from the connection layer —
 the one file that is meant to be replaceable. It is a real number, not a
 target that has been met: DESIGN.md §10's goal is 30% for an *adopting team*
@@ -87,9 +87,9 @@ to compare against.
 |---|---|
 | Spec section | §4.2, §4.3, §5.1–5.3, §6.2 |
 | Acceptance | dogfooding on Ambit itself; diagnostics update on a contract-comment-only change; schema and measurement conditions fixed |
-| Implemented | `@effects` parsing and propagation (rules 1–7 incl. cycles, constructors, `super`, object literals), `unknown`, `--coverage`, NDJSON diagnostics with `engine`, `--strict`, `fixes[].edits` for AMB-E001 |
-| Evidence | `test/{effects,propagate,summarize,diagnose,construction,cli,fix}.test.ts`; `check src --coverage` exit 0; `test/backend.legacy-ts.test.ts` self-hosting block |
-| Outstanding | **`ambit init` is not built** (§4.1: infer effects and emit JSDoc as fix candidates). **No resident or incremental check** (§6.2) — measured above: a re-check costs the same as a first check. **No versioned JSON Schema** for the diagnostic format (§5.2); the shape is fixed in code and documented, not schema-validated. `ambit.config.ts` (out-of-code contracts, user-defined effects, per-directory `strict`, price table) is not implemented. |
+| Implemented | `@effects` parsing and propagation (rules 1–7 incl. cycles, constructors, `super`, object literals), `unknown`, `--coverage`, NDJSON diagnostics with `engine`, `--strict`, `fixes[].edits` for AMB-E001, `ambit init` contract inference |
+| Evidence | `test/{effects,propagate,summarize,diagnose,construction,cli,fix}.test.ts`; `check src --coverage` exit 0; `test/backend.legacy-ts.test.ts` self-hosting block; `test/init.test.ts` round-trips every proposal through `check` |
+| Outstanding | **`ambit init` writes no config** — it proposes JSDoc (§4.1's inference half) but `ambit.config.ts` is not implemented, so out-of-code contracts, user-defined effects, per-directory `strict`, and the price table have nowhere to live. **No resident or incremental check** (§6.2) — measured above: a re-check costs the same as a first check. **No versioned JSON Schema** for the diagnostic format (§5.2); the shape is fixed in code and documented, not schema-validated. |
 
 ### M2 — capabilities, budget, runtime hooks, framework adapters, 50 stubs
 

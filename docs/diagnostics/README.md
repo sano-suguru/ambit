@@ -202,3 +202,27 @@ present — `@budget onExceed=warn` declares a policy with nothing to exceed.
 
 Rejected whole rather than partly applied, for the reason AMB-E002 rejects a
 misspelled effect name.
+
+## AMB-I001
+
+Contract proposal.
+
+**Severity:** info
+**Category:** effects
+
+Emitted by `ambit init`, never by `ambit check`. A function has no `@effects`
+tag and its effects were fully resolved, so the tag can be written for it
+(DESIGN.md §4.1). The fix carries a concrete patch adding the tag — into the
+declaration's existing JSDoc block when it has exactly one, otherwise as a new
+block above it — and is `consistentWithContract: true`: adding a declaration
+where there was none cannot contradict one, and the set proposed is exactly
+what was observed.
+
+No proposal is made when the function's effects reached `unknown`. Declaring
+`@effects pure` for a function the analysis could not resolve would convert
+"could not tell" into a guarantee, which is the thing `unknown` exists to
+prevent (§4.3). Those functions stay undeclared and keep appearing in
+`--coverage`.
+
+`ambit init` exits 0 regardless of how many proposals it makes: contracts left
+to write are not a failed check.

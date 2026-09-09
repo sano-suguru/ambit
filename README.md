@@ -56,6 +56,7 @@ npx ambit check src
 ```
 
 ```sh
+npx ambit init src                  # propose @effects for undeclared functions
 npx ambit check src --format json   # NDJSON, one diagnostic per line
 npx ambit check src --coverage      # unknown rate and why calls stayed unresolved
 npx ambit check src --strict        # treat unresolved paths as errors, not warnings
@@ -97,6 +98,11 @@ analysis itself could not run.
   set. `@boundary reason="…"` stops checking a body and trusts the declared
   contract instead, counted separately in `--coverage`. `@budget` is parsed
   and validated. `--strict` promotes the `unknown` warnings to errors.
+- **`ambit init`:** proposes an `@effects` tag for every undeclared function
+  whose effects resolved, as an applicable patch in the same NDJSON. It
+  proposes nothing for a function that reached `unknown` — writing `pure`
+  there would turn "could not tell" into a guarantee. It exits 0: contracts
+  left to write are not a failed check.
 - **Fix candidates:** an `AMB-E001` diagnostic carries one applicable patch
   (`fixes[].edits`, 0-based and end-exclusive) that widens the `@effects` tag
   to what was observed, marked `consistentWithContract: false` with the
@@ -110,8 +116,10 @@ analysis itself could not run.
 - **Not yet:** the static half of §4.4's 二重強制 (rejecting a literal URL
   outside the granted target) is not implemented; only the
   declaration-to-declaration narrowing check runs. `@budget`'s loop-pattern
-  warnings are not implemented. `ambit init`, `ambit run`, `ambit agent`,
-  `ambit stubs`, and `ambit sbom` are planned, not built. There are no
+  warnings are not implemented. `ambit run`, `ambit agent`, `ambit stubs`, and
+  `ambit sbom` are planned, not built. `ambit init` proposes JSDoc but does
+  not write `ambit.config.ts` — out-of-code contracts (§4.1) are not
+  implemented, so there is no config for it to write. There are no
   framework adapters — `withAmbit` is wrapped by hand.
 - **Safety posture:** a call Ambit cannot resolve is reported as `unknown`,
   not assumed safe. The bundled effect tables are deliberately small, so a lot
@@ -347,4 +355,3 @@ Direction, not commitments — nothing here is scheduled.
   name outside the granted target
 - Stable diagnostic ids (from the first public release)
 - Impact analysis and incremental re-checking
-- Inferring candidate contracts for existing code

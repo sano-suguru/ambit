@@ -32,7 +32,15 @@ describe("summarizeExtractedFiles", () => {
     const files: ExtractedFile[] = [
       {
         filePath: "f.ts",
-        functions: [{ id: "f.ts#undeclared" as never, location: LOC, jsDoc: undefined, calls: [] }],
+        functions: [
+          {
+            id: "f.ts#undeclared" as never,
+            location: LOC,
+            declarationStart: LOC,
+            jsDoc: undefined,
+            calls: [],
+          },
+        ],
       },
     ];
     const [summary] = summarizeExtractedFiles(files);
@@ -47,6 +55,7 @@ describe("summarizeExtractedFiles", () => {
           {
             id: "f.ts#typoed" as never,
             location: LOC,
+            declarationStart: LOC,
             jsDoc: { tagLocations: new Map(), tags: new Map([["effects", "netwrok"]]) },
             calls: [],
           },
@@ -65,6 +74,7 @@ describe("summarizeExtractedFiles", () => {
           {
             id: "f.ts#fn" as never,
             location: LOC,
+            declarationStart: LOC,
             jsDoc: undefined,
             calls: [{ location: LOC, calleeQualifiedName: "fetch" }],
           },
@@ -85,6 +95,7 @@ describe("summarizeExtractedFiles", () => {
           {
             id: "f.ts#fn" as never,
             location: LOC,
+            declarationStart: LOC,
             jsDoc: undefined,
             calls: [{ location: LOC, calleeQualifiedName: "undici.fetch" }],
           },
@@ -105,6 +116,7 @@ describe("summarizeExtractedFiles", () => {
           {
             id: "f.ts#fn" as never,
             location: LOC,
+            declarationStart: LOC,
             jsDoc: undefined,
             calls: [{ location: LOC, calleeQualifiedName: "someThirdPartyLib.doThing" }],
           },
@@ -130,6 +142,7 @@ describe("summarizeExtractedFiles", () => {
           {
             id: "f.ts#fn" as never,
             location: LOC,
+            declarationStart: LOC,
             jsDoc: undefined,
             calls: [
               {
@@ -161,6 +174,7 @@ describe("summarizeExtractedFiles", () => {
           {
             id: "f.ts#fn" as never,
             location: LOC,
+            declarationStart: LOC,
             jsDoc: undefined,
             calls: [{ location: LOC, pureBuiltinName: "Set.has" }],
           },
@@ -181,6 +195,7 @@ describe("summarizeExtractedFiles", () => {
           {
             id: "f.ts#fn" as never,
             location: LOC,
+            declarationStart: LOC,
             jsDoc: undefined,
             calls: [
               {
@@ -208,6 +223,7 @@ describe("summarizeExtractedFiles", () => {
           {
             id: "f.ts#fn" as never,
             location: LOC,
+            declarationStart: LOC,
             jsDoc: undefined,
             calls: [
               { location: LOC, pureBuiltinName: "Array.push", unresolvedReason: "builtin-method" },
@@ -230,6 +246,7 @@ describe("summarizeExtractedFiles", () => {
           {
             id: "f.ts#fn" as never,
             location: LOC,
+            declarationStart: LOC,
             jsDoc: undefined,
             calls: [{ location: LOC, resolvedCallee: "f.ts#other" as never }],
           },

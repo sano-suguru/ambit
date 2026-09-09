@@ -87,6 +87,8 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
       functions.push({
         id,
         location: locationOf(absoluteRoot, sourceFile, nameOrNode(node)),
+        declarationStart: declarationStartOf(absoluteRoot, sourceFile, node),
+        ...jsDocRangeOf(absoluteRoot, sourceFile, node),
         jsDoc: extractJsDoc(node, absoluteRoot),
         calls: collectCalls(node, sourceFile, program, checker, declaredNodeToId, absoluteRoot),
       });
@@ -512,6 +514,50 @@ function isNestedInAnotherFunction(node: ts.Node): boolean {
     current = current.parent;
   }
   return false;
+}
+
+/**
+ * Where the declaration's own text starts, excluding leading JSDoc and other
+ * trivia — the insertion point for a new contract comment.
+ *
+ * A `const f = () => {}` indexes the `VariableDeclaration`, whose start is
+ * after the `const`; the statement is what a comment goes above.
+ */
+function declarationStartOf(
+  absoluteRoot: string,
+  sourceFile: ts.SourceFile,
+  decl: FunctionLikeDeclaration,
+): SourceLocation {
+  const node: ts.Node = ts.isVariableDeclaration(decl) ? (decl.parent.parent ?? decl) : decl;
+  const start = node.getStart(sourceFile, /* includeJsDocComment */ false);
+  const position = sourceFile.getLineAndCharacterOfPosition(start);
+  return {
+    file: relativePath(absoluteRoot, sourceFile),
+    line: position.line + 1,
+    col: position.character + 1,
+    endLine: position.line + 1,
+    endCol: position.character + 1,
+  };
+}
+
+/**
+ * The one JSDoc block attached to `decl`, if there is exactly one. Read from
+ * the comment nodes rather than from the tags, because the block a fix needs
+ * to add a tag to is usually one that has no tags yet.
+ */
+function jsDocRangeOf(
+  absoluteRoot: string,
+  sourceFile: ts.SourceFile,
+  decl: FunctionLikeDeclaration,
+): { jsDocRange?: SourceLocation } {
+  const target: ts.Node = ts.isVariableDeclaration(decl) ? (decl.parent.parent ?? decl) : decl;
+  const blocks = ts.getJSDocCommentsAndTags(target).filter(ts.isJSDoc);
+  // More than one block above the same declaration has no single right place
+  // to add to; the fix falls back to a new block of its own.
+  if (blocks.length !== 1) return {};
+  const block = blocks[0];
+  if (!block || block.getSourceFile() !== sourceFile) return {};
+  return { jsDocRange: locationOf(absoluteRoot, sourceFile, block) };
 }
 
 function nameOrNode(decl: FunctionLikeDeclaration): ts.Node {

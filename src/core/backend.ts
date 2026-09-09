@@ -126,6 +126,21 @@ export interface RawJsDoc {
 export interface ExtractedFunction {
   readonly id: SymbolId;
   readonly location: SourceLocation;
+  /**
+   * Where the declaration itself begins (`export async function …`, not the
+   * name), so `ambit init` can insert a JSDoc block above it at the right
+   * indentation. `location` points at the name, which is the right place for
+   * a diagnostic and the wrong place for an edit.
+   */
+  readonly declarationStart: SourceLocation;
+  /**
+   * The single JSDoc block attached to this declaration, when there is
+   * exactly one — so a fix can add a tag to the comment that is already there
+   * instead of stacking a second block above it. Independent of whether that
+   * block contains any tags: a purely descriptive comment is the common case
+   * `ambit init` has to add to.
+   */
+  readonly jsDocRange?: SourceLocation;
   readonly jsDoc: RawJsDoc | undefined;
   readonly calls: readonly CallSite[];
 }
