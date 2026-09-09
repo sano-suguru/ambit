@@ -22,8 +22,14 @@ import type { SymbolId } from "./symbol-id.ts";
  *   whose call site (a method on a local value) `qualifiedNameOf` cannot
  *   turn into a name the stub table can key on.
  * - `external-module`: same shape, but the ambient declaration lives in a
- *   third-party package's `.d.ts` (e.g. an ORM client) rather than the
- *   default lib.
+ *   third-party package's `.d.ts` under `node_modules` (e.g. an ORM client
+ *   installed as a dependency) rather than the default lib.
+ * - `ambient-declaration`: the callee resolved to a declaration in a `.d.ts`
+ *   that is part of the project itself — a hand-written `declare module "pg"`
+ *   or a `declare function`, neither shipped with the compiler nor installed
+ *   as a package. Distinct from `external-module` because the two are fixed
+ *   differently: the first is the project's own file to annotate, the second
+ *   needs a bundled or package-provided stub.
  * `unresolved-symbol` remains the residual case: either no declaration could
  * be found at all, or one was found but the call still cannot be followed to
  * an extracted function — a nested function declaration, or a receiver with no
@@ -42,6 +48,7 @@ export type UnresolvedReason =
   | "import-binding"
   | "builtin-method"
   | "external-module"
+  | "ambient-declaration"
   | "unresolved-symbol";
 
 /**
@@ -71,6 +78,38 @@ export type SkippedFunctionKind =
   | "callback-argument"
   | "nested-function"
   | "other";
+
+/**
+ * What the connector layer could read statically from one call argument.
+ *
+ * Carries no compiler object, so it crosses the `TsBackend` boundary freely
+ * (DESIGN.md §3.4). Two consumers need it, and both need the same distinction
+ * between "this is the whole value" and "this is only how the value starts":
+ * `src/stubs/data-clients.ts` reads a SQL statement's leading keyword, and
+ * `src/stubs/http-capabilities.ts` reads a URL's host. A template literal's
+ * static head is enough for both, and is enough for neither to claim it saw
+ * the whole string — hence {@link complete}.
+ */
+export interface LiteralArgument {
+  /**
+   * A string literal's value, or a template literal's static leading text.
+   * Absent when the argument is not a string at all (an object literal, say —
+   * see {@link properties}).
+   */
+  readonly text?: string;
+  /**
+   * False when {@link text} is only a prefix (a template literal with a
+   * substitution). Absent when there is no `text`.
+   */
+  readonly complete?: boolean;
+  /**
+   * An object literal's string-literal properties, for an options argument
+   * like `fetch(url, { method: "POST" })`. Only identifier-named properties
+   * whose value is a string literal appear; anything else is left out rather
+   * than guessed at.
+   */
+  readonly properties?: ReadonlyMap<string, string>;
+}
 
 /**
  * One call expression found while walking a function's body.
@@ -104,6 +143,13 @@ export interface CallSite {
   readonly calleeQualifiedName?: string;
   readonly pureBuiltinName?: string;
   readonly callbackByReference?: true;
+  /**
+   * What each argument was, statically, indexed by position — `undefined`
+   * where nothing could be read. Present only when `calleeQualifiedName` is:
+   * the arguments matter to a stub table keyed on that name, and to nothing
+   * else.
+   */
+  readonly literalArguments?: readonly (LiteralArgument | undefined)[];
   /**
    * Set on a construction (`new X(...)`, `super(...)`, a derived class's
    * implicit base call) that passes no arguments. `src/stubs/constructors.ts`

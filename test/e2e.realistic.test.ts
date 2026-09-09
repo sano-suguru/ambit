@@ -150,6 +150,102 @@ export async function formatCents(cents: number): Promise<string> {
     );
   }, 60_000);
 
+  it("accident 2: a Prisma read added to a pure function is a db_read violation", async () => {
+    await withVariant(
+      [
+        {
+          file: "src/domain/money.ts",
+          find: PURE_TARGET,
+          replace: `import { prisma } from "../lib/index.ts";
+
+/** @effects pure */
+export async function formatCents(cents: number): Promise<string> {
+  await prisma.user.findMany({});
+  return (cents / 100).toFixed(2);
+}`,
+        },
+      ],
+      (result) => {
+        const diagnostic = at(result, "AMB-E001", "src/domain/money.ts", 4);
+        expect(diagnostic?.message).toContain("performs [db_read] directly");
+        expect(result.exitCode).toBe(1);
+      },
+    );
+  }, 60_000);
+
+  it("accident 2: a literal INSERT through `pool.query` is a db_write violation", async () => {
+    await withVariant(
+      [
+        {
+          file: "src/domain/money.ts",
+          find: PURE_TARGET,
+          replace: `import { pool } from "../lib/index.ts";
+
+/** @effects pure */
+export async function formatCents(cents: number): Promise<string> {
+  await pool.query("INSERT INTO audit (cents) VALUES ($1)", [cents]);
+  return (cents / 100).toFixed(2);
+}`,
+        },
+      ],
+      (result) => {
+        const diagnostic = at(result, "AMB-E001", "src/domain/money.ts", 4);
+        // The direction came from the statement's leading keyword, not from a
+        // blanket "any query touches the database both ways".
+        expect(diagnostic?.message).toContain("performs [db_write] directly");
+        expect(result.exitCode).toBe(1);
+      },
+    );
+  }, 60_000);
+
+  it("accident 2: a non-literal statement contributes both directions", async () => {
+    await withVariant(
+      [
+        {
+          file: "src/domain/money.ts",
+          find: PURE_TARGET,
+          replace: `import { pool } from "../lib/index.ts";
+
+/** @effects pure */
+export async function formatCents(cents: number, sql: string): Promise<string> {
+  await pool.query(sql, [cents]);
+  return (cents / 100).toFixed(2);
+}`,
+        },
+      ],
+      (result) => {
+        const diagnostic = at(result, "AMB-E001", "src/domain/money.ts", 4);
+        expect(diagnostic?.message).toContain("performs [db_read, db_write] directly");
+        expect(result.exitCode).toBe(1);
+      },
+    );
+  }, 60_000);
+
+  it("accident 3: an LLM call added to a pure function is an llm violation", async () => {
+    await withVariant(
+      [
+        {
+          file: "src/domain/money.ts",
+          find: PURE_TARGET,
+          replace: `import { openai } from "../lib/index.ts";
+
+/** @effects pure */
+export async function formatCents(cents: number): Promise<string> {
+  await openai.chat.completions.create({ model: "gpt-4o-mini", messages: [] });
+  return (cents / 100).toFixed(2);
+}`,
+        },
+      ],
+      (result) => {
+        const diagnostic = at(result, "AMB-E001", "src/domain/money.ts", 4);
+        // `llm` implies `network` (DESIGN.md §4.2), so both are excess here.
+        expect(diagnostic?.message).toContain("llm");
+        expect(diagnostic?.message).toContain("network");
+        expect(result.exitCode).toBe(1);
+      },
+    );
+  }, 60_000);
+
   it("accident 5: a barrel-imported network function called from a pure function is AMB-E001", async () => {
     await withVariant(
       [

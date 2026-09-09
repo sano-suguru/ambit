@@ -9,6 +9,7 @@ import type {
   ExtractedFile,
   FunctionSummary,
   KnownEffect,
+  LiteralArgument,
   RawJsDoc,
 } from "../core/index.ts";
 import {
@@ -23,6 +24,7 @@ import {
   isKnownPureConstructor,
   lookupConstructorEffect,
 } from "../stubs/constructors.ts";
+import { lookupClientEffects } from "../stubs/data-clients.ts";
 import { lookupStubEffect } from "../stubs/node-builtins.ts";
 import { isKnownPureBuiltin } from "../stubs/pure-builtins.ts";
 
@@ -130,12 +132,12 @@ function toCall(site: CallSite): Call {
     if (isConstructorKey(site.calleeQualifiedName)) {
       return toConstructorCall(site, site.calleeQualifiedName);
     }
-    const effect = lookupStubEffect(site.calleeQualifiedName);
-    if (effect) {
+    const effects = stubEffectsFor(site.calleeQualifiedName, site.literalArguments);
+    if (effects) {
       return {
         kind: "stub",
         location: site.location,
-        effect,
+        effects,
         qualifiedName: site.calleeQualifiedName,
       };
     }
@@ -173,11 +175,28 @@ function toCall(site: CallSite): Call {
   };
 }
 
+/**
+ * The bundled effect tables, in one lookup: the fixed table for globals and
+ * Node.js builtins (`src/stubs/node-builtins.ts`), then the database/LLM
+ * client table (`src/stubs/data-clients.ts`), whose answer can depend on the
+ * call's own literal arguments. The two key spaces do not overlap — a builtin
+ * key never has a client class in it — so the order only decides which lookup
+ * runs first, not which answer wins.
+ */
+function stubEffectsFor(
+  qualifiedName: string,
+  literalArguments: readonly (LiteralArgument | undefined)[] | undefined,
+): readonly KnownEffect[] | undefined {
+  const builtin = lookupStubEffect(qualifiedName);
+  if (builtin) return [builtin];
+  return lookupClientEffects(qualifiedName, literalArguments);
+}
+
 function toConstructorCall(site: CallSite, qualifiedName: string): Call {
   const withoutArguments = site.constructedWithoutArguments === true;
   const effect = lookupConstructorEffect(qualifiedName, withoutArguments);
   if (effect) {
-    return { kind: "stub", location: site.location, effect, qualifiedName };
+    return { kind: "stub", location: site.location, effects: [effect], qualifiedName };
   }
   // A callback passed by reference is never walked, so an allowlisted
   // constructor that runs one (`new Promise(namedExecutor)`) cannot be

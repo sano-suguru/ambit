@@ -83,7 +83,7 @@ describe("summarizeExtractedFiles", () => {
     ];
     const [summary] = summarizeExtractedFiles(files);
     expect(summary?.calls).toEqual([
-      { kind: "stub", location: LOC, effect: "network", qualifiedName: "fetch" },
+      { kind: "stub", location: LOC, effects: ["network"], qualifiedName: "fetch" },
     ]);
   });
 
@@ -104,7 +104,7 @@ describe("summarizeExtractedFiles", () => {
     ];
     const [summary] = summarizeExtractedFiles(files);
     expect(summary?.calls).toEqual([
-      { kind: "stub", location: LOC, effect: "network", qualifiedName: "undici.fetch" },
+      { kind: "stub", location: LOC, effects: ["network"], qualifiedName: "undici.fetch" },
     ]);
   });
 

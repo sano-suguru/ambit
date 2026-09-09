@@ -335,3 +335,82 @@ describe("legacyTsBackend.extractProject (cross-module alias resolution)", () =>
     expect(call?.calleeQualifiedName).toBe("doesNotExist");
   });
 });
+
+describe("legacyTsBackend.extractProject (client receivers)", () => {
+  const REALISTIC_ROOT = path.join(import.meta.dirname, "fixtures", "realistic-api");
+
+  function callsOf(
+    files: Awaited<ReturnType<typeof legacyTsBackend.extractProject>>["files"],
+    id: string,
+  ) {
+    for (const file of files) {
+      const fn = file.functions.find((f) => f.id === id);
+      if (fn) return fn.calls;
+    }
+    return [];
+  }
+
+  it("names a method on a constructed client by module specifier and class, not by the local variable", async () => {
+    // `const pool = new Pool(...)` with `Pool` imported from "pg": every part
+    // of `pg.Pool.query` comes from the project's own source, so a locally
+    // declared `declare module "pg"` and an installed `pg` produce the same key.
+    const { files } = await legacyTsBackend.extractProject(REALISTIC_ROOT);
+    const calls = callsOf(files, "src/lib/db.ts#insertOrder");
+    expect(calls.some((c) => c.calleeQualifiedName === "pg.Pool.query")).toBe(true);
+  });
+
+  it("keeps the whole property path for a nested client member", async () => {
+    const { files } = await legacyTsBackend.extractProject(REALISTIC_ROOT);
+    expect(
+      callsOf(files, "src/lib/db.ts#listUsers").some(
+        (c) => c.calleeQualifiedName === "@prisma/client.PrismaClient.user.findMany",
+      ),
+    ).toBe(true);
+    expect(
+      callsOf(files, "src/lib/llm.ts#summarize").some(
+        (c) => c.calleeQualifiedName === "openai.OpenAI.chat.completions.create",
+      ),
+    ).toBe(true);
+  });
+
+  it("resolves a client receiver imported through the barrel file", async () => {
+    // The handler writes `pool.query(...)` with `pool` re-exported by
+    // `src/lib/index.ts`; the name has to come from where the client was
+    // actually constructed.
+    const { files } = await legacyTsBackend.extractProject(REALISTIC_ROOT);
+    expect(
+      callsOf(files, "src/routes/orders.ts#listOrderTotals").some(
+        (c) => c.calleeQualifiedName === "pg.Pool.query",
+      ),
+    ).toBe(true);
+  });
+
+  it("carries a literal string argument, and a template literal's static head", async () => {
+    const { files } = await legacyTsBackend.extractProject(REALISTIC_ROOT);
+    const query = callsOf(files, "src/lib/db.ts#insertOrder").find(
+      (c) => c.calleeQualifiedName === "pg.Pool.query",
+    );
+    expect(query?.literalArguments?.[0]).toEqual({
+      text: "INSERT INTO orders (customer_id, total_cents) VALUES ($1, $2)",
+      complete: true,
+    });
+
+    const fetchCall = callsOf(files, "src/lib/rates.ts#fetchRate").find(
+      (c) => c.calleeQualifiedName === "fetch",
+    );
+    expect(fetchCall?.literalArguments?.[0]).toEqual({
+      text: "https://api.example.com/rates/",
+      complete: false,
+    });
+  });
+
+  it("classifies a call into the project's own .d.ts as ambient-declaration", async () => {
+    // `response.json()` is declared in `types/globals.d.ts` — neither the
+    // compiler's lib nor an installed package, so neither existing reason fits.
+    const { files } = await legacyTsBackend.extractProject(REALISTIC_ROOT);
+    const unresolved = callsOf(files, "src/lib/rates.ts#fetchRate").filter(
+      (c) => !c.resolvedCallee && c.calleeQualifiedName === undefined,
+    );
+    expect(unresolved.map((c) => c.unresolvedReason)).toEqual(["ambient-declaration"]);
+  });
+});

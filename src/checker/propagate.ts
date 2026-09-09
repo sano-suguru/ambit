@@ -105,7 +105,7 @@ export function propagate(
 function directEffects(summary: FunctionSummary): EffectSet {
   const stubEffects = summary.calls
     .filter((call) => call.kind === "stub")
-    .map((call) => call.effect);
+    .flatMap((call) => call.effects);
   let set = effectSetOf(...stubEffects);
   if (summary.calls.some((call) => call.kind === "unresolved")) {
     set = unionEffectSets(set, unknownEffectSet());

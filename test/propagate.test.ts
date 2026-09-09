@@ -18,7 +18,7 @@ describe("propagate", () => {
         location: LOC,
         declared: { kind: "declared", effects: emptyEffectSet() },
         ...NO_OTHER_CONTRACTS,
-        calls: [{ kind: "stub", location: LOC, effect: "network", qualifiedName: "fetch" }],
+        calls: [{ kind: "stub", location: LOC, effects: ["network"], qualifiedName: "fetch" }],
       },
     ];
     const state = propagate(summaries);
@@ -48,7 +48,7 @@ describe("propagate", () => {
         location: LOC,
         declared: { kind: "declared", effects: effectSetOf("network") },
         ...NO_OTHER_CONTRACTS,
-        calls: [{ kind: "stub", location: LOC, effect: "network", qualifiedName: "fetch" }],
+        calls: [{ kind: "stub", location: LOC, effects: ["network"], qualifiedName: "fetch" }],
       },
       {
         id: id("f.ts#calculateTax"),
@@ -73,7 +73,7 @@ describe("propagate", () => {
         location: LOC,
         declared: { kind: "none" },
         ...NO_OTHER_CONTRACTS,
-        calls: [{ kind: "stub", location: LOC, effect: "network", qualifiedName: "fetch" }],
+        calls: [{ kind: "stub", location: LOC, effects: ["network"], qualifiedName: "fetch" }],
       },
       {
         id: id("f.ts#calculateTax"),
@@ -98,7 +98,7 @@ describe("propagate", () => {
         declared: { kind: "declared", effects: effectSetOf("network") },
         ...NO_OTHER_CONTRACTS,
         calls: [
-          { kind: "stub", location: LOC, effect: "network", qualifiedName: "fetch" },
+          { kind: "stub", location: LOC, effects: ["network"], qualifiedName: "fetch" },
           { kind: "unresolved", location: LOC, reason: "any-typed" },
         ],
       },
@@ -163,7 +163,7 @@ describe("propagate", () => {
         declared: { kind: "none" },
         ...NO_OTHER_CONTRACTS,
         calls: [
-          { kind: "stub", location: LOC, effect: "network", qualifiedName: "fetch" },
+          { kind: "stub", location: LOC, effects: ["network"], qualifiedName: "fetch" },
           { kind: "resolved", location: LOC, callee: id("f.ts#a") },
         ],
       },
@@ -184,7 +184,7 @@ describe("propagate", () => {
           {
             kind: "stub",
             location: LOC,
-            effect: "llm",
+            effects: ["llm"],
             qualifiedName: "anthropic.messages.create",
           },
         ],

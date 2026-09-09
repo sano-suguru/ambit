@@ -12,11 +12,21 @@ export interface ResolvedCall {
   readonly callee: SymbolId;
 }
 
-/** A call matched against a known stub (`src/stubs/`); its effect is known directly. */
+/**
+ * A call matched against a known stub (`src/stubs/`); its effects are known
+ * directly.
+ *
+ * `effects` is a set, not one effect, because an operation's direction is not
+ * always decidable from the source: `pool.query(sql)` with a non-literal
+ * statement may read or write, and the stub table answers with both rather
+ * than picking one (DESIGN.md §4.2, スタブの効果表). One call site produces one
+ * `StubCall` whatever the size of that set — never one per effect, which
+ * would double-count it in `--coverage`.
+ */
 export interface StubCall {
   readonly kind: "stub";
   readonly location: SourceLocation;
-  readonly effect: KnownEffect;
+  readonly effects: readonly KnownEffect[];
   readonly qualifiedName: string;
 }
 

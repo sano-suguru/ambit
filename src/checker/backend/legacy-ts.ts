@@ -6,6 +6,7 @@ import type {
   ExtractedFile,
   ExtractedFunction,
   ExtractedProject,
+  LiteralArgument,
   RawJsDoc,
   SkippedFunctionKind,
   SourceLocation,
@@ -1014,7 +1015,12 @@ function classifyCall(
 
   const qualifiedName = qualifiedNameOf(checker, callee, importBindingReason === undefined);
   if (qualifiedName) {
-    return { location, calleeQualifiedName: qualifiedName, unresolvedReason: fallbackReason };
+    return {
+      location,
+      calleeQualifiedName: qualifiedName,
+      literalArguments: literalArgumentsOf(node),
+      unresolvedReason: fallbackReason,
+    };
   }
 
   // qualifiedNameOf only names a bare identifier or a property access on an
@@ -1197,13 +1203,20 @@ function isCallableParameterType(type: ts.Type): boolean {
   return type.getCallSignatures().length > 0;
 }
 
+/**
+ * Which flavour of ambient declaration a callee resolved to, so an unresolved
+ * call says what would fix it: the compiler's own lib (`builtin-method`), an
+ * installed package's types (`external-module`), or a `.d.ts` written by the
+ * project itself (`ambient-declaration` — a hand-written `declare module`,
+ * common in a project that types a dependency locally).
+ */
 function ambientUnresolvedReason(
   declarationSourceFile: ts.SourceFile,
   program: ts.Program,
 ): UnresolvedReason | undefined {
   if (program.isSourceFileDefaultLibrary(declarationSourceFile)) return "builtin-method";
   if (program.isSourceFileFromExternalLibrary(declarationSourceFile)) return "external-module";
-  return undefined;
+  return "ambient-declaration";
 }
 
 /**
@@ -1240,15 +1253,162 @@ function qualifiedNameOf(
 ): string | undefined {
   if (ts.isIdentifier(expr)) {
     if (aliasResolved) {
-      const namedImportQualifiedName = namedImportQualifiedNameOf(checker, expr);
-      if (namedImportQualifiedName) return namedImportQualifiedName;
+      const imported = importedQualifiedNameOf(checker, expr);
+      if (imported) return imported;
     }
     return expr.text;
   }
   if (ts.isPropertyAccessExpression(expr)) {
+    return memberChainQualifiedNameOf(checker, expr);
+  }
+  return undefined;
+}
+
+/**
+ * `<origin>.<property path>` for a property-access expression, where
+ * `<origin>` says where the receiver came from and the path is what the source
+ * literally wrote after it.
+ *
+ * Two origins are recognized, both facts about the project's own source rather
+ * than about any package's `.d.ts`:
+ *
+ * - a namespace or default import — `node:fs` for `import * as fs from
+ *   "node:fs"`, giving `node:fs.readFileSync` (and now `node:fs.promises.readFile`
+ *   for a deeper path, which previously had no name at all);
+ * - the class a `const` was constructed from — `pg.Pool` for `const pool = new
+ *   Pool(...)` with `Pool` imported from `"pg"`, giving `pg.Pool.query` and
+ *   `@prisma/client.PrismaClient.user.findMany`.
+ *
+ * Anything else yields `undefined`: a receiver whose origin is a parameter, a
+ * `let`, a project-local class, or a call result has no module-qualified name
+ * that a stub table could honestly key on, and inventing one from the local
+ * variable's spelling would make the table match by coincidence.
+ */
+function memberChainQualifiedNameOf(
+  checker: ts.TypeChecker,
+  expr: ts.PropertyAccessExpression,
+): string | undefined {
+  const path: string[] = [];
+  let current: ts.Expression = expr;
+  while (ts.isPropertyAccessExpression(current)) {
+    path.unshift(current.name.text);
+    current = current.expression;
+  }
+  if (!ts.isIdentifier(current)) return undefined;
+
+  const origin =
+    moduleSpecifierOf(checker, current) ?? constructedClassQualifiedNameOf(checker, current);
+  if (!origin) return undefined;
+  return [origin, ...path].join(".");
+}
+
+/**
+ * The module-qualified class name a receiver was constructed from, following
+ * the binding through imports and re-exports — `"pg.Pool"` for a `const pool =
+ * new Pool(...)` declared in another module and re-exported by a barrel.
+ *
+ * `undefined` unless the binding is a `const` whose initializer is a `new`
+ * expression naming an *imported* class. `const` because a `let` may hold a
+ * different object by the time the call runs; imported because a locally
+ * declared class has no module-qualified name. This rests on exactly the
+ * assumption DESIGN.md §4.2 rule 7 already states for object literals —
+ * `const` fixes the binding, not the object's properties — and adds no other.
+ */
+function constructedClassQualifiedNameOf(
+  checker: ts.TypeChecker,
+  receiver: ts.Identifier,
+): string | undefined {
+  const symbol = checker.getSymbolAtLocation(receiver);
+  if (!symbol) return undefined;
+  const resolved =
+    (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(symbol) : symbol;
+
+  const declaration = resolved.declarations?.[0];
+  if (!declaration || !ts.isVariableDeclaration(declaration)) return undefined;
+  if ((declaration.parent.flags & ts.NodeFlags.Const) === 0) return undefined;
+  if (!declaration.initializer) return undefined;
+
+  const initializer = unwrapTypeOnlyExpression(declaration.initializer);
+  if (!ts.isNewExpression(initializer)) return undefined;
+  return importedQualifiedNameOf(checker, initializer.expression);
+}
+
+/**
+ * `"<module specifier>.<exported name>"` for an expression that names an
+ * import, and `undefined` for anything else — including a bare local
+ * identifier, which `qualifiedNameOf` falls back to separately.
+ *
+ * The distinction matters wherever the name is used as a *prefix* rather than
+ * as a whole key ({@link constructedClassQualifiedNameOf}): a prefix built from
+ * a local spelling would collide across projects, so only module-derived names
+ * qualify.
+ */
+function importedQualifiedNameOf(checker: ts.TypeChecker, expr: ts.Expression): string | undefined {
+  if (ts.isIdentifier(expr)) {
+    const named = namedImportQualifiedNameOf(checker, expr);
+    if (named) return named;
+    const defaultSpecifier = defaultImportSpecifierOf(checker, expr);
+    // The module's default export has no name of its own to borrow — the local
+    // binding's spelling is the importer's choice, not the module's.
+    return defaultSpecifier === undefined ? undefined : `${defaultSpecifier}.default`;
+  }
+  if (ts.isPropertyAccessExpression(expr)) {
     const moduleSpecifier = moduleSpecifierOf(checker, expr.expression);
-    if (moduleSpecifier) return `${moduleSpecifier}.${expr.name.text}`;
+    return moduleSpecifier === undefined ? undefined : `${moduleSpecifier}.${expr.name.text}`;
+  }
+  return undefined;
+}
+
+/** The module specifier of a default import (`import OpenAI from "openai"`), and nothing else. */
+function defaultImportSpecifierOf(
+  checker: ts.TypeChecker,
+  expr: ts.Identifier,
+): string | undefined {
+  const decl = checker.getSymbolAtLocation(expr)?.declarations?.[0];
+  if (!decl || !ts.isImportClause(decl)) return undefined;
+  const importDecl = decl.parent;
+  if (!ts.isImportDeclaration(importDecl) || !ts.isStringLiteral(importDecl.moduleSpecifier)) {
     return undefined;
+  }
+  return importDecl.moduleSpecifier.text;
+}
+
+/**
+ * What each argument of `node` says statically (see {@link LiteralArgument}).
+ * `undefined` when nothing at all could be read from any argument, so a call
+ * whose arguments are all opaque carries no field rather than an array of
+ * holes.
+ */
+function literalArgumentsOf(
+  node: ts.CallExpression,
+): readonly (LiteralArgument | undefined)[] | undefined {
+  const args = node.arguments;
+  if (args.length === 0) return undefined;
+  const read = args.map(literalArgumentOf);
+  return read.some((argument) => argument !== undefined) ? read : undefined;
+}
+
+function literalArgumentOf(argument: ts.Expression): LiteralArgument | undefined {
+  const expr = unwrapTypeOnlyExpression(argument);
+  if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) {
+    return { text: expr.text, complete: true };
+  }
+  // A template literal's static head is the part the source fixes; everything
+  // after the first substitution is the caller's to decide at runtime.
+  if (ts.isTemplateExpression(expr)) {
+    return { text: expr.head.text, complete: false };
+  }
+  if (ts.isObjectLiteralExpression(expr)) {
+    const properties = new Map<string, string>();
+    for (const property of expr.properties) {
+      if (!ts.isPropertyAssignment(property)) continue;
+      if (!ts.isIdentifier(property.name)) continue;
+      const value = unwrapTypeOnlyExpression(property.initializer);
+      if (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value)) {
+        properties.set(property.name.text, value.text);
+      }
+    }
+    return properties.size === 0 ? undefined : { properties };
   }
   return undefined;
 }
