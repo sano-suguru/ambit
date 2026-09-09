@@ -32,9 +32,11 @@ jobs:
       - name: Test
         run: pnpm test
 
-      # Not a gate: records Ambit's own coverage numbers on every PR without
-      # failing the build on them (DESIGN.md §4.3's coverage KPI is still
-      # being brought down, not yet enforced).
-      - name: Coverage report on Ambit's own source (non-gating)
-        run: node src/cli/main.ts check src --coverage
-        continue-on-error: true
+      # The gate: a contract violation in Ambit's own source fails the build.
+      # `--format github` annotates the offending line with the whole call path
+      # (DESIGN.md §5.1 / §6), and `--coverage` keeps recording the numbers
+      # docs/status.md tracks. Not `--strict`: measured, `check src --strict`
+      # exits 1 on four unresolved-call warnings in the connection layer — see
+      # docs/status.md, "Ambit's own source".
+      - name: Contract check on Ambit's own source
+        run: node src/cli/main.ts check src --coverage --format github

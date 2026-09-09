@@ -41,19 +41,36 @@ runs `pnpm exec biome ci .` in GitHub Actions, where no such wrapper exists.
 
 ## Ambit's own source (`check src --coverage`)
 
-| Figure | After the Hono adapter | Before `ambit.config.ts` | After `ambit.config.ts` | After M0.5 |
-|---|---|---|---|---|
-| files analyzed | 27 | 27 | 29 | 29 |
-| functions extracted | 194 | 202 | 236 | 238 |
-| functions with a declared `@effects` | 4 | 4 | 4 (jsdoc 4, config 0) | 4 (jsdoc 4, config 0) |
-| `unknown` rate | 64.4% (125/194) | 63.4% (128/202) | 65.7% (155/236) | **66.0% (157/238)** |
-| `boundary` rate | 0.0% (0/194) | 0.0% (0/202) | 0.0% (0/236) | 0.0% (0/238) |
-| call sites | 1003 — resolved 299, stub 3, known-pure 258, mutation 94, unresolved 349 | 1035 — resolved 315, stub 3, known-pure 260, mutation 93, unresolved 364 | 1278 — resolved 404, stub 8, known-pure 327, mutation 110, unresolved 429 | 1287 — resolved 406, stub 8, known-pure 327, mutation 110, unresolved 436 |
-| unresolved by reason | `builtin-method` 68, `external-module` 265, `unresolved-symbol` 12, `callback-parameter` 4 | `builtin-method` 72, `external-module` 276, `unresolved-symbol` 12, `callback-parameter` 4 | `builtin-method` 102, `external-module` 307, `dynamic-import` 1, `unresolved-symbol` 15, `callback-parameter` 4 | `builtin-method` 102, `external-module` 314, `dynamic-import` 1, `unresolved-symbol` 15, `callback-parameter` 4 |
-| skipped function-like nodes | 90 (`callback-argument` 75, `nested-function` 15) | 91 (`callback-argument` 76, `nested-function` 15) | 109 (`callback-argument` 91, `object-literal-method` 3, `nested-function` 15) | 109 (`callback-argument` 91, `object-literal-method` 3, `nested-function` 15) |
-| exit code | 0 | 0 | 0 | 0 |
+| Figure | After the Hono adapter | Before `ambit.config.ts` | After `ambit.config.ts` | After M0.5 | After the CI gate |
+|---|---|---|---|---|---|
+| files analyzed | 27 | 27 | 29 | 29 | 29 |
+| functions extracted | 194 | 202 | 236 | 238 | 246 |
+| functions with a declared `@effects` | 4 | 4 | 4 (jsdoc 4, config 0) | 4 (jsdoc 4, config 0) | 4 (jsdoc 4, config 0) |
+| `unknown` rate | 64.4% (125/194) | 63.4% (128/202) | 65.7% (155/236) | 66.0% (157/238) | **65.9% (162/246)** |
+| `boundary` rate | 0.0% (0/194) | 0.0% (0/202) | 0.0% (0/236) | 0.0% (0/238) | 0.0% (0/246) |
+| call sites | 1003 — resolved 299, stub 3, known-pure 258, mutation 94, unresolved 349 | 1035 — resolved 315, stub 3, known-pure 260, mutation 93, unresolved 364 | 1278 — resolved 404, stub 8, known-pure 327, mutation 110, unresolved 429 | 1287 — resolved 406, stub 8, known-pure 327, mutation 110, unresolved 436 | 1322 — resolved 419, stub 8, known-pure 341, mutation 110, unresolved 444 |
+| unresolved by reason | `builtin-method` 68, `external-module` 265, `unresolved-symbol` 12, `callback-parameter` 4 | `builtin-method` 72, `external-module` 276, `unresolved-symbol` 12, `callback-parameter` 4 | `builtin-method` 102, `external-module` 307, `dynamic-import` 1, `unresolved-symbol` 15, `callback-parameter` 4 | `builtin-method` 102, `external-module` 314, `dynamic-import` 1, `unresolved-symbol` 15, `callback-parameter` 4 | `builtin-method` 107, `external-module` 317, `dynamic-import` 1, `unresolved-symbol` 15, `callback-parameter` 4 |
+| skipped function-like nodes | 90 (`callback-argument` 75, `nested-function` 15) | 91 (`callback-argument` 76, `nested-function` 15) | 109 (`callback-argument` 91, `object-literal-method` 3, `nested-function` 15) | 109 (`callback-argument` 91, `object-literal-method` 3, `nested-function` 15) | 114 (`callback-argument` 96, `object-literal-method` 3, `nested-function` 15) |
+| exit code | 0 | 0 | 0 | 0 | 0 |
 
-The "After M0.5" column is the current tree. It moved by two functions and
+The "After the CI gate" column is the current tree: the call-path rendering,
+`contract.operation`, and `--format github` added eight helper functions, all
+undeclared, so the per-function `unknown` ratio moved by a tenth of a point.
+
+CI gates on `node src/cli/main.ts check src --coverage --format github`,
+without `--strict`. The baseline was measured, not assumed: plain `check src`
+exits 0, and `check src --strict` exits 1 on four `AMB-W001` warnings —
+`extractProject` (`src/checker/backend/legacy-ts.ts:55`), `loadProjectConfig`
+(`:164`), `collectTsFiles` (`:211`), and `main` (`src/cli/main.ts:39`). All
+four are the connection layer and the CLI reaching the `typescript` API and
+`node:fs` through calls the analysis does not resolve; closing them is stub and
+resolution work, not a contract to write, so `--strict` is not the gate today.
+`check test/fixtures/realistic-api --strict` exits 1 for the same class of
+reason (`unknown` 20.8%, 11/53 functions; `builtin-method` 1,
+`ambient-declaration` 4). No allowlist was widened to make either number look
+better.
+
+The "After M0.5" column moved by two functions and
 nothing else: `unwrapNonNullAssertions` and `implementationDeclarationOf`, both
 added to `src/checker/backend/legacy-ts.ts` by the M0.5 fixes below, both
 undeclared, both calling the `typescript` API (`external-module` 307 → 314).
