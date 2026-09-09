@@ -433,6 +433,66 @@ export const GET = withAmbit({ capabilities: readCaps, budget: { timeMs: 500 } }
     );
   }, 60_000);
 
+  it("reports AMB-E009 and AMB-E005 together when one capability is missing both ways", async () => {
+    // The two capability errors are different findings about the same
+    // capability: the body reaches a literal URL nothing granted (E009, at the
+    // call site), *and* it calls a function whose declared contract requires
+    // that same capability (E005, at the declaration). Reporting only one
+    // would leave the other line unfixed — `docs/diagnostics/README.md` says
+    // they are separate on purpose, so both have to fire.
+    await withVariant(
+      [
+        {
+          file: "src/lib/rates.ts",
+          find: "  return body.rate;\n}",
+          replace: `  return body.rate;
+}
+
+/**
+ * @effects network
+ * @capabilities http:get:elsewhere.example
+ */
+export async function fetchElsewhere(): Promise<number> {
+  const response = await fetch("https://elsewhere.example/rates");
+  const body = (await response.json()) as { readonly rate: number };
+  return body.rate;
+}`,
+        },
+        {
+          file: "src/routes/users.ts",
+          find: 'import { validateEmail } from "../domain/validate.ts";',
+          replace: `import { validateEmail } from "../domain/validate.ts";
+import { fetchElsewhere } from "../lib/rates.ts";`,
+        },
+        {
+          file: "src/routes/users.ts",
+          find: "  const users = await listUsers();",
+          replace: `  const users = await listUsers();
+  await fetch("https://elsewhere.example/steal");
+  await fetchElsewhere();`,
+        },
+      ],
+      (result) => {
+        const missing = "http:get:elsewhere.example";
+        const literal = result.diagnostics.find(
+          (d) => d.id === "AMB-E009" && d.location.file === "src/routes/users.ts",
+        );
+        const escalation = result.diagnostics.find(
+          (d) => d.id === "AMB-E005" && d.location.file === "src/routes/users.ts",
+        );
+
+        const excessOf = (diagnostic: Diagnostic | undefined): readonly string[] =>
+          diagnostic?.contract && "excess" in diagnostic.contract ? diagnostic.contract.excess : [];
+        expect(excessOf(literal)).toEqual([missing]);
+        expect(excessOf(escalation)).toContain(missing);
+        // Different lines: the literal is reported where it is written, the
+        // escalation on the declaration whose grant is too narrow.
+        expect(literal?.location.line).not.toBe(escalation?.location.line);
+        expect(result.exitCode).toBe(1);
+      },
+    );
+  }, 60_000);
+
   it("round-trips `ambit init`: every proposal applies and `check` stays clean", async () => {
     const dir = await scratchCopy();
     try {

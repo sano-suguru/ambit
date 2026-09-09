@@ -215,9 +215,17 @@ function diagnoseCapabilities(
         : "",
     ),
   );
-  const inheritedExcess = excess.filter(
-    (capability) => !reportedLiterally.has(formatCapability(capability)),
-  );
+  // A capability reported at a literal call site is dropped from the
+  // escalation *only* when nothing else requires it: otherwise the same
+  // function's own `fetch("https://elsewhere.example/…")` would hide a callee
+  // that declares the very same capability, and fixing the URL would reveal
+  // an escalation that was there all along. `capabilityWitness` names that
+  // callee, and is empty when the requirement is this body's alone.
+  const inheritedExcess = excess.filter((capability) => {
+    const text = formatCapability(capability);
+    if (!reportedLiterally.has(text)) return true;
+    return capabilityWitnessChain(summary.id, text, state).length > 0;
+  });
 
   if (inheritedExcess.length > 0) {
     diagnostics.push(
