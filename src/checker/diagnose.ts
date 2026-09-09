@@ -1,4 +1,5 @@
 import type {
+  Budget,
   Capability,
   ContractViaEntry,
   Diagnostic,
@@ -13,11 +14,14 @@ import type {
   StubCall,
   SymbolId,
   UncarriedContract,
+  WrapperBudget,
 } from "../core/index.ts";
 import {
   callLeavesUnknown,
+  DEFAULT_ON_EXCEED,
   excessCapabilities,
   excessEffects,
+  formatBudget,
   formatCapability,
   KNOWN_EFFECTS,
 } from "../core/index.ts";
@@ -596,25 +600,25 @@ export function diagnoseUncarriedContracts(
   }));
 }
 
-/** How a wrapper that could not be compared is described, by why. */
-const UNCOMPARED_WRAPPER_REASON: Record<NonNullable<RuntimeWrapper["unmatchedReason"]>, string> = {
-  "dynamic-capabilities": "its capability list is not a literal array of strings in the source",
-  "handler-not-in-this-file":
-    "its handler is not a declaration in this file, so there is no JSDoc contract beside it to compare",
-};
+/** How a wrapper whose handler could not be reached at all is described. */
+const HANDLER_NOT_IN_THIS_FILE =
+  "its handler is not a declaration in this file, so there is no JSDoc contract beside it to compare";
 
 /**
- * DESIGN.md §4.4: the capability set is written twice — once as
- * `@capabilities` on the handler, once in the `withAmbit(spec, handler)` or
+ * DESIGN.md §4.4: the contract is written twice — once as `@capabilities` and
+ * `@budget` on the handler, once in the `withAmbit(spec, handler)` or
  * `ambitHandler(spec, handler, decode)` beside it. Explicit registration is
  * what §4.4 chose, so the duplication stays; nothing checked that the two
- * agree, and an agent adding `db:write:users` to one of them expanded
- * authority silently.
+ * agree, and an agent adding `db:write:users` to one of them — or widening
+ * `timeMs` in one of them — expanded authority silently.
  *
- * This compares the two **as source**. §12's 「契約とハンドラの対応付け」 —
- * matching a contract to a handler after a build strips the comments, or after
- * a bundler moves it — stays open, and a wrapper this comparison cannot reach
- * is reported (`AMB-W004`) rather than passed over.
+ * This compares the two **as source**, half by half: the capability set
+ * (`AMB-E010`) and the budget (`AMB-E011`) are fixed by the source
+ * independently, so one may be comparable when the other is not. §12's
+ * 「契約とハンドラの対応付け」 — matching a contract to a handler after a build
+ * strips the comments, or after a bundler moves it — stays open, and a half
+ * this comparison cannot reach is reported (`AMB-W004`) rather than passed
+ * over.
  */
 export function diagnoseRuntimeWrappers(
   wrappers: readonly RuntimeWrapper[],
@@ -624,45 +628,63 @@ export function diagnoseRuntimeWrappers(
   const diagnostics: Diagnostic[] = [];
 
   for (const wrapper of wrappers) {
-    if (wrapper.unmatchedReason) {
-      diagnostics.push(
-        uncomparedWrapper(wrapper, UNCOMPARED_WRAPPER_REASON[wrapper.unmatchedReason], engine),
-      );
-      continue;
-    }
     const handler = wrapper.handler ? state.get(wrapper.handler)?.summary : undefined;
-    if (!handler || wrapper.capabilities === undefined) {
+    if (!handler) {
       diagnostics.push(
         uncomparedWrapper(
           wrapper,
-          "its handler could not be matched to an analyzed declaration",
+          wrapper.unmatchedReason === "handler-not-in-this-file"
+            ? HANDLER_NOT_IN_THIS_FILE
+            : "its handler could not be matched to an analyzed declaration",
           engine,
         ),
       );
       continue;
     }
-    // A `@capabilities` that did not parse is AMB-E004's business; comparing
-    // against a tag Ambit already rejected would name the wrong problem.
-    if (handler.capabilities.kind === "invalid") continue;
-    if (!handler.entrypoint && handler.capabilities.kind === "none") {
-      diagnostics.push(
-        uncomparedWrapper(
-          wrapper,
-          `${displayName(handler.id)} declares neither @entrypoint nor @capabilities, so there is nothing to compare the spec against`,
-          engine,
-        ),
-      );
-      continue;
-    }
+    diagnostics.push(...diagnoseWrapperCapabilities(wrapper, handler, engine));
+    diagnostics.push(...diagnoseWrapperBudget(wrapper, handler, engine));
+  }
 
-    const declared =
-      handler.capabilities.kind === "declared"
-        ? handler.capabilities.capabilities.capabilities.map(formatCapability)
-        : [];
-    const wrapped = [...wrapper.capabilities];
-    if (sameCapabilityText(declared, wrapped)) continue;
+  return diagnostics;
+}
 
-    diagnostics.push({
+/** The capability half of §4.4's agreement check. */
+function diagnoseWrapperCapabilities(
+  wrapper: RuntimeWrapper,
+  handler: FunctionSummary,
+  engine: DiagnosticEngine,
+): readonly Diagnostic[] {
+  // A `@capabilities` that did not parse is AMB-E004's business; comparing
+  // against a tag Ambit already rejected would name the wrong problem.
+  if (handler.capabilities.kind === "invalid") return [];
+  if (wrapper.capabilities === undefined) {
+    return [
+      uncomparedWrapper(
+        wrapper,
+        "its capability list is not a literal array of strings in the source",
+        engine,
+      ),
+    ];
+  }
+  if (!handler.entrypoint && handler.capabilities.kind === "none") {
+    return [
+      uncomparedWrapper(
+        wrapper,
+        `${displayName(handler.id)} declares neither @entrypoint nor @capabilities, so there is nothing to compare the spec against`,
+        engine,
+      ),
+    ];
+  }
+
+  const declared =
+    handler.capabilities.kind === "declared"
+      ? handler.capabilities.capabilities.capabilities.map(formatCapability)
+      : [];
+  const wrapped = [...wrapper.capabilities];
+  if (sameCapabilityText(declared, wrapped)) return [];
+
+  return [
+    {
       id: "AMB-E010",
       severity: "error",
       category: "capabilities",
@@ -677,10 +699,85 @@ export function diagnoseRuntimeWrappers(
       fixes: [],
       docs: "docs/diagnostics/README.md#amb-e010",
       engine,
-    });
+    },
+  ];
+}
+
+/**
+ * The budget half of §4.4's agreement check.
+ *
+ * Its own id rather than AMB-E010's: that diagnostic's `contract` field is
+ * capability text (`declared` / `required` / `excess`), and a budget
+ * disagreement has nothing honest to put in it.
+ */
+function diagnoseWrapperBudget(
+  wrapper: RuntimeWrapper,
+  handler: FunctionSummary,
+  engine: DiagnosticEngine,
+): readonly Diagnostic[] {
+  // A `@budget` that did not parse is AMB-E008's business, for the reason an
+  // invalid `@capabilities` is AMB-E004's.
+  if (handler.budget.kind === "invalid") return [];
+  if (wrapper.budget === undefined) {
+    return [
+      uncomparedWrapper(
+        wrapper,
+        "its budget is not an object literal of literal limits in the source",
+        engine,
+      ),
+    ];
   }
 
-  return diagnostics;
+  const declared = handler.budget.kind === "declared" ? handler.budget.budget : undefined;
+  const wrapped =
+    wrapper.budget.kind === "literal" ? withDefaultOnExceed(wrapper.budget) : undefined;
+  if (sameBudget(declared, wrapped)) return [];
+
+  return [
+    {
+      id: "AMB-E011",
+      severity: "error",
+      category: "budget",
+      message: `${wrapper.wrapper} sets ${describeBudget(wrapped, "budget")} but ${displayName(handler.id)} declares ${describeBudget(declared, "@budget")}`,
+      location: wrapper.location,
+      fixes: [],
+      docs: "docs/diagnostics/README.md#amb-e011",
+      engine,
+    },
+  ];
+}
+
+/**
+ * The spec's budget with `onExceed` defaulted, so the two sides are comparable.
+ *
+ * `parseBudgetTag` already writes `throw` into a `@budget` that omits it, so
+ * the JSDoc side has no absent state; leaving the spec's key absent would make
+ * `@budget timeMs=500` and `{ timeMs: 500 }` disagree over a policy both sides
+ * apply identically. The numeric limits are not defaulted: there `timeMs=500`
+ * against no `timeMs` is a real disagreement.
+ */
+function withDefaultOnExceed(budget: Extract<WrapperBudget, { kind: "literal" }>): Budget {
+  return {
+    ...(budget.timeMs === undefined ? {} : { timeMs: budget.timeMs }),
+    ...(budget.costUsd === undefined ? {} : { costUsd: budget.costUsd }),
+    ...(budget.llmCalls === undefined ? {} : { llmCalls: budget.llmCalls }),
+    onExceed: budget.onExceed ?? DEFAULT_ON_EXCEED,
+  };
+}
+
+/** Field-by-field equality; a limit present on one side only is a disagreement. */
+function sameBudget(a: Budget | undefined, b: Budget | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return (
+    a.timeMs === b.timeMs &&
+    a.costUsd === b.costUsd &&
+    a.llmCalls === b.llmCalls &&
+    a.onExceed === b.onExceed
+  );
+}
+
+function describeBudget(budget: Budget | undefined, label: string): string {
+  return budget === undefined ? `no ${label}` : `${label} ${formatBudget(budget)}`;
 }
 
 function uncomparedWrapper(

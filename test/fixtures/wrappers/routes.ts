@@ -56,3 +56,91 @@ const built = ["db:read:orders"];
 export const DYNAMIC_BY_ADAPTER = ambitHandler({ capabilities: built }, dynamicByAdapter, () => [
   "",
 ]);
+
+// --- §4.4's agreement check on `@budget` ---------------------------------
+
+/**
+ * @entrypoint
+ * @capabilities db:read:orders
+ * @budget timeMs=500 onExceed=throw
+ * @effects pure
+ */
+export function agreeingBudget(id: string): string {
+  return id;
+}
+
+// The spec omits `onExceed`; both sides default it to `throw`, so they agree.
+export const AGREEING_BUDGET = ambitHandler(
+  { capabilities: ["db:read:orders"], budget: { timeMs: 500 } },
+  agreeingBudget,
+  () => [""],
+);
+
+/**
+ * @entrypoint
+ * @capabilities db:read:orders
+ * @budget timeMs=800 onExceed=throw
+ * @effects pure
+ */
+export function driftingTimeMs(id: string): string {
+  return id;
+}
+
+// A widened `timeMs`: the limit the runtime applies is not the declared one.
+export const DRIFTING_TIME_MS = ambitHandler(
+  { capabilities: ["db:read:orders"], budget: { timeMs: 5000, onExceed: "throw" } },
+  driftingTimeMs,
+  () => [""],
+);
+
+/**
+ * @entrypoint
+ * @capabilities db:read:orders
+ * @budget timeMs=500 onExceed=warn
+ * @effects pure
+ */
+export function driftingOnExceed(id: string): string {
+  return id;
+}
+
+// Same limit, different policy on exceeding it.
+export const DRIFTING_ON_EXCEED = withAmbit(
+  { capabilities: ["db:read:orders"], budget: { timeMs: 500, onExceed: "abort" } },
+  driftingOnExceed,
+);
+
+/**
+ * @entrypoint
+ * @capabilities db:read:orders
+ * @budget timeMs=500 costUsd=0.01 onExceed=throw
+ * @effects pure
+ */
+export function jsDocOnlyCostUsd(id: string): string {
+  return id;
+}
+
+// A limit on one side only: the JSDoc declares a `costUsd` the spec does not.
+export const JSDOC_ONLY_COST_USD = ambitHandler(
+  { capabilities: ["db:read:orders"], budget: { timeMs: 500, onExceed: "throw" } },
+  jsDocOnlyCostUsd,
+  () => [""],
+);
+
+/**
+ * @entrypoint
+ * @capabilities db:read:orders
+ * @budget timeMs=500
+ * @effects pure
+ */
+export function dynamicBudget(id: string): string {
+  return id;
+}
+
+const builtBudget = { timeMs: 500, onExceed: "throw" } as const;
+
+// Not an object literal: not compared, reported as AMB-W004.
+export const DYNAMIC_BUDGET = ambitHandler(
+  { capabilities: ["db:read:orders"], budget: builtBudget },
+  dynamicBudget,
+  () => [""],
+);

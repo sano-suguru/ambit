@@ -7,6 +7,7 @@ import type {
   ExtractedFunction,
   ExtractedProject,
   LiteralArgument,
+  OnExceed,
   RawJsDoc,
   RuntimeWrapper,
   SkippedFunctionKind,
@@ -15,8 +16,9 @@ import type {
   TsBackend,
   UncarriedContract,
   UnresolvedReason,
+  WrapperBudget,
 } from "../../core/index.ts";
-import { symbolId } from "../../core/index.ts";
+import { isOnExceed, symbolId } from "../../core/index.ts";
 import { constructorStubKey } from "../../stubs/constructors.ts";
 import { isMutatingBuiltin } from "../../stubs/mutating-builtins.ts";
 
@@ -722,15 +724,22 @@ function runtimeWrapperOf(
 ): RuntimeWrapper {
   const location = locationOf(absoluteRoot, sourceFile, node);
   const capabilities = literalCapabilityListOf(node.arguments[0]);
+  const budget = literalBudgetOf(node.arguments[0]);
   const handler = sameFileHandlerOf(node.arguments[1], sourceFile, checker, declaredNodeToId);
 
-  if (capabilities === undefined) {
-    return { location, wrapper, unmatchedReason: "dynamic-capabilities" };
-  }
+  // Both halves are carried whatever either one turned out to be. A spec that
+  // builds its capability list at runtime but writes its budget as a literal
+  // still has a budget worth comparing, and vice versa: collapsing the wrapper
+  // to one "not compared" the moment either half is dynamic would drop a check
+  // the source does support.
+  const halves = {
+    ...(capabilities === undefined ? {} : { capabilities }),
+    ...(budget === undefined ? {} : { budget }),
+  };
   if (handler === undefined) {
-    return { location, wrapper, capabilities, unmatchedReason: "handler-not-in-this-file" };
+    return { location, wrapper, ...halves, unmatchedReason: "handler-not-in-this-file" };
   }
-  return { location, wrapper, capabilities, handler };
+  return { location, wrapper, ...halves, handler };
 }
 
 /**
@@ -766,6 +775,76 @@ function literalCapabilityListOf(spec: ts.Expression | undefined): readonly stri
     capabilities.push(value.text);
   }
   return capabilities;
+}
+
+/**
+ * The spec's `budget` as written, or `undefined` when the source does not fix
+ * it — the spec is not an object literal, the `budget` value is not an object
+ * literal, a key is not one of §4.5's four, or a value is not a literal.
+ *
+ * A spec with no `budget` key yields `{ kind: "absent" }`, on the same
+ * reasoning as an absent `capabilities` key: writing no budget is a statement
+ * the handler's JSDoc can contradict, not an absence of information.
+ */
+function literalBudgetOf(spec: ts.Expression | undefined): WrapperBudget | undefined {
+  if (!spec) return undefined;
+  const literal = unwrapTypeOnlyExpression(spec);
+  if (!ts.isObjectLiteralExpression(literal)) return undefined;
+  if (literal.properties.some(ts.isSpreadAssignment)) return undefined;
+
+  const property = literal.properties.find(
+    (member): member is ts.PropertyAssignment =>
+      ts.isPropertyAssignment(member) &&
+      ts.isIdentifier(member.name) &&
+      member.name.text === "budget",
+  );
+  if (!property) return { kind: "absent" };
+
+  const object = unwrapTypeOnlyExpression(property.initializer);
+  if (!ts.isObjectLiteralExpression(object)) return undefined;
+  if (object.properties.some(ts.isSpreadAssignment)) return undefined;
+
+  let timeMs: number | undefined;
+  let costUsd: number | undefined;
+  let llmCalls: number | undefined;
+  let onExceed: OnExceed | undefined;
+
+  for (const member of object.properties) {
+    if (!ts.isPropertyAssignment(member) || !ts.isIdentifier(member.name)) return undefined;
+    const value = unwrapTypeOnlyExpression(member.initializer);
+    if (member.name.text === "onExceed") {
+      if (!ts.isStringLiteral(value) && !ts.isNoSubstitutionTemplateLiteral(value))
+        return undefined;
+      if (!isOnExceed(value.text)) return undefined;
+      onExceed = value.text;
+      continue;
+    }
+    const numeric = numericLiteralOf(value);
+    if (numeric === undefined) return undefined;
+    if (member.name.text === "timeMs") timeMs = numeric;
+    else if (member.name.text === "costUsd") costUsd = numeric;
+    else if (member.name.text === "llmCalls") llmCalls = numeric;
+    // A key outside §4.5's four is not a budget this comparison understands.
+    else return undefined;
+  }
+
+  return {
+    kind: "literal",
+    ...(timeMs === undefined ? {} : { timeMs }),
+    ...(costUsd === undefined ? {} : { costUsd }),
+    ...(llmCalls === undefined ? {} : { llmCalls }),
+    ...(onExceed === undefined ? {} : { onExceed }),
+  };
+}
+
+/** A numeric literal, including a negated one — `-1` is a prefix expression, not a literal. */
+function numericLiteralOf(node: ts.Expression): number | undefined {
+  if (ts.isNumericLiteral(node)) return Number(node.text);
+  if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken) {
+    const operand = unwrapTypeOnlyExpression(node.operand);
+    if (ts.isNumericLiteral(operand)) return -Number(operand.text);
+  }
+  return undefined;
 }
 
 /**

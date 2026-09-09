@@ -295,10 +295,76 @@ describe("contract-to-handler agreement (DESIGN.md §4.4「契約とハンドラ
 
   it("reports an adapter registration it cannot compare as AMB-W004 rather than passing it", async () => {
     const { diagnostics } = await analyze(WRAPPER_ROOT);
-    const found = diagnostics.filter((d) => d.id === "AMB-W004");
+    // Filtered by reason, not counted: the two halves are reported
+    // independently, so the fixture now holds one uncompared capability list
+    // and one uncompared budget.
+    const found = diagnostics.filter(
+      (d) => d.id === "AMB-W004" && d.message.includes("not a literal array of strings"),
+    );
     expect(found).toHaveLength(1);
     expect(found[0]?.message).toContain("ambitHandler here was not compared");
-    expect(found[0]?.message).toContain("not a literal array of strings");
     expect(found[0]?.severity).toBe("warning");
+  });
+
+  /**
+   * §4.4's duplication is not only the capability set: `spec.budget` and
+   * `@budget` are the same contract written twice, and an agent that widens
+   * one of them moves the limit the runtime actually applies away from the
+   * one the source declares. Its own id, AMB-E011 — AMB-E010's `contract`
+   * field is capability text, which a budget disagreement cannot fill.
+   */
+  it("catches a spec budget whose timeMs drifts from the handler's @budget", async () => {
+    const { diagnostics } = await analyze(WRAPPER_ROOT);
+    const found = diagnostics.filter(
+      (d) => d.id === "AMB-E011" && d.message.includes("driftingTimeMs"),
+    );
+    expect(found).toHaveLength(1);
+    expect(found[0]?.severity).toBe("error");
+    expect(found[0]?.category).toBe("budget");
+    expect(found[0]?.message).toContain("ambitHandler sets budget timeMs=5000");
+    expect(found[0]?.message).toContain("declares @budget timeMs=800");
+  });
+
+  it("catches a spec budget whose onExceed drifts from the handler's @budget", async () => {
+    const { diagnostics } = await analyze(WRAPPER_ROOT);
+    const found = diagnostics.filter(
+      (d) => d.id === "AMB-E011" && d.message.includes("driftingOnExceed"),
+    );
+    expect(found).toHaveLength(1);
+    expect(found[0]?.message).toContain("withAmbit sets budget timeMs=500 onExceed=abort");
+    expect(found[0]?.message).toContain("declares @budget timeMs=500 onExceed=warn");
+  });
+
+  it("treats a limit declared on one side only as a disagreement", async () => {
+    const { diagnostics } = await analyze(WRAPPER_ROOT);
+    const found = diagnostics.filter(
+      (d) => d.id === "AMB-E011" && d.message.includes("jsDocOnlyCostUsd"),
+    );
+    expect(found).toHaveLength(1);
+    expect(found[0]?.message).toContain("declares @budget timeMs=500 costUsd=0.01");
+    expect(found[0]?.message).not.toContain("sets budget timeMs=500 costUsd");
+  });
+
+  it("stays quiet when the spec omits onExceed and the @budget takes its default", async () => {
+    // `parseBudgetTag` writes `onExceed=throw` into a tag that omits it, and
+    // the runtime defaults the spec's the same way — comparing the two
+    // un-defaulted would report a disagreement neither side has.
+    const { diagnostics } = await analyze(WRAPPER_ROOT);
+    expect(diagnostics.filter((d) => d.message.includes("agreeingBudget"))).toEqual([]);
+  });
+
+  it("reports a budget it cannot compare as AMB-W004 rather than passing it", async () => {
+    const { diagnostics } = await analyze(WRAPPER_ROOT);
+    const found = diagnostics.filter(
+      (d) => d.id === "AMB-W004" && d.message.includes("its budget is not an object literal"),
+    );
+    expect(found).toHaveLength(1);
+    expect(found[0]?.severity).toBe("warning");
+    expect(found[0]?.message).toContain("source only");
+    // The capability half of the same registration is a literal, so it is
+    // still compared: not knowing one half does not silence the other.
+    expect(
+      diagnostics.filter((d) => d.id === "AMB-E010" && d.message.includes("dynamicBudget")),
+    ).toEqual([]);
   });
 });

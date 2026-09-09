@@ -1,3 +1,4 @@
+import type { OnExceed } from "./budget.ts";
 import type { SourceLocation } from "./location.ts";
 import type { SymbolId } from "./symbol-id.ts";
 
@@ -249,11 +250,40 @@ export interface RuntimeWrapper {
    * `unmatchedReason` instead.
    */
   readonly capabilities?: readonly string[];
+  /**
+   * The spec's `budget` as the source fixes it, or absent when the source does
+   * not fix it. Independent of {@link RuntimeWrapper.capabilities}: a spec can
+   * write one half as a literal and build the other at runtime, and each half
+   * is compared — or reported as uncompared — on its own.
+   */
+  readonly budget?: WrapperBudget;
   /** The wrapped handler, when it is an identifier naming a declaration extracted from the same file. */
   readonly handler?: SymbolId;
   /** Why this wrapper could not be compared, when it could not. */
-  readonly unmatchedReason?: "dynamic-capabilities" | "handler-not-in-this-file";
+  readonly unmatchedReason?: "handler-not-in-this-file";
 }
+
+/**
+ * A `spec.budget` the source fixes.
+ *
+ * `absent` is a spec that writes no budget at all, which the handler's JSDoc
+ * can agree or disagree with; it is not the same as the field being missing,
+ * which means the source did not fix the budget and nothing can be compared.
+ *
+ * `onExceed` stays optional here because the spec may omit it. Both sides
+ * default it to `throw` before they are compared — `parseBudgetTag` already
+ * writes the default into a parsed `@budget`, so the JSDoc side has no absent
+ * state to compare an absent spec key against.
+ */
+export type WrapperBudget =
+  | { readonly kind: "absent" }
+  | {
+      readonly kind: "literal";
+      readonly timeMs?: number;
+      readonly costUsd?: number;
+      readonly llmCalls?: number;
+      readonly onExceed?: OnExceed;
+    };
 
 export interface ExtractedFile {
   readonly filePath: string;

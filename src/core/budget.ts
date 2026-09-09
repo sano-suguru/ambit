@@ -18,6 +18,11 @@ const ON_EXCEED = ["throw", "warn", "abort"] as const;
 
 export const DEFAULT_ON_EXCEED: OnExceed = "throw";
 
+/** Whether a string is one of §4.5's three `onExceed` policies. */
+export function isOnExceed(value: string): value is OnExceed {
+  return (ON_EXCEED as readonly string[]).includes(value);
+}
+
 const NUMERIC_KEYS = ["timeMs", "costUsd", "llmCalls"] as const;
 type NumericKey = (typeof NUMERIC_KEYS)[number];
 
