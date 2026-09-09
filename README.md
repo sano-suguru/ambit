@@ -12,7 +12,9 @@ checks it — declared boundaries, not silent trust.
 - How much time or money is an entrypoint allowed to spend?
 - What happens when an agent quietly expands what a function can do?
 
-Only the first is enforced today — see [Status](#status).
+The first two are checked statically, for the packages Ambit ships stubs for.
+The third is declared and validated, and only `timeMs` is enforced at runtime.
+See [Status](#status).
 
 ## The accident
 
@@ -89,15 +91,18 @@ analysis itself could not run.
   effects through the call graph. Diagnostics are available as text or NDJSON,
   and every run reports how many files and functions it analyzed, so a check
   that saw nothing is never indistinguishable from a check that found nothing.
-- **Also works:** `@capabilities` is checked statically — a callee may not
-  require a capability its caller does not grant, and the check crosses
-  undeclared functions. In practice, with today's unknown rate, a function
-  that declares `@capabilities` will usually also get `AMB-W003`: everything
-  it reaches has to be declared, stubbed, or bounded before its requirement
-  is fully known. `@entrypoint` warns when it declares no capability
-  set. `@boundary reason="…"` stops checking a body and trusts the declared
-  contract instead, counted separately in `--coverage`. `@budget` is parsed
-  and validated. `--strict` promotes the `unknown` warnings to errors.
+- **Also works:** `@capabilities` is checked statically, in both halves of
+  DESIGN.md §4.4's 二重強制. A callee may not require a capability its caller
+  does not grant, and the check crosses undeclared functions; separately, a
+  literal URL whose host falls outside the granted target is rejected at the
+  call site (`AMB-E009`). A URL the source does not fix is reported as
+  `AMB-W003` naming the runtime as the place it is matched, never as "allowed".
+  A `withAmbit(...)` wrapping a handler declared in the same file is checked
+  against that handler's `@capabilities` (`AMB-E010`). `@entrypoint` warns when
+  it declares no capability set. `@boundary reason="…"` stops checking a body
+  and trusts the declared contract instead, counted separately in
+  `--coverage`. `@budget` is parsed and validated. `--strict` promotes the
+  `unknown` warnings to errors.
 - **`ambit init`:** proposes an `@effects` tag for every undeclared function
   whose effects resolved, as an applicable patch in the same NDJSON. It
   proposes nothing for a function that reached `unknown` — writing `pure`
@@ -113,9 +118,7 @@ analysis itself could not run.
   entrypoint context and blocks an outgoing `fetch` whose
   `http:<method>:<host>` is not granted. See [What is actually
   enforced](#what-is-actually-enforced).
-- **Not yet:** the static half of §4.4's 二重強制 (rejecting a literal URL
-  outside the granted target) is not implemented; only the
-  declaration-to-declaration narrowing check runs. `@budget`'s loop-pattern
+- **Not yet:** `@budget`'s loop-pattern
   warnings are not implemented. `ambit run`, `ambit agent`, `ambit stubs`, and
   `ambit sbom` are planned, not built. `ambit init` proposes JSDoc but does
   not write `ambit.config.ts` — out-of-code contracts (§4.1) are not
@@ -163,9 +166,9 @@ What side effects can this function perform?
 export async function getUser(id: UserId) { /* ... */ }
 ```
 
-This is the part `ambit check` enforces today: it stops a call to `fetch` or
-`node:fs` inside a function declared `pure`, and propagates effects through
-the call graph.
+This is the part `ambit check` enforces today: it stops a call to `fetch`,
+`node:fs`, a `pg`/Prisma query, or an OpenAI/Anthropic request inside a
+function declared `pure`, and propagates effects through the call graph.
 
 ### Capabilities *(statically checked; not enforced at runtime)*
 
@@ -244,17 +247,22 @@ restores the original `fetch`.
 | `@effects` | yes | — | — | — |
 | `@capabilities`, caller→callee narrowing | yes | — | — | — |
 | `@capabilities`, `globalThis.fetch` | — | yes | recorded on the context | — |
-| `@capabilities`, literal URL in source | — | — | — | not implemented |
-| `@capabilities`, `node:fs` / `child_process` / DB clients / LLM SDKs | — | — | — | no hook |
+| `@capabilities`, literal URL in source | yes (`http:<method>:<host>`) | — | — | — |
+| `@capabilities`, URL built at runtime | warns (`AMB-W003`) | yes, for `fetch` | recorded on the context | — |
+| `@capabilities`, DB table / LLM target | — | — | — | not derived from source |
+| `@effects` for `node:fs` / `child_process` / `pg` / `mysql2` / Prisma / OpenAI / Anthropic | yes | — | — | no runtime hook |
 | `@budget timeMs` | — | yes (`throw` / `warn` / `abort`) | — | — |
 | `@budget costUsd`, `llmCalls` | parsed and validated | — | — | no hook increments them |
-| `@entrypoint` declared but not wrapped | warns if no `@capabilities` | — | — | no adapter links the two |
+| `@entrypoint` vs. the `withAmbit` beside it | yes, in the same file (`AMB-E010`) | — | — | no adapter links the two |
 
-Two limits worth stating plainly. Nothing connects the `@entrypoint` JSDoc to
-the `withAmbit` call — you write the capability list twice, and Ambit does not
-check that they agree (DESIGN.md §12 「契約とハンドラの対応付け」). And
-`costUsd`/`llmCalls` are carried on the context but never incremented, because
-no LLM SDK is hooked; they are not enforced limits.
+Two limits worth stating plainly. The `@entrypoint` / `withAmbit` agreement
+check reads the **source**: it compares a literal capability array with the
+JSDoc on a handler declared in the same file, and reports anything it cannot
+compare as `AMB-W004`. Matching a contract to the handler that actually runs —
+after a build strips the comments, or a bundler moves it — is DESIGN.md §12
+「契約とハンドラの対応付け」 and is still open. And `costUsd`/`llmCalls` are
+carried on the context but never incremented, because no LLM SDK is hooked;
+they are not enforced limits.
 
 The runtime currently ships in the same package as the CLI, so installing it
 pulls in `typescript` as a production dependency. DESIGN.md §6 says it should
@@ -284,15 +292,26 @@ instead of hidden.
 Representative cases where analysis is narrower than the model suggests:
 
 - **Small bundled effect tables.** 52 call entries (`fetch`, `undici`'s
-  `fetch`, and Node.js builtins) plus 45 constructor entries and a 29-entry
-  pure-builtin allowlist, producing only `network`, `fs_read`, `fs_write`,
-  `process`, and `env`. Nothing bundled produces `db_read`, `db_write`, or
-  `llm` — a `pure` function calling a database driver reports `unknown`, not a
-  violation.
+  `fetch`, and Node.js builtins), 43 constructor entries, a 29-entry
+  pure-builtin allowlist, and 35 database/LLM client rules (`pg`, `mysql2`,
+  `@prisma/client`, `openai`, `@anthropic-ai/sdk`) — covering all eight
+  effects. Everything outside those five packages and the Node.js builtins
+  still reports `unknown`.
+- **Client calls are matched through the value, not the type.** A method on a
+  database or LLM client is recognized when the receiver is a `const` built
+  from an imported class (`const pool = new Pool(...)` from `"pg"` gives
+  `pg.Pool.query`), including through a barrel file. A client held in a class
+  field, reassigned with `let`, or returned from a factory function is not
+  matched, and reports `unknown`.
+- **Reading a response body is `unknown`.** `(await fetch(url)).json()` is a
+  method on a type from `@types/node` or `lib.dom`, and the pure-builtin
+  allowlist covers only the compiler's own lib, so the call cannot be named.
+  A function that parses a `fetch` response reports `unknown` and gets
+  `AMB-W001`.
 - **Import-shape sensitive matching.** `import * as fs from "node:fs"`,
-  `import fs from "node:fs"`, and `import { writeFileSync } from "node:fs"`
-  are all recognized; a destructured or re-exported binding several hops
-  away (e.g. through a barrel file) is not.
+  `import fs from "node:fs"`, `import { writeFileSync } from "node:fs"`, and a
+  re-export chain through a barrel file are all recognized. A binding reached
+  by destructuring a value (`const { readFile } = fs`) is not.
 - **No higher-order inference.** A call through a callback parameter is
   `unknown`; a callback passed by name (`arr.map(namedFn)`) is never seen.
 - **Construction is resolved, anonymous classes are not.** `new X(...)`,
@@ -300,6 +319,17 @@ Representative cases where analysis is narrower than the model suggests:
   initializers all propagate through `Class.constructor`. A construction of an
   anonymous class expression has no stable declaration path and stays
   `unknown`.
+- **Only HTTP targets are read from source.** The static capability check
+  covers `http:<method>:<host>` from a literal URL. No `db:` capability is
+  derived from a SQL statement: DESIGN.md §4.4 is explicit that hooking a
+  database client does not amount to deciding table-level permission for
+  arbitrary SQL, and reading a table name out of a literal would be the same
+  claim made somewhere else.
+- **The `withAmbit` agreement check is source-only, same-file.** It compares a
+  literal capability array with the JSDoc of a handler declared in the same
+  file. A list built at runtime, a handler imported from elsewhere, or a
+  handler with no contract is reported as `AMB-W004` — not compared, and not
+  silently accepted.
 - **Not every function can carry a contract.** Getters/setters, anonymous
   default exports, nested functions, and object-literal members the
   declaration-path notation cannot name (a computed or string key, a literal
@@ -351,7 +381,7 @@ Direction, not commitments — nothing here is scheduled.
 - Runtime hooks beyond `fetch`: `node:fs`, `child_process`, DB and LLM clients
 - Framework adapters (Express, Hono, Next.js) that link a declared
   `@entrypoint` to the running handler
-- The static half of capability enforcement: rejecting a literal URL or table
-  name outside the granted target
+- Deriving a capability target for operations other than HTTP — a table name,
+  a bucket, a queue — which §4.4 currently leaves to the runtime
 - Stable diagnostic ids (from the first public release)
 - Impact analysis and incremental re-checking

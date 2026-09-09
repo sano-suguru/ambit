@@ -7,17 +7,18 @@ records *implementation status*, not design — the specification itself is
 Measured on 2026-09-09, Node.js v24.20.0, macOS (darwin arm64), Apple M1,
 8 cores, 16 GiB. Every number below was run, not estimated.
 
-**Verdict: not a release candidate.** M0.5 has not been run at all, M1 is
-missing `init` and any incremental path, and M2–M4 are partial. The details
-are per row.
+**Verdict: not a release candidate.** M0.5 has not been run at all, M1 has no
+config and no incremental path, and M2–M4 are partial. The details are per
+row.
 
 ## Baseline commands
 
 ```sh
-pnpm test                     # 182 tests, 14 files — pass
+pnpm test                     # 226 tests, 17 files — pass
 pnpm exec tsc --noEmit        # pass
 ./node_modules/.bin/biome ci .  # pass
 node src/cli/main.ts check src --coverage   # exit 0
+node src/cli/main.ts check test/fixtures/realistic-api --coverage   # exit 0
 ```
 
 `pnpm exec biome ci .` returns 1 in one local shell because of a
@@ -30,21 +31,68 @@ runs `pnpm exec biome ci .` in GitHub Actions, where no such wrapper exists.
 
 | Figure | Value |
 |---|---|
-| files analyzed | 17 |
-| functions extracted | 136 |
+| files analyzed | 19 |
+| functions extracted | 163 |
 | functions with a declared `@effects` | 4 |
-| `unknown` rate | 63.2% (86/136) |
-| `boundary` rate | 0.0% (0/136) |
-| call sites | 707 — resolved 197, stub 3, known-pure 210, unresolved 297 |
-| unresolved by reason | `builtin-method` 104, `external-module` 184, `unresolved-symbol` 8, `callback-parameter` 1 |
-| skipped function-like nodes | 61 (`callback-argument` 54, `nested-function` 7) |
+| `unknown` rate | 68.7% (112/163) |
+| `boundary` rate | 0.0% (0/163) |
+| call sites | 851 — resolved 243, stub 3, known-pure 236, unresolved 369 |
+| unresolved by reason | `builtin-method` 139, `external-module` 221, `unresolved-symbol` 8, `callback-parameter` 1 |
+| skipped function-like nodes | 74 (`callback-argument` 66, `nested-function` 8) |
 | exit code | 0 |
 
-The 63% unknown rate is dominated by `external-module` (184), which is almost
+The 69% unknown rate is dominated by `external-module` (221), which is almost
 entirely calls into the `typescript` compiler API from the connection layer —
 the one file that is meant to be replaceable. It is a real number, not a
 target that has been met: DESIGN.md §10's goal is 30% for an *adopting team*
 after three months, which no one has done.
+
+It went **up** from 63.2% (86/136), measured before the client stubs and the
+capability work. Two causes, neither of them an analysis regression: the
+denominator grew by 27 functions (two new stub modules, plus the connection
+layer's new helpers), and those new helpers use `Array.push`, `Map.set`, and
+`String.slice`, none of which the pure-builtin allowlist lists — the first two
+because DESIGN.md §12 leaves local mutation outside the effect model, the third
+because it had not surfaced in a measurement before. The allowlist was not
+widened to move this number.
+
+## Adopting-team-equivalent code (`check test/fixtures/realistic-api --coverage`)
+
+DESIGN.md §10's `unknown`-rate target is about a team's own code, not about
+Ambit's connection layer, so it is measured against
+`test/fixtures/realistic-api` — a Node backend of the shape a coding agent
+produces (HTTP handlers with `@entrypoint` contracts, a `pg` pool, a Prisma
+client, an LLM SDK, a barrel file, pure domain logic). **This is not a team**,
+and it does not satisfy §10, which requires a real adopting team after three
+months. It is the fixture that makes the number measurable at all.
+
+| Figure | Before the client stubs | After |
+|---|---|---|
+| files analyzed | 9 | 9 |
+| functions extracted | 19 | 19 |
+| `unknown` rate | 47.4% (9/19) | **10.5% (2/19)** |
+| `boundary` rate | 0.0% | 0.0% |
+| call sites | 31 — resolved 12, stub 1, pure 9, unresolved 9 | 31 — resolved 12, stub 8, pure 9, unresolved 2 |
+| unresolved by reason | `builtin-method` 1, `unresolved-symbol` 8 | `builtin-method` 1, `ambient-declaration` 1 |
+| top unresolved names | `Map.set` 1 | `Map.set` 1 |
+| exit code | 0 | 0 |
+
+Both remaining `unknown`s are accounted for:
+
+- `Map.set` (`builtin-method`) — an in-memory cache writing to a `Map`. The
+  pure-builtin allowlist deliberately excludes mutating methods, and how far
+  `pure` extends to local mutation is an open design question (DESIGN.md §12,
+  「pure の検証範囲」). **This goal did not decide it**, and the allowlist was
+  not widened to reach 30%.
+- one `ambient-declaration` — `(await fetch(url)).json()`. The method is
+  declared on a type from a `.d.ts`, and the pure-builtin allowlist covers only
+  the compiler's own lib, so the call cannot be named.
+
+Before the client stubs, all eight of the `unresolved-symbol` calls were
+database and LLM client methods, and none of them carried a name at all —
+`top-unresolved-names` showed only `Map.set`. That is worth recording on its
+own: the "what to stub next" signal was silent about the single largest source
+of `unknown` in the fixture.
 
 ### Check latency
 
@@ -59,6 +107,14 @@ and "変更後の再検査" are the same operation. That is the honest reading o
 these numbers, and the reason no threshold has been set: there is nothing yet
 to compare against.
 
+The table above is the original measurement and has **not** been superseded.
+Re-running the same command while adding the client stubs gave 1.72–3.20 s, and
+re-running it on the pre-change tree in the same session gave 2.58–3.63 s —
+both far above the recorded range, and the older tree the slower of the two.
+That is machine load, not a change in the analysis, and neither range is
+recorded as a figure for this build. A comparable measurement needs a quiescent
+machine, and §3.5's performance gate has not run either way.
+
 ## Milestones
 
 ### M0 — specification, diagnostic ledger, RFC procedure, scope
@@ -67,7 +123,7 @@ to compare against.
 |---|---|
 | Spec section | §11 M0 |
 | Acceptance | review complete |
-| Implemented | `docs/DESIGN.md`, `docs/diagnostics/README.md` (11 codes), `AGENTS.md` |
+| Implemented | `docs/DESIGN.md`, `docs/diagnostics/README.md` (15 codes), `AGENTS.md` |
 | Evidence | files in tree |
 | Outstanding | `rfcs/` and `conformance/` are deferred to first publish by §9. The npm scope `@ambit` is **not** secured; the package is named `ambit` and is `private: true`. |
 
@@ -97,9 +153,9 @@ to compare against.
 |---|---|
 | Spec section | §4.4, §4.5, §4.6 |
 | Acceptance | conformance tests for the planned hook targets; contract-to-handler mapping; 50 bundled stub packages |
-| Implemented | `@capabilities` narrowing (static, crosses undeclared functions, target globs), `@entrypoint` warning, `@boundary` with mandatory reason and separate coverage accounting, `@budget` parsing/validation, runtime `withAmbit` + `globalThis.fetch` blocking + `timeMs` enforcement + `runtime.unscoped` |
-| Evidence | `test/contracts.test.ts` (26), `test/runtime.test.ts` (mock-level, 13), `test/e2e.runtime.test.ts` (real socket, through the installed package, 4) |
-| Outstanding | **Only `fetch` is hooked.** `node:fs`, `node:http`/`https`/`net`, `child_process`, `pg`/`mysql2`/Prisma/Drizzle/MongoDB, OpenAI/Anthropic/Vercel AI — none. **`costUsd` and `llmCalls` are not enforced**; nothing increments them. **No framework adapters** (Express/Hono/Next.js/BullMQ). **No contract-to-handler mapping** — the capability list is written twice, in JSDoc and in `withAmbit`, and Ambit does not check they agree (§12). **The static half of §4.4's 二重強制 is not implemented**: a literal URL outside the granted target is not rejected at check time. **No `@budget` loop-pattern warnings.** Bundled stubs: 52 call entries across 9 namespaces (`fetch`, `globalThis`, `undici`, `node:http`, `node:https`, `node:net`, `node:fs`, `node:fs/promises`, `node:child_process`), 45 constructor entries, and 29 pure-builtin methods — **not** 50 packages. Nothing bundled produces `db_read`, `db_write`, or `llm`. |
+| Implemented | `@capabilities` narrowing (static, crosses undeclared functions, target globs), the static half of §4.4's 二重強制 for literal HTTP targets (`AMB-E009`), source-level `withAmbit` ↔ `@entrypoint` agreement (`AMB-E010`/`AMB-W004`), `@entrypoint` warning, `@boundary` with mandatory reason and separate coverage accounting, `@budget` parsing/validation, runtime `withAmbit` + `globalThis.fetch` blocking + `timeMs` enforcement + `runtime.unscoped`, `db_read`/`db_write`/`llm` stubs for `pg`/`mysql2`/Prisma/OpenAI/Anthropic |
+| Evidence | `test/contracts.test.ts` (26), `test/runtime.test.ts` (mock-level, 13), `test/e2e.runtime.test.ts` (real socket, through the installed package, 4), `test/e2e.realistic.test.ts` (15 — all six accidents in `docs/goals/realistic-api.md`), `test/stubs.data-clients.test.ts`, `test/stubs.http-capabilities.test.ts` |
+| Outstanding | **Only `fetch` is hooked at runtime.** `node:fs`, `node:http`/`https`/`net`, `child_process`, `pg`/`mysql2`/Prisma/Drizzle/MongoDB, OpenAI/Anthropic/Vercel AI — none. **`costUsd` and `llmCalls` are not enforced**; nothing increments them. **No framework adapters** (Express/Hono/Next.js/BullMQ). **Contract-to-handler mapping is source-level only** — a literal capability array is compared with the JSDoc of a handler declared in the same file; a list built at runtime, a handler from another module, or a build/bundle that moves either half is reported as uncompared (`AMB-W004`), and §12's 「契約とハンドラの対応付け」 stays open. **Only HTTP targets are read from source** — no `db:` capability is derived from SQL (§4.4's caveat). **No `@budget` loop-pattern warnings.** Bundled stubs: 52 call entries across 9 namespaces (`fetch`, `globalThis`, `undici`, `node:http`, `node:https`, `node:net`, `node:fs`, `node:fs/promises`, `node:child_process`), 43 constructor entries, 29 pure-builtin methods, 35 database/LLM client rules across 5 packages (`pg`, `mysql2`, `@prisma/client`, `openai`, `@anthropic-ai/sdk`), and 7 HTTP capability rules — **not** 50 packages. All eight effects now have at least one bundled source. |
 
 ### M3 — concrete fix patches, agent protocol
 
@@ -133,8 +189,8 @@ repository claims progress against it.
 | Tag | Parsed | Statically checked | Runtime-enforced | Audit only |
 |---|---|---|---|---|
 | `@effects` | yes | yes (§4.2 rules 1–7) | — | — |
-| `@capabilities` | yes | yes (caller→callee narrowing) | `fetch` only | recorded on the context |
+| `@capabilities` | yes | yes (caller→callee narrowing; literal HTTP target) | `fetch` only | recorded on the context |
 | `@budget` | yes | validation only | `timeMs` only | — |
-| `@entrypoint` | yes | warns without `@capabilities` | establishes the context via `withAmbit` | — |
+| `@entrypoint` | yes | warns without `@capabilities`; compared with a same-file `withAmbit` | establishes the context via `withAmbit` | — |
 | `@boundary` | yes | excludes the body; reason required | — | counted in `--coverage` |
 | `unknown` | n/a | propagated, reported, counted; `--strict` promotes it | — | — |
