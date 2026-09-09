@@ -272,6 +272,84 @@ export async function GET(): Promise<number> {
     expect(result.stderr).toContain("netwrok");
   });
 
+  it("(c) expands a user-defined effect and catches the violation it makes visible", async () => {
+    // DESIGN.md §4.2: 「ユーザー定義エフェクトは `ambit.config.ts` で標準
+    // エフェクトの組み合わせとして宣言できる」. `payments` stands for
+    // network + db_write, so a function declaring it may do both — and a
+    // function that declares it while also writing files is still a violation,
+    // which is what proves the name expanded rather than swallowed everything.
+    const dir = await project({
+      "src/billing.ts": `const receipts: string[] = [];
+
+/** @effects payments */
+export async function charge(id: string): Promise<number> {
+  const response = await fetch("https://payments.example.test/" + id);
+  receipts.push(id);
+  return response.status;
+}
+
+export async function refund(id: string): Promise<number> {
+  const response = await fetch("https://payments.example.test/refund/" + id);
+  return response.status;
+}
+`,
+      "ambit.config.ts": `export default {
+  effects: { payments: ["network", "db_write"] },
+  contracts: {
+    "src/billing.ts#refund": { effects: ["payments"] },
+  },
+};
+`,
+    });
+
+    const result = await run(dir);
+    expect(result.exitCode).toBe(1);
+
+    // The JSDoc side: `payments` covered the `fetch`, so only the file write
+    // is in excess. Had the name not expanded, `@effects payments` would have
+    // been AMB-E002 (an unknown effect name) instead.
+    const violation = result.diagnostics.find((d) => d.id === "AMB-E001");
+    expect(violation?.message).toContain("charge");
+    expect(violation).toMatchObject({
+      contract: { declared: ["network", "db_write"], observed: ["network", "state_write"] },
+    });
+    expect(result.diagnostics.map((d) => d.id)).not.toContain("AMB-E002");
+
+    // The config side: the same name, used from a `contracts` entry, and the
+    // diagnostics only ever name standard effects (§4.1 (d)) — `payments`
+    // appears nowhere in the output.
+    expect(result.stdout).not.toContain("payments");
+
+    const coverage = await run(dir, ["check", "src", "--coverage"]);
+    expect(coverage.stdout).toContain("declared-by: jsdoc=1 config=1");
+  });
+
+  it("(c) exits 2 for a definition that is not made of standard effects", async () => {
+    const dir = await project({
+      "src/a.ts": "export function f(): number {\n  return 1;\n}\n",
+      "ambit.config.ts": `export default {
+  effects: { payments: ["network", "db_wrote"] },
+};
+`,
+    });
+    const result = await run(dir);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("db_wrote");
+  });
+
+  it("(c) exits 2 for a definition that shadows a standard effect", async () => {
+    const dir = await project({
+      "src/a.ts": "export function f(): number {\n  return 1;\n}\n",
+      "ambit.config.ts": `export default {
+  effects: { network: ["db_read"] },
+};
+`,
+    });
+    const result = await run(dir);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("redefines the standard effect");
+  });
+
   it("(f) leaves a project with no config exactly as it was", async () => {
     const source = `/** @effects pure */
 export async function fetchRate(): Promise<number> {

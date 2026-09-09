@@ -9,7 +9,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { AmbitConfig, ConfigContract, OnExceed, SymbolId } from "../core/index.ts";
+import type {
+  AmbitConfig,
+  ConfigContract,
+  KnownEffect,
+  OnExceed,
+  SymbolId,
+} from "../core/index.ts";
 import { isKnownEffect, isOnExceed, KNOWN_EFFECTS, parseCapability } from "../core/index.ts";
 
 /**
@@ -92,7 +98,7 @@ export async function loadConfig(startDir: string): Promise<LoadedConfig | undef
   return { configPath, config: validateConfig(module.default, configPath), sourceText };
 }
 
-const TOP_LEVEL_KEYS = ["contracts"] as const;
+const TOP_LEVEL_KEYS = ["effects", "contracts"] as const;
 const CONTRACT_KEYS = ["effects", "capabilities", "budget", "entrypoint", "boundary"] as const;
 const BUDGET_KEYS = ["timeMs", "costUsd", "llmCalls", "onExceed"] as const;
 
@@ -107,15 +113,55 @@ export function validateConfig(value: unknown, where: string): AmbitConfig {
   const root = asObject(value, where, "default export");
   rejectUnknownKeys(root, TOP_LEVEL_KEYS, where, "");
 
+  const effects =
+    root.effects === undefined ? undefined : validateEffectAliases(root.effects, where);
   const contracts =
-    root.contracts === undefined ? undefined : validateContracts(root.contracts, where);
+    root.contracts === undefined
+      ? undefined
+      : validateContracts(root.contracts, where, new Set(Object.keys(effects ?? {})));
 
-  return { ...(contracts ? { contracts } : {}) };
+  return {
+    ...(effects ? { effects } : {}),
+    ...(contracts ? { contracts } : {}),
+  };
+}
+
+function validateEffectAliases(
+  value: unknown,
+  where: string,
+): Readonly<Record<string, readonly string[]>> {
+  const raw = asObject(value, where, "effects");
+  const out: Record<string, readonly string[]> = {};
+  for (const [name, members] of Object.entries(raw)) {
+    if (name.trim().length === 0) throw new ConfigError(`${where}: effects has an empty name`);
+    // A definition that shadows a standard effect would make `@effects env`
+    // mean something different in two files (§4.1 (d)).
+    if (isKnownEffect(name)) {
+      throw new ConfigError(
+        `${where}: effects.${name} redefines the standard effect "${name}"; user-defined names must not collide with ${KNOWN_EFFECTS.join(", ")}`,
+      );
+    }
+    const list = validateStringArray(members, where, `effects.${name}`);
+    for (const member of list) {
+      // §4.1 (d): definitions do not expand into other definitions. Allowing
+      // it would need a cycle check and would buy nothing a flat list cannot
+      // express.
+      if (!isKnownEffect(member)) {
+        throw new ConfigError(
+          `${where}: effects.${name} contains "${member}", which is not a standard effect (${KNOWN_EFFECTS.join(", ")})`,
+        );
+      }
+    }
+    if (list.length === 0) throw new ConfigError(`${where}: effects.${name} is empty`);
+    out[name] = list;
+  }
+  return out;
 }
 
 function validateContracts(
   value: unknown,
   where: string,
+  aliasNames: ReadonlySet<string>,
 ): Readonly<Record<string, ConfigContract>> {
   const raw = asObject(value, where, "contracts");
   const out: Record<string, ConfigContract> = {};
@@ -138,12 +184,17 @@ function validateContracts(
         `${where}: contracts key ${JSON.stringify(key)} globs the symbol half; only the file half may use * or **`,
       );
     }
-    out[key] = validateContract(contract, where, key);
+    out[key] = validateContract(contract, where, key, aliasNames);
   }
   return out;
 }
 
-function validateContract(value: unknown, where: string, key: string): ConfigContract {
+function validateContract(
+  value: unknown,
+  where: string,
+  key: string,
+  aliasNames: ReadonlySet<string>,
+): ConfigContract {
   const raw = asObject(value, where, `contracts[${JSON.stringify(key)}]`);
   rejectUnknownKeys(raw, CONTRACT_KEYS, where, `contracts[${JSON.stringify(key)}].`);
   const at = `contracts[${JSON.stringify(key)}]`;
@@ -173,9 +224,9 @@ function validateContract(value: unknown, where: string, key: string): ConfigCon
   // already decided to trust, and §3.4 says a declaration that does not mean
   // what it says must stop the run rather than narrow silently.
   for (const effect of effects ?? []) {
-    if (!isKnownEffect(effect)) {
+    if (!isKnownEffect(effect) && !aliasNames.has(effect)) {
       throw new ConfigError(
-        `${where}: ${at}.effects contains "${effect}", which is not a standard effect (${KNOWN_EFFECTS.join(", ")})`,
+        `${where}: ${at}.effects contains "${effect}", which is neither a standard effect nor defined under effects`,
       );
     }
   }
@@ -306,6 +357,8 @@ interface ResolvedEntry {
 export interface ResolvedConfig {
   readonly configPath: string;
   readonly sourceText: string;
+  /** User-defined effect names → the standard effects they stand for (§4.1 (d)). */
+  readonly effectAliases: ReadonlyMap<string, readonly KnownEffect[]>;
   /** The contract declared for `id`, or `undefined`. Records the match for {@link unmatchedExactKeys}. */
   contractFor(id: SymbolId): ConfigContract | undefined;
   /**
@@ -343,11 +396,17 @@ export function resolveConfig(loaded: LoadedConfig, rootDir: string): ResolvedCo
     });
   }
 
+  const effectAliases = new Map<string, readonly KnownEffect[]>();
+  for (const [name, members] of Object.entries(loaded.config.effects ?? {})) {
+    effectAliases.set(name, members.filter(isKnownEffect));
+  }
+
   const matchedKeys = new Set<string>();
 
   return {
     configPath: loaded.configPath,
     sourceText: loaded.sourceText,
+    effectAliases,
     contractFor(id: SymbolId): ConfigContract | undefined {
       const hash = id.indexOf("#");
       if (hash < 0) return undefined;

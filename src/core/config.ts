@@ -31,6 +31,14 @@ export interface ConfigContract {
 
 export interface AmbitConfig {
   /**
+   * User-defined effect names, each a combination of standard effects
+   * (DESIGN.md §4.2: 「ユーザー定義エフェクトは `ambit.config.ts` で標準
+   * エフェクトの組み合わせとして宣言できる」). Usable from both `@effects`
+   * and {@link ConfigContract.effects}. Values are standard effect names
+   * only: a definition never expands into another definition.
+   */
+  readonly effects?: Readonly<Record<string, readonly string[]>>;
+  /**
    * Contracts keyed by `"<file>#<symbol>"`. `<file>` is relative to this
    * config file's directory and may use `*` and `**`; `<symbol>` is the
    * declaration path and may not (§4.1 (a), (b)).

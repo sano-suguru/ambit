@@ -49,18 +49,19 @@ export function summarizeExtractedFiles(
   files: readonly ExtractedFile[],
   config?: ResolvedConfig,
 ): readonly FunctionSummary[] {
+  const aliases = config?.effectAliases;
   const summaries: FunctionSummary[] = [];
   for (const file of files) {
     for (const fn of file.functions) {
       const jsDoc = {
-        declared: parseDeclaredEffects(fn.jsDoc),
+        declared: parseDeclaredEffects(fn.jsDoc, aliases),
         capabilities: parseDeclaredCapabilities(fn.jsDoc),
         budget: parseDeclaredBudget(fn.jsDoc),
         boundary: parseDeclaredBoundary(fn.jsDoc),
         entrypoint: fn.jsDoc?.tags.has("entrypoint") ?? false,
       };
       const declaredContract = config?.contractFor(fn.id);
-      const merged = mergeContract(jsDoc, declaredContract);
+      const merged = mergeContract(jsDoc, declaredContract, aliases);
       summaries.push({
         id: fn.id,
         location: fn.location,
@@ -106,6 +107,7 @@ interface JsDocContract {
 function mergeContract(
   jsDoc: JsDocContract,
   config: ConfigContract | undefined,
+  aliases: EffectAliases,
 ): Pick<
   FunctionSummary,
   "declared" | "capabilities" | "budget" | "boundary" | "entrypoint" | "declaredBy" | "divergences"
@@ -118,7 +120,7 @@ function mergeContract(
   }
 
   const divergences: ContractDivergence[] = [];
-  const configEffects = config.effects ? expandConfigEffects(config.effects) : undefined;
+  const configEffects = config.effects ? expandConfigEffects(config.effects, aliases) : undefined;
   const configCapabilities = config.capabilities
     ? configCapabilitySet(config.capabilities)
     : undefined;
@@ -212,11 +214,19 @@ function mergeContract(
 }
 
 /**
- * A config `effects` list turned into an {@link EffectSet}. Every name is a
- * standard effect, which `validateConfig` already guaranteed.
+ * A config `effects` list turned into an {@link EffectSet}. Every name is
+ * either a standard effect or a user-defined one, which `validateConfig`
+ * already guaranteed — a user-defined name expands to the standard effects it
+ * stands for, and nothing but standard effects ever leaves this function
+ * (DESIGN.md §4.1 (d)).
  */
-function expandConfigEffects(names: readonly string[]): EffectSet {
-  return effectSetOf(...names.filter(isKnownEffect));
+function expandConfigEffects(names: readonly string[], aliases: EffectAliases): EffectSet {
+  const effects: KnownEffect[] = [];
+  for (const name of names) {
+    if (isKnownEffect(name)) effects.push(name);
+    else effects.push(...(aliases?.get(name) ?? []));
+  }
+  return effectSetOf(...effects);
 }
 
 function configCapabilitySet(tokens: readonly string[]): CapabilitySet {
@@ -235,10 +245,13 @@ function formatCapabilities(set: CapabilitySet): string {
   return set.capabilities.map(formatCapability).join(", ");
 }
 
-function parseDeclaredEffects(jsDoc: RawJsDoc | undefined): DeclaredEffects {
+function parseDeclaredEffects(
+  jsDoc: RawJsDoc | undefined,
+  aliases: EffectAliases,
+): DeclaredEffects {
   const tagText = jsDoc?.tags.get("effects");
   if (tagText === undefined) return { kind: "none" };
-  const effects = parseEffectsTag(tagText);
+  const effects = parseEffectsTag(tagText, aliases);
   if (effects === undefined) return { kind: "invalid", raw: tagText };
   return { kind: "declared", effects };
 }
@@ -286,18 +299,34 @@ function parseDeclaredBoundary(jsDoc: RawJsDoc | undefined): DeclaredBoundary {
  * collapse to an empty (`pure`) contract. The caller reports this as
  * `AMB-E002` (`diagnose.ts`) instead of the tag's real, but broken, contract.
  */
-export function parseEffectsTag(text: string): EffectSet | undefined {
+export function parseEffectsTag(text: string, aliases?: EffectAliases): EffectSet | undefined {
   const trimmed = text.trim();
   if (trimmed === "pure") return emptyEffectSet();
 
   const tokens = trimmed.split(",").map((token) => token.trim());
   const effects: KnownEffect[] = [];
   for (const token of tokens) {
-    if (!isKnownEffect(token)) return undefined;
-    effects.push(token);
+    if (isKnownEffect(token)) {
+      effects.push(token);
+      continue;
+    }
+    // A user-defined name is usable from `@effects` too, not only from
+    // config (DESIGN.md §4.2: 「ユーザー定義エフェクトは `ambit.config.ts` で
+    // 標準エフェクトの組み合わせとして宣言できる」). It expands here, so
+    // nothing downstream ever sees a name that is not a standard effect
+    // (§4.1 (d)).
+    const expansion = aliases?.get(token);
+    if (expansion === undefined) return undefined;
+    effects.push(...expansion);
   }
   return effectSetOf(...effects);
 }
+
+/**
+ * User-defined effect names and the standard effects they stand for. Absent
+ * when no config was loaded, in which case every name has to be standard.
+ */
+export type EffectAliases = ReadonlyMap<string, readonly KnownEffect[]> | undefined;
 
 function toCall(site: CallSite): Call {
   if (site.mutation) {
