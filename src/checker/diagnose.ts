@@ -574,6 +574,8 @@ const UNCARRIED_REASON: Record<SkippedFunctionKind, string> = {
   "anonymous-default-export": "an anonymous default export",
   "callback-argument": "a callback passed inline as an argument",
   "nested-function": "a function declared inside another function",
+  "bodyless-declaration":
+    "a declaration with no body (an overload signature, an abstract member, or an ambient declare) — the contract belongs on the implementation that runs",
   other: "a node the analysis does not extract",
 };
 

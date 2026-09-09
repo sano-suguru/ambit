@@ -70,6 +70,14 @@ export type UnresolvedReason =
  * members that have no stable declaration path (a computed, string, or numeric
  * key) or no path at all (a nested literal, one declared inside a function
  * body, one passed inline as an argument, or one bound by `let`).
+ *
+ * `bodyless-declaration` is a function-like node that declares a signature and
+ * no code: an overload signature, an `abstract` member, or an ambient
+ * `declare` written in a `.ts` file. It is skipped because it is not a
+ * function — the implementation is (DESIGN.md §4.1「オーバーロードと本体の
+ * ない宣言」). Indexing one would give two declarations the same declaration
+ * path, and the first of them has no body to infer effects from, so every
+ * caller would read as `pure` whatever the implementation does.
  */
 export type SkippedFunctionKind =
   | "class-declaration"
@@ -78,6 +86,7 @@ export type SkippedFunctionKind =
   | "anonymous-default-export"
   | "callback-argument"
   | "nested-function"
+  | "bodyless-declaration"
   | "other";
 
 /**
@@ -292,6 +301,19 @@ export type WrapperBudget =
 
 export interface ExtractedFile {
   readonly filePath: string;
+  /**
+   * Every entry's {@link ExtractedFunction.id} is distinct. This is a
+   * requirement on the backend, not an observation about one: `propagate`
+   * argues its termination from each `SymbolId` naming exactly one summary
+   * (its state map is keyed by id, and its worklist iterates the summaries).
+   * Two entries sharing an id overwrite each other's state on every pass, so
+   * the fixed-point loop never settles and `ambit check` does not return.
+   *
+   * The shape that breaks it is an overload set — several declarations, one
+   * declaration path — which is why only the implementation is extracted
+   * (see {@link SkippedFunctionKind}'s `bodyless-declaration`).
+   * `test/backend.conformance.test.ts` asserts it for every fixture root.
+   */
   readonly functions: readonly ExtractedFunction[];
   /**
    * Required, not optional, for the reason {@link ExtractedProject}'s counts
@@ -348,9 +370,11 @@ export interface ExtractedProject {
  * §3.5). No TypeScript-specific object (`ts.Node`, `ts.Symbol`, `ts.Type`,
  * a compiler-internal id, ...) may cross this boundary in either direction.
  *
- * Implementations live under `src/checker/backend/`. The only implementation
- * in this slice, `legacy-ts.ts`, is a throwaway (DESIGN.md §3.5 has not run
- * yet) and must stay the only file that imports `typescript`.
+ * Implementations live under `src/checker/backend/`. The only one is
+ * `legacy-ts.ts`, adopted as the default by DESIGN.md §3.5
+ * 「既定バックエンド（決定）」, and it must stay the only file that imports
+ * `typescript`. `test/backend.conformance.test.ts` states what any
+ * implementation of this interface has to satisfy.
  */
 export interface TsBackend {
   readonly name: string;

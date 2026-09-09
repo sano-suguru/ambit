@@ -363,7 +363,12 @@ rule already limits class-method extraction.
 
 `ambit check --coverage` reports these nodes as "skipped", broken down by
 kind: `getter-setter`, `object-literal-method`, `anonymous-default-export`,
-`callback-argument`, `nested-function`, and a residual `other`. The first and
+`callback-argument`, `nested-function`, `bodyless-declaration`, and a residual
+`other`. `bodyless-declaration` is a signature with no code — an overload
+signature, an `abstract` member, or a `declare function` in a `.ts` file. An
+overload set is one function and it is the implementation, so the signatures
+are skipped and the implementation is extracted; a contract on a signature is
+`AMB-E003` naming the implementation. The first and
 third are narrower than they were: an accessor is extracted when it is a class
 member or a member of a module-scope `const` object literal, so `getter-setter`
 now counts only accessors in the literals that notation cannot reach (a `let`
@@ -393,18 +398,22 @@ Ambit run against its own `src/` (2026-09-09, four functions declaring
 
 ```console
 $ node src/cli/main.ts check src --coverage
-warning: extractProject declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:40)
-warning: loadProjectConfig declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:124)
-warning: collectTsFiles declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:171)
-warning: main declares fs_read but calls something that could not be resolved (cli/main.ts:31)
-files=21 functions=176 declared=4
-unknown-rate=63.1% (111/176 functions) boundary-rate=0.0% (0/176 functions)
+warning: extractProject declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:43)
+warning: loadProjectConfig declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:152)
+warning: collectTsFiles declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:199)
+warning: main declares fs_read but calls something that could not be resolved (cli/main.ts:37)
+files=29 functions=238 declared=4
+declared-by: jsdoc=4 config=0
+unknown-rate=66.0% (157/238 functions) boundary-rate=0.0% (0/238 functions)
 entrypoints=0 (without-capabilities=0)
-skipped=75 (callback-argument=67, nested-function=8)
-call-sites: total=924 resolved=268 stub=3 pure=244 mutation=81 unresolved=328
-unresolved-by-reason: builtin-method=62, external-module=257, unresolved-symbol=8, callback-parameter=1
-top-unresolved-names: typescript.isIdentifier=19, typescript.isVariableDeclaration=12, ...
+skipped=109 (callback-argument=91, object-literal-method=3, nested-function=15)
+call-sites: total=1287 resolved=406 stub=8 pure=327 mutation=110 unresolved=436
+unresolved-by-reason: builtin-method=102, external-module=314, dynamic-import=1, unresolved-symbol=15, callback-parameter=4
+top-unresolved-names: typescript.isIdentifier=22, ReadonlyArray.map=13, ...
 ```
+
+No `bodyless-declaration` appears because `src/` contains no overload
+signature, `abstract` member, or `.ts`-file `declare`.
 
 - `unknown-rate` — the share of extracted functions whose effects could not be
   fully determined.

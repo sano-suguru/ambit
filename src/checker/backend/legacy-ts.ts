@@ -23,15 +23,27 @@ import { constructorStubKey } from "../../stubs/constructors.ts";
 import { isMutatingBuiltin } from "../../stubs/mutating-builtins.ts";
 
 /**
- * `TsBackend` implementation on the legacy TypeScript Compiler API
- * (DESIGN.md §3.4, §3.5). This is a throwaway implementation (plan D2):
- * the native backend comparison (M0.5) has not run, and this file exists to
- * let the contract-analysis layer (`src/checker/{summarize,propagate,
- * diagnose}.ts`) develop and prove out against a real, working backend now.
+ * `TsBackend` implementation on the TypeScript Compiler API (DESIGN.md §3.4).
  *
- * This is the ONLY file allowed to import `typescript`. No `ts.Node`,
+ * **This is the adopted backend**, not a placeholder. M0.5's comparison ran and
+ * chose it — DESIGN.md §3.5「既定バックエンド（決定）」, with the measurements
+ * in `docs/status.md`. The native TypeScript 7 engine (Go) was faster on every
+ * corpus and was still not adopted: its API is published entirely under
+ * `unstable/`, it answers from a stale snapshot unless told which files
+ * changed, and none of its speed was needed to meet a threshold. §3.5 also
+ * records what would reopen the decision; changing the default now requires an
+ * RFC (§9).
+ *
+ * The name `typescript-legacy` is the engine id in diagnostics and predates
+ * that decision. It distinguishes the JavaScript implementation from the Go
+ * one; it does not mean unmaintained. The version tracks the JS line's newest
+ * stable release (6.0.3), by the rule in AGENTS.md.
+ *
+ * The separation this file sits behind is unchanged and still the point: this
+ * is the ONLY file allowed to import `typescript`, and no `ts.Node`,
  * `ts.Symbol`, or `ts.Type` may be returned from `extractProject` — see
- * `src/core/backend.ts`.
+ * `src/core/backend.ts`. Adoption makes the boundary more useful, not less: it
+ * is what will let §3.5's review happen without touching the contract layer.
  */
 export const legacyTsBackend: TsBackend = {
   name: "typescript-legacy",
@@ -264,7 +276,17 @@ function collectFunctionLikeDeclarations(
         return;
       }
     }
+    // A function declaration with no body declares a signature, not code: an
+    // overload signature, or an ambient `declare function` written in a `.ts`
+    // file. Indexing it would give the overload set's several declarations one
+    // shared declaration path — and `ExtractedFile.functions` requires ids to
+    // be unique, because `propagate`'s fixed point does not terminate without
+    // it. It is counted as `bodyless-declaration` instead, and a contract
+    // written on it is reported (AMB-E003) rather than silently attributed to
+    // a declaration Ambit does not model. Same rule the constructor branch
+    // below already applies.
     if (ts.isFunctionDeclaration(node) && node.name) {
+      if (!node.body) return;
       const declPath = [...containerPath, node.name.text];
       results.push([node, declPath]);
       return; // do not descend into nested function declarations separately
@@ -272,7 +294,15 @@ function collectFunctionLikeDeclarations(
     if (ts.isClassDeclaration(node) && node.name) {
       const classPath = [...containerPath, node.name.text];
       for (const member of node.members) {
-        if (ts.isMethodDeclaration(member) && member.name && ts.isIdentifier(member.name)) {
+        // `member.body` for the same reason the function-declaration branch
+        // above requires it: a method's overload signatures and an `abstract`
+        // member declare a signature and no code.
+        if (
+          ts.isMethodDeclaration(member) &&
+          member.body &&
+          member.name &&
+          ts.isIdentifier(member.name)
+        ) {
           results.push([member, [...classPath, member.name.text]]);
         }
         // `handle = async (req) => { … }` is a method written as a property.
@@ -595,6 +625,18 @@ function isIndexedInitializer(node: ts.Node, indexed: ReadonlyMap<ts.Node, Symbo
 }
 
 function classifySkipped(node: ts.FunctionLikeDeclaration): SkippedFunctionKind {
+  // Checked before the shape-based kinds below: an overload signature is
+  // syntactically a plain function or method declaration, so nothing else
+  // here would distinguish it from one that was skipped for a different
+  // reason.
+  if (
+    (ts.isFunctionDeclaration(node) ||
+      ts.isMethodDeclaration(node) ||
+      ts.isConstructorDeclaration(node)) &&
+    !node.body
+  ) {
+    return "bodyless-declaration";
+  }
   if (ts.isGetAccessor(node) || ts.isSetAccessor(node)) return "getter-setter";
   if (isObjectLiteralMethod(node)) return "object-literal-method";
   if (isDefaultExport(node)) return "anonymous-default-export";
@@ -1222,6 +1264,50 @@ function constructorTarget(
   return declaredNodeToId.get(declaration);
 }
 
+/**
+ * `f!` → `f`, through any number of assertions and the parentheses that may
+ * wrap them. A non-null assertion is a type-level statement with no runtime
+ * meaning and no effect on which declaration the callee names.
+ */
+function unwrapNonNullAssertions(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  while (ts.isNonNullExpression(current) || ts.isParenthesizedExpression(current)) {
+    current = current.expression;
+  }
+  return current;
+}
+
+/**
+ * The declaration of `symbol` that carries code, or its first declaration when
+ * none does.
+ *
+ * An overloaded function is one symbol with several declarations: the
+ * signatures, then the implementation. Only the implementation runs, and only
+ * it is extracted (`collectFunctionLikeDeclarations`), so a call that stopped
+ * at `declarations[0]` would reach a node with no id and no body — and a
+ * body-less node infers an empty effect set, which reads as `pure` however the
+ * implementation behaves. DESIGN.md §3.2 names this case: 「オーバーロードでは
+ * 選択された宣言に本体がない場合があり」.
+ *
+ * Returning the first declaration when nothing has a body is deliberate: the
+ * caller needs a node to classify (ambient vs. project, parameter vs.
+ * function), and an ambient overload set legitimately has no implementation.
+ */
+function implementationDeclarationOf(symbol: ts.Symbol | undefined): ts.Declaration | undefined {
+  const declarations = symbol?.declarations;
+  if (!declarations || declarations.length === 0) return undefined;
+  if (declarations.length === 1) return declarations[0];
+  for (const declaration of declarations) {
+    if (
+      (ts.isFunctionDeclaration(declaration) || ts.isMethodDeclaration(declaration)) &&
+      declaration.body
+    ) {
+      return declaration;
+    }
+  }
+  return declarations[0];
+}
+
 function classifyCall(
   node: ts.CallExpression,
   sourceFile: ts.SourceFile,
@@ -1238,7 +1324,13 @@ function classifyCall(
     return { location, unresolvedReason: "dynamic-import" };
   }
 
-  const callee = node.expression;
+  // `f!()` is a call to `f`. The non-null assertion narrows the *type* and
+  // leaves the declaration exactly where it was, so it must not cost the call
+  // its resolution — DESIGN.md §12 requires `as any` and `!` to be told apart,
+  // and they differ in precisely this: a cast to `any` destroys the
+  // declaration, an assertion keeps it. Only the assertion is unwrapped here;
+  // `(f as any)()` continues to fall through to `any-typed`.
+  const callee = unwrapNonNullAssertions(node.expression);
 
   // eval(...)
   if (ts.isIdentifier(callee) && callee.text === "eval") {
@@ -1274,7 +1366,14 @@ function classifyCall(
   // getAliasedSymbol() on a non-alias symbol asserts, so it's guarded.
   const isAlias = symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0;
   const resolvedSymbol = isAlias ? checker.getAliasedSymbol(symbol) : symbol;
-  const declaration = resolvedSymbol?.declarations?.[0];
+  // An overload set is several declarations under one symbol, and only the
+  // implementation has code. `declarations[0]` is the first *signature*, whose
+  // empty body would infer an empty effect set — so the implementation is
+  // preferred when there is one, and `declarations[0]` remains the answer when
+  // there is not (an ambient overload set, which falls to
+  // `overload-without-body` below). Which declaration this is decides both the
+  // resolved target and every classification derived from its source file.
+  const declaration = implementationDeclarationOf(resolvedSymbol);
 
   // Resolves to a project-local function/method we indexed in pass 1
   // (directly, or via the alias resolution above).

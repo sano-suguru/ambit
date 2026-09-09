@@ -91,8 +91,8 @@ silently does nothing reads as a guarantee and is not one.
 The message names why the node cannot carry a contract, using the same
 classification `--coverage` counts under "skipped": a getter/setter, an
 object-literal member with no stable declaration path, an anonymous default
-export, a callback passed inline as an argument, or a function declared inside
-another function.
+export, a callback passed inline as an argument, a function declared inside
+another function, or a declaration with no body.
 
 Two of those *are* analyzed where the declaration path reaches them: a
 `get`/`set` accessor on a class or on a module-scope `const` object literal,
@@ -105,6 +105,23 @@ one. The comment on them is still inert, so this is still an error, and the
 message ends with the config key that would work:
 `declare it in ambit.config.ts under "src/cart.ts#Cart.get total" instead`.
 DESIGN.md §12 records the asymmetry that leaves.
+
+A declaration with no body — an overload signature, an `abstract` member, or a
+`declare function` written in a `.ts` file — is reported for a reason worth
+separating from the others. An overload set is one runtime function, and it is
+the implementation: the signatures describe types, and only the implementation
+runs. So the contract belongs on the implementation, and the message says so.
+This is not a limitation waiting to be lifted. Adopting a signature's contract
+would mean attributing it to a declaration Ambit does not model, and choosing
+between two signatures that disagree; both are guesses, and DESIGN.md
+§4.1「オーバーロードと本体のない宣言」settles it the other way. A call to an
+overload set with no implementation in the project is `unknown`
+(`overload-without-body` in `--coverage`), not `pure`.
+
+For a `declare function` with no implementation anywhere in the project, there
+is nothing to move the contract *to*, and the message's advice does not apply.
+What that code needs is a stub (`src/stubs/`); until it has one, calls to it
+are honestly `unknown`.
 
 One case is not a function-like node at all: a contract written on a `class`.
 The class's construction *is* analyzed (indexed as `Class.constructor`), but a
