@@ -26,10 +26,9 @@ tarball on a registry that nothing depends on produces no such party. The two
 were conflated because, for most projects, publishing and acquiring dependents
 happen close enough together to look like one event; here they do not.
 
-Dropping the procedure entirely was the opposite error. Ambit's product is a
-contract that can be trusted, so "the meaning of a declaration does not move
-without warning" is not a process nicety — it is the thing being sold. A
-governance change that removes the guarantee removes the product.
+Dropping the procedure entirely was the opposite error. What Ambit sells is a
+contract a reader can trust, which requires that the meaning of a declaration
+not move without warning. Remove that and there is no product left.
 
 ## Decision
 
@@ -65,10 +64,10 @@ behind them internal. A consumer's `import` is not an internal detail, and it
 is the one part of the surface whose breakage stops another project's build
 outright.
 
-Three ledgers, not one document, are what carry (2) and (3): `CHANGELOG.md` for
-what changed, `docs/diagnostics/` for what each code means, and `docs/adr/` for
-why a design is the one in the specification. That is what an RFC directory
-would have provided, minus the self-approval.
+(2) and (3) are carried by three ledgers: `CHANGELOG.md` for what changed,
+`docs/diagnostics/` for what each code means, and `docs/adr/` for why a design
+is the one in the specification. An RFC directory would have added the
+self-approval and nothing else.
 
 ## Alternatives considered
 

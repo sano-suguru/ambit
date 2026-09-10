@@ -260,10 +260,8 @@ exit=1
 ```
 
 That is a real run against this repository, with one function added to
-`src/core/authority-diff.ts` that fetches from `exfil.example.com` — the shape
-an agent's edit takes when it reaches for the network in a helper nobody
-reviews line by line. Reducing authority is not what the command watches for:
-only increases fail, so tightening a contract is never taxed.
+`src/core/authority-diff.ts` that fetches from `exfil.example.com`. Only
+increases fail: tightening a contract is never taxed.
 
 ## For coding agents
 

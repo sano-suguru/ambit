@@ -817,9 +817,9 @@ The four changes listed above require an RFC **from 1.0, or from the first exter
 
 Until then, a decision is made by editing this file directly and writing the record in [`docs/adr/`](adr/README.md), and the conformance tests are substituted by Vitest under `test/`. From the trigger onward, the accepted RFC is the record.
 
-Publishing a tarball to npm is not the trigger. What a written approval procedure buys is a second party being told before their work breaks; a registry entry with no dependent gives an author nothing to approve but their own note to themselves ([ADR-0010](adr/0010-when-governance-takes-effect.md)). Which changes require an RFC is not narrowed by this — only when the procedure around them starts.
+Publishing a tarball to npm is not the trigger. An RFC needs a second party; a registry entry with no dependent supplies none ([ADR-0010](adr/0010-when-governance-takes-effect.md)). This moves when the procedure starts, not which changes it covers.
 
-What holds in the meantime is §9.2 and §9.3, and they hold at every version: a change to the guaranteed surface is announced whether or not an RFC is required, and each diagnostic code's meaning is carried by the ledger in [`docs/diagnostics/`](diagnostics/README.md).
+§9.2 and §9.3 are what hold in the meantime, and they hold at every version.
 
 ### 9.2 The guaranteed surface
 
@@ -836,14 +836,12 @@ Not on the list, and free to change in any release:
 
 - anything not reachable through those subpath exports, including every module path under `dist/` the export map does not name
 - the measured `unknown` rate, and the resolution of the analysis behind it: which calls resolve, which fall to `unknown`, and the reasons `--coverage` breaks them down by
-- added stubs (§4.2, §8) and added runtime hooks (§4.4). These are authority Ambit could not see before and now can, so a check that passed may begin to fail — because the code always did what the check now reports. Making that visible is P3 and P4, not a broken promise
+- added stubs (§4.2, §8) and added runtime hooks (§4.4). These are authority Ambit could not see before and now can, so a check that passed may begin to fail — because the code always did what the check now reports (P3, P4)
 - whether anything is cached, and any resident or incremental path (§6.2)
-
-The second list is what keeps P4 honest in both directions. Ambit does not promise that the set of things it can see stays fixed, and it does not describe growing that set as a breaking change; what it promises is that the meaning of a declaration, and of a verdict about one, does not move without being announced.
 
 ### 9.3 Versioning
 
-Semantic versioning, with 0.x read as semver defines it: **while the major version is 0, a minor release may make a breaking change to anything in §9.2's first list.** A patch release does not. The obligation of §9.2 is unaffected by the version number — a break is announced at the release that makes it, at 0.x as at 1.x.
+Semantic versioning, with 0.x read as semver defines it: **while the major version is 0, a minor release may make a breaking change to anything in §9.2's first list.** A patch release does not. §9.2's announcement obligation does not vary with the version number.
 
 ## 10. Success Metrics
 

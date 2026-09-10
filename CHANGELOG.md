@@ -6,35 +6,23 @@ Notable changes to `ambit-ts`. The format is
 semver defines it — while the major version is 0, a **minor** release may make a
 breaking change (`docs/DESIGN.md` §9.3).
 
-What a release is obliged to announce here is the **guaranteed surface** of
-`docs/DESIGN.md` §9.2: the meaning of the JSDoc tags and of the standard
-effects, diagnostic ids and their meanings, the NDJSON diagnostic field shape,
-the format of `ambit.approvals.md`, the CLI's commands, flags and exit codes,
-and the package's subpath exports. A change to any of those appears here at the
-release that makes it, whether or not it also required an RFC.
-
-Changes outside that list are deliberately absent. §9.2's second list says which
-those are — added stubs, added runtime hooks, movement in the `unknown` rate,
-the resolution of the analysis, and caching. What is implemented and what is not
-is [`docs/status.md`](docs/status.md); this file is not a status report.
+What a release must announce here is `docs/DESIGN.md` §9.2's **guaranteed
+surface**. Changes outside that list — added stubs, added runtime hooks,
+`unknown`-rate movement, caching — are deliberately absent. What is implemented
+and what is not is [`docs/status.md`](docs/status.md); this file is not a status
+report.
 
 ## [Unreleased]
 
 ## [0.1.0] — unreleased
 
-The first published release, so what it records is the guaranteed surface it
-establishes rather than a difference from an earlier one. The version's date is
-stamped when it is actually published.
+The first release, so this records the surface it establishes rather than a
+difference from an earlier one. The date is stamped at publish.
 
-One thing here *is* a change rather than an establishment, because it changed
-before anyone could depend on it: **governance takes effect at 1.0 or the first
-external adopter, not at the first npm publish** (`docs/DESIGN.md` §9.1,
-[ADR-0010](docs/adr/0010-when-governance-takes-effect.md)). Until that trigger,
-a design decision is an edit to `docs/DESIGN.md` plus a record in `docs/adr/`;
-`rfcs/` and `conformance/` arrive with the trigger. Which changes require an RFC
-is unchanged. What replaces the procedure in the meantime is §9.2's guaranteed
-surface, announced in this file — and §5.2's "an `id` is never deleted or
-reused" now says from which version it holds, namely 1.0.
+Two rules changed while nothing could yet depend on them. Governance takes
+effect at 1.0 or the first external adopter, **not** at the first npm publish
+(§9.1, [ADR-0010](docs/adr/0010-when-governance-takes-effect.md)). And §5.2's
+"an `id` is never deleted or reused" now says from which version it holds: 1.0.
 
 ### Added
 
@@ -70,8 +58,7 @@ reused" now says from which version it holds, namely 1.0.
   to `withAmbit`, is read as the handler's own `@capabilities` / `@budget`
   declaration.
 
-One limit worth stating next to the tag list, because a reader could otherwise
-assume otherwise from `@budget`'s syntax: of its three limits only `timeMs` is
-enforced. `costUsd` and `llmCalls` are parsed, carried and compared, and nothing
-increments them. The rest of what Ambit does not do is
+`@budget` takes three limits and enforces one. `timeMs` is enforced; `costUsd`
+and `llmCalls` are parsed, carried and compared, and nothing increments them.
+The rest of what Ambit does not do is
 [`docs/limitations.md`](docs/limitations.md).
