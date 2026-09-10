@@ -340,10 +340,14 @@ five files it touches (`backend.legacy-ts.test.ts`, `contracts.test.ts`,
 26.9 s combined to 5.95 s combined, run in isolation before the other two
 changes landed.
 
-CI's Test-step number after this merges is not yet recorded — the number
-above is local (8 logical cores; `ubuntu-latest` runners have 4 vCPU, and CLI
-spawns are CPU-bound, so the CI improvement will be smaller). Record the
-actual post-merge CI seconds here once a run exists; do not predict them.
+CI itself confirms the direction, at a smaller margin than the 8-core local
+numbers above: on PR #17's own run (`ubuntu-latest`, 4 vCPU, run
+34432888258), the `Test` step went from 173 s to **86 s**, and the whole job
+from 194 s to **113 s**. `ubuntu-latest`'s 4 vCPU makes the CLI-spawn-heavy
+part of this suite more CPU-bound than the 8-core machine above, which is
+exactly why the ratio is smaller here (2.0x) than locally (3.2–3.6x) — both
+numbers are real, they are just answering different questions about
+available parallelism.
 
 ## M0.5 — the backend comparison, measured
 
