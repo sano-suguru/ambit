@@ -1,17 +1,17 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { legacyTsBackend } from "../src/checker/backend/legacy-ts.ts";
 import { computeCoverage } from "../src/checker/coverage.ts";
 import { diagnose } from "../src/checker/diagnose.ts";
 import { propagate } from "../src/checker/propagate.ts";
 import { summarizeExtractedFiles } from "../src/checker/summarize.ts";
 import type { Diagnostic } from "../src/core/index.ts";
+import { extractFixture } from "./support/extract.ts";
 
 const FIXTURE = path.join(import.meta.dirname, "fixtures", "mutation");
 const ENGINE = { name: "test", version: "0" };
 
 async function analyze() {
-  const project = await legacyTsBackend.extractProject(FIXTURE);
+  const project = await extractFixture(FIXTURE);
   const summaries = summarizeExtractedFiles(project.files);
   const state = propagate(summaries);
   return {

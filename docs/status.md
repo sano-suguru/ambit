@@ -309,6 +309,42 @@ That is machine load, not a change in the analysis, and neither range is
 recorded as a figure for this build. A comparable measurement needs a quiescent
 machine, and §3.5's performance gate has not run either way.
 
+### Test suite wall time
+
+CI's `Test` step (`pnpm test`, GitHub Actions `ubuntu-latest`, run
+34429851250) took 173 s of a 194 s job — the whole test suite ran serially
+(`vitest.config.ts` set `fileParallelism: false`) and spawned the CLI as a
+subprocess close to 100 times with no compile cache.
+
+Three changes removed those costs: memoizing `legacyTsBackend.extractProject`
+per fixture root within a test file (`test/support/extract.ts`), setting
+`NODE_COMPILE_CACHE` for every spawned `node` process (`vitest.config.ts`
+`test.env`), and restoring `fileParallelism` behind a cross-process lock
+around `pnpm pack` (`test/support/global-setup.ts`, `test/support/pack.ts`).
+None of them touch analysis — `check src --coverage`'s `unresolved-by-reason`
+breakdown is unchanged before and after.
+
+Measured on the same machine as the M0.5 section below (`vitest run`, 412
+tests, 27 files, all passing at every step):
+
+| Configuration | Wall clock |
+|---|---|
+| Before (serial, no compile cache, no fixture memo) | 133 s |
+| + fixture-extraction memo, serial | *(see per-file note below)* |
+| + `NODE_COMPILE_CACHE`, still serial | 107 s |
+| + `fileParallelism` restored (all three changes) | 37 / 43 s |
+
+The fixture memo's own effect is clearest per-file rather than suite-wide: the
+five files it touches (`backend.legacy-ts.test.ts`, `contracts.test.ts`,
+`diagnose.test.ts`, `construction.test.ts`, `mutation.test.ts`) went from
+26.9 s combined to 5.95 s combined, run in isolation before the other two
+changes landed.
+
+CI's Test-step number after this merges is not yet recorded — the number
+above is local (8 logical cores; `ubuntu-latest` runners have 4 vCPU, and CLI
+spawns are CPU-bound, so the CI improvement will be smaller). Record the
+actual post-merge CI seconds here once a run exists; do not predict them.
+
 ## M0.5 — the backend comparison, measured
 
 Every number here was run on 2026-09-09, Node.js v24.20.0, macOS (darwin

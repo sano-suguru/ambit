@@ -1,6 +1,5 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { legacyTsBackend } from "../src/checker/backend/legacy-ts.ts";
 import { computeCoverage } from "../src/checker/coverage.ts";
 import { diagnose, diagnoseRuntimeWrappers } from "../src/checker/diagnose.ts";
 import { propagate } from "../src/checker/propagate.ts";
@@ -13,13 +12,14 @@ import {
   parseCapabilitiesTag,
   parseCapability,
 } from "../src/core/index.ts";
+import { extractFixture } from "./support/extract.ts";
 
 const FIXTURE_ROOT = path.join(import.meta.dirname, "fixtures", "contracts");
 const WRAPPER_ROOT = path.join(import.meta.dirname, "fixtures", "wrappers");
 const ENGINE = { name: "test", version: "0" };
 
 async function analyze(root: string) {
-  const project = await legacyTsBackend.extractProject(root);
+  const project = await extractFixture(root);
   const summaries = summarizeExtractedFiles(project.files);
   const state = propagate(summaries);
   return {
