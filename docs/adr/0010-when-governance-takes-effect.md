@@ -53,6 +53,12 @@ give each its own trigger.
 4. §9.3 states the 0.x rule: while the major version is 0, a minor release may
    break the guaranteed surface. The announcement obligation does not vary with
    the version number.
+5. §5.2's `id` row said an `id` is "never deleted or reused", unconditionally,
+   while `docs/diagnostics/README.md` said ids were unstable until 1.0. The two
+   could not both be true and the disagreement predates this record. §5.2 is
+   qualified to hold **from 1.0**, which is the reading that survives 0.1.0
+   shipping 18 codes with an admitted right to renumber them. The 0.x latitude
+   is bounded by (2): a renumbering is announced, never silent.
 
 The subpath exports are on the guaranteed list although §6.1 calls the modules
 behind them internal. A consumer's `import` is not an internal detail, and it

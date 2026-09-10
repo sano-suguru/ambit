@@ -1,7 +1,7 @@
 # Ambit Design Specification
 
 - Status: Draft
-- Revision: 4 (Draft) — chapter 9 gained the trigger that puts the RFC procedure in force (§9.1), the guaranteed surface (§9.2), and the versioning rule (§9.3)
+- Revision: 4 (Draft) — chapter 9 gained the trigger that puts the RFC procedure in force (§9.1), the guaranteed surface (§9.2), and the versioning rule (§9.3); §5.2's `id` permanence now says from which version it holds
 - Intended readers: developers of Ambit itself, contributors, design reviewers
 - Change procedure: direct edit plus a record in `docs/adr/` until chapter 9's trigger; RFC (under `rfcs/`) from there on — see §9.1
 - What this file is: the current design, and the limits of what it guarantees. **Why** a design is the one written here is in [`docs/adr/`](adr/README.md); what is implemented today is in `docs/status.md`; where the project is going is in `ROADMAP.md`
@@ -588,7 +588,7 @@ This example assumes that line 41, the target of the fix, is the 20 characters `
 
 | Field | Content |
 |---|---|
-| `id` | A stable diagnostic code. Never deleted or reused |
+| `id` | A stable diagnostic code. Never deleted or reused — **from 1.0**. While the major version is 0 an `id` may still be renumbered or reworded, and such a change is announced in `CHANGELOG.md` like any other change to the guaranteed surface (§9.2, §9.3). The ledger in [`docs/diagnostics/`](diagnostics/README.md) is what carries each code's current meaning either way |
 | `severity` | `error` / `warning` / `info` |
 | `category` | `effects` / `capabilities` / `budget` / `boundary` / `types` |
 | `contract` | The declared/observed difference and path of a contract diagnostic. The shape varies by `category`: `effects` is `{declared, observed, via}`, `capabilities` is `{declared, required, excess, via}` (`declared` is the granted capabilities, `required` is what the body needs, and `excess` is the part of that which `declared` does not permit). No extra discriminator field is added — consumers look at `category`. Application to compiler-derived type diagnostics and the like is defined in the schema |

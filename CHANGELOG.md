@@ -26,6 +26,16 @@ The first published release, so what it records is the guaranteed surface it
 establishes rather than a difference from an earlier one. The version's date is
 stamped when it is actually published.
 
+One thing here *is* a change rather than an establishment, because it changed
+before anyone could depend on it: **governance takes effect at 1.0 or the first
+external adopter, not at the first npm publish** (`docs/DESIGN.md` §9.1,
+[ADR-0010](docs/adr/0010-when-governance-takes-effect.md)). Until that trigger,
+a design decision is an edit to `docs/DESIGN.md` plus a record in `docs/adr/`;
+`rfcs/` and `conformance/` arrive with the trigger. Which changes require an RFC
+is unchanged. What replaces the procedure in the meantime is §9.2's guaranteed
+surface, announced in this file — and §5.2's "an `id` is never deleted or
+reused" now says from which version it holds, namely 1.0.
+
 ### Added
 
 - **Contract declarations as JSDoc tags on ordinary TypeScript**: `@effects`,
@@ -65,13 +75,3 @@ assume otherwise from `@budget`'s syntax: of its three limits only `timeMs` is
 enforced. `costUsd` and `llmCalls` are parsed, carried and compared, and nothing
 increments them. The rest of what Ambit does not do is
 [`docs/limitations.md`](docs/limitations.md).
-
-### Changed
-
-- **Governance takes effect at 1.0 or the first external adopter, not at the
-  first npm publish** (`docs/DESIGN.md` §9.1,
-  [ADR-0010](docs/adr/0010-when-governance-takes-effect.md)). Until that
-  trigger, a design decision is an edit to `docs/DESIGN.md` plus a record in
-  `docs/adr/`; `rfcs/` and `conformance/` arrive with the trigger. Which changes
-  require an RFC is unchanged. What replaces the procedure in the meantime is
-  §9.2's guaranteed surface, announced in this file.
