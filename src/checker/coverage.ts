@@ -72,6 +72,14 @@ export interface CoverageReport {
   readonly callSitesStub: number;
   readonly callSitesPure: number;
   /**
+   * Calls to a function written inside the caller's own body. Counted apart
+   * from {@link callSitesPure} for the reason `InlinedCall` exists: this is
+   * not evidence that a call performs nothing, it is a call whose effects are
+   * counted elsewhere in the same function. Folding it into the pure count
+   * would report a nested `fetch` as proven effect-free.
+   */
+  readonly callSitesInlined: number;
+  /**
    * In-place mutation sites (DESIGN.md §4.2, "Local mutation and `pure`").
    * Counted apart from `callSitesPure` and `callSitesStub`: a local mutation
    * carries no effect but is not the same evidence as a call proven pure, and
@@ -110,6 +118,7 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
   let callSitesResolved = 0;
   let callSitesStub = 0;
   let callSitesPure = 0;
+  let callSitesInlined = 0;
   let callSitesMutation = 0;
   let callSitesUnresolved = 0;
   const unresolvedByReason = new Map<UnresolvedReason, number>();
@@ -129,6 +138,8 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
         callSitesStub++;
       } else if (call.kind === "known-pure") {
         callSitesPure++;
+      } else if (call.kind === "inlined") {
+        callSitesInlined++;
       } else if (call.kind === "mutation") {
         callSitesMutation++;
       } else {
@@ -162,10 +173,16 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
     functionUnknownRate,
     functionBoundaryRate,
     callSitesTotal:
-      callSitesResolved + callSitesStub + callSitesPure + callSitesMutation + callSitesUnresolved,
+      callSitesResolved +
+      callSitesStub +
+      callSitesPure +
+      callSitesInlined +
+      callSitesMutation +
+      callSitesUnresolved,
     callSitesResolved,
     callSitesStub,
     callSitesPure,
+    callSitesInlined,
     callSitesMutation,
     callSitesUnresolved,
     unresolvedByReason,

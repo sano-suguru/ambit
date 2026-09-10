@@ -94,7 +94,28 @@ export interface MutationCall {
   readonly unknownCallback?: true;
 }
 
-export type Call = ResolvedCall | StubCall | KnownPureCall | UnresolvedCall | MutationCall;
+export type Call =
+  | ResolvedCall
+  | StubCall
+  | KnownPureCall
+  | InlinedCall
+  | UnresolvedCall
+  | MutationCall;
+
+/**
+ * A call to a function written inside this same function's body, whose calls
+ * `collectCalls` already recorded here (`CallSite.inlinedCallee`).
+ *
+ * Contributes nothing on its own — everything it does is in this summary
+ * already — and is a kind of its own rather than a `known-pure`, because the
+ * two claim different things: that one says the callee performs no effect,
+ * this one says the callee's effects are counted somewhere else in this list.
+ * A tally that merged them would report a nested `fetch` as proven pure.
+ */
+export interface InlinedCall {
+  readonly kind: "inlined";
+  readonly location: SourceLocation;
+}
 
 /**
  * Whether a call site leaves the caller's effect set incomplete — an

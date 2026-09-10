@@ -28,9 +28,34 @@ export function readsAHeaderAndDecodes(headers: Headers, bytes: Uint8Array): str
 // -- the nearby cases that must not become "no effect" --------------------
 
 export function assignsOntoAnArgument(target: Record<string, string>): Record<string, string> {
-  // `Object.assign` mutates its first argument, not its receiver, so the
-  // locality rule cannot answer for it and neither table lists it.
+  // `Object.assign` writes into its first argument. That argument came from
+  // outside, so this is `state_write`.
   return Object.assign(target, { seen: "1" });
+}
+
+export function assignsOntoAFreshObject(source: Record<string, string>): Record<string, string> {
+  // The same call, on a value this function just allocated: a local mutation,
+  // which carries nothing (DESIGN.md §4.2, "Local mutation and `pure`").
+  return Object.assign({}, source, { seen: "1" });
+}
+
+/** @effects pure */
+export function freezesItsOwnRecord(): Readonly<Record<string, string>> {
+  const record: Record<string, string> = { seen: "1" };
+  return Object.freeze(record);
+}
+
+/** @effects pure */
+export function freezesAnArgument(
+  record: Record<string, string>,
+): Readonly<Record<string, string>> {
+  return Object.freeze(record);
+}
+
+export function appliesAnOpaqueFunction(fn: () => void): void {
+  // `Reflect.apply` calls what it is handed. It writes into no argument, and
+  // the function it runs is not visible here.
+  Reflect.apply(fn, undefined, []);
 }
 
 export function readsAResponseBody(response: Response): Promise<unknown> {

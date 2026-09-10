@@ -20,7 +20,7 @@ import type {
 } from "../../core/index.ts";
 import { isOnExceed, symbolId } from "../../core/index.ts";
 import { constructorStubKey } from "../../stubs/constructors.ts";
-import { isMutatingBuiltin } from "../../stubs/mutating-builtins.ts";
+import { isFirstArgumentMutator, isMutatingBuiltin } from "../../stubs/mutating-builtins.ts";
 
 /**
  * `TsBackend` implementation on the TypeScript Compiler API (DESIGN.md §3.4).
@@ -1258,6 +1258,56 @@ function classifyConstruct(
   };
 }
 
+/**
+ * Whether `declaration` is a function-valued node written inside one of the
+ * bodies `collectCalls` walks for `enclosing` — the exact condition under
+ * which its calls are already part of `enclosing`'s own call list.
+ *
+ * Matched against {@link bodiesOf} rather than against `enclosing` itself, so
+ * the two can never drift apart: a body `collectCalls` does not walk (a class's
+ * function-valued property, which has its own entry) must not be reported as
+ * already accounted for.
+ */
+function isWalkedIntoSummaryOf(
+  declaration: ts.Declaration,
+  enclosing: FunctionLikeDeclaration,
+): boolean {
+  if (declaration === enclosing) return false;
+  if (!isFunctionValuedDeclaration(declaration)) return false;
+  const bodies = bodiesOf(enclosing);
+  if (bodies.length === 0) return false;
+  for (let current: ts.Node | undefined = declaration; current; current = current.parent) {
+    if (bodies.includes(current)) return true;
+    if (ts.isSourceFile(current)) return false;
+  }
+  return false;
+}
+
+/** A declaration whose value is a function with a body, in any of the shapes that can hold one. */
+function isFunctionValuedDeclaration(declaration: ts.Declaration): boolean {
+  if (
+    ts.isFunctionDeclaration(declaration) ||
+    ts.isMethodDeclaration(declaration) ||
+    ts.isConstructorDeclaration(declaration) ||
+    ts.isGetAccessor(declaration) ||
+    ts.isSetAccessor(declaration)
+  ) {
+    return declaration.body !== undefined;
+  }
+  if (
+    ts.isVariableDeclaration(declaration) ||
+    ts.isPropertyAssignment(declaration) ||
+    ts.isPropertyDeclaration(declaration)
+  ) {
+    const initializer = declaration.initializer;
+    return (
+      initializer !== undefined &&
+      (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer))
+    );
+  }
+  return ts.isFunctionExpression(declaration) || ts.isArrowFunction(declaration);
+}
+
 /** The indexed `Class.constructor` entry for a class: its explicit constructor, or the class node standing in for the implicit one. */
 function constructorTarget(
   declaration: ts.ClassLikeDeclaration,
@@ -1425,6 +1475,22 @@ function classifyCall(
   // is attempted for anything ambient instead of being misclassified.
   const isAmbientDeclaration = declaration?.getSourceFile().isDeclarationFile ?? false;
 
+  // A callee written *inside* the declaration being summarized — a nested
+  // `function`, or a `const` holding an arrow — has no id of its own (nothing
+  // inside a function body is indexed), but its body is not missing from this
+  // summary either: `collectCalls` walked straight through it, so every call
+  // it makes is already recorded here. The call site therefore adds nothing,
+  // and reporting it `unknown` would claim the analysis lost a body it in fact
+  // read (DESIGN.md §3.4 cuts the other way too — an *analyzed* path must not
+  // read as an unanalyzed one).
+  //
+  // Deliberately not the same thing as extracting the nested function: it
+  // gets no id, no contract, and no summary of its own. Whether it should is
+  // DESIGN.md §12's "Nested function declarations and the locality rule".
+  if (declaration && !isAmbientDeclaration && isWalkedIntoSummaryOf(declaration, enclosing)) {
+    return { location, inlinedCallee: true };
+  }
+
   if (declaration && !isAmbientDeclaration) {
     // A parameter (higher-order function calling its own callback argument):
     // out of scope for this slice's propagation (DESIGN.md §4.2 rule 4).
@@ -1489,6 +1555,23 @@ function classifyCall(
       const callbackByReference = callable.opaque || undefined;
       const callbackTargets =
         callable.targets.length > 0 ? { callbackTargets: callable.targets } : {};
+      // A name that writes into its first argument (`Object.assign(target,
+      // …)`) is a mutation of *that* value. DESIGN.md §4.2's locality rule
+      // reads "the root of the mutation target", which here is the argument,
+      // not the `Object` global the call is spelled through.
+      const mutatedArgument = isFirstArgumentMutator(builtinName) ? node.arguments[0] : undefined;
+      if (mutatedArgument) {
+        const escaping = !isLocallyOwnedMutationTarget(mutatedArgument, enclosing, checker);
+        return {
+          location,
+          ...callbackTargets,
+          mutation: {
+            escaping,
+            qualifiedName: builtinName,
+            ...(escaping && callbackByReference ? { unknownCallback: true as const } : {}),
+          },
+        };
+      }
       if (isMutatingBuiltin(builtinName) && ts.isPropertyAccessExpression(callee)) {
         const escaping = !isLocallyOwnedMutationTarget(callee.expression, enclosing, checker);
         // A local mutation carries no effect, so a callback the walk never

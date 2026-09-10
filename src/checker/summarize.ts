@@ -468,6 +468,9 @@ function toCall(site: CallSite): Call {
   if (site.resolvedCallee) {
     return { kind: "resolved", location: site.location, callee: site.resolvedCallee };
   }
+  if (site.inlinedCallee) {
+    return { kind: "inlined", location: site.location };
+  }
   if (site.calleeQualifiedName) {
     // A construction is keyed in its own namespace (`src/stubs/
     // constructors.ts`) — `new URL(...)` and `URL(...)` are different

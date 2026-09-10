@@ -71,6 +71,42 @@ const MUTATING_BUILTINS: ReadonlySet<string> = new Set([
   "Uint8Array.sort",
 ]);
 
+/**
+ * Default-lib functions whose mutation target is their **first argument**, not
+ * their receiver: `Object.assign(target, …)` writes into `target`, and
+ * `Object` is only where the function is spelled.
+ *
+ * They need their own table because {@link MUTATING_BUILTINS}'s locality rule
+ * reads the receiver. Applied there, these would ask about the `Object` /
+ * `Reflect` global and answer `state_write` every time — including for the
+ * `Object.assign({}, …)` that appears in almost every codebase, where the
+ * target is a value the function just allocated. DESIGN.md §4.2 states the
+ * rule in terms that already cover this: "The decision looks at the **root**
+ * of the mutation target". For these names that root is in the arguments.
+ *
+ * Every entry mutates argument 0 and nothing else, which is why one set is
+ * enough. `Reflect.apply` and `Object.groupBy` are not here: they call what
+ * they are handed, which is a different question and stays `unknown`.
+ */
+const FIRST_ARGUMENT_MUTATORS: ReadonlySet<string> = new Set([
+  "ObjectConstructor.assign",
+  "ObjectConstructor.defineProperties",
+  "ObjectConstructor.defineProperty",
+  "ObjectConstructor.freeze",
+  "ObjectConstructor.preventExtensions",
+  "ObjectConstructor.seal",
+  "ObjectConstructor.setPrototypeOf",
+  "Reflect.defineProperty",
+  "Reflect.deleteProperty",
+  "Reflect.set",
+  "Reflect.setPrototypeOf",
+]);
+
 export function isMutatingBuiltin(qualifiedName: string): boolean {
   return MUTATING_BUILTINS.has(qualifiedName);
+}
+
+/** Whether this default-lib name writes into its first argument rather than its receiver. */
+export function isFirstArgumentMutator(qualifiedName: string): boolean {
+  return FIRST_ARGUMENT_MUTATORS.has(qualifiedName);
 }

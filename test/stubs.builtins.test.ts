@@ -6,7 +6,7 @@ import { summarizeExtractedFiles } from "../src/checker/summarize.ts";
 import type { Call, FunctionSummary } from "../src/core/index.ts";
 import { lookupBuiltinEffect } from "../src/stubs/builtin-effects.ts";
 import { isKnownPureConstructor } from "../src/stubs/constructors.ts";
-import { isMutatingBuiltin } from "../src/stubs/mutating-builtins.ts";
+import { isFirstArgumentMutator, isMutatingBuiltin } from "../src/stubs/mutating-builtins.ts";
 import {
   isHigherOrderBuiltin,
   isKnownPureBuiltin,
@@ -63,10 +63,9 @@ describe("the pure default-lib table", () => {
     expect(isKnownPureBuiltin("Date.toISOString")).toBe(true);
   });
 
-  it("leaves out the names that mutate an argument rather than the receiver", () => {
-    // The locality rule reads the receiver, which for these is the `Object` /
-    // `Reflect` global — it would answer about the wrong value, so neither
-    // table may claim them.
+  it("routes the names that write into their first argument to their own table", () => {
+    // The receiver-keyed table cannot answer for these: applied there, the
+    // locality rule would ask about the `Object` / `Reflect` global.
     for (const name of [
       "ObjectConstructor.assign",
       "ObjectConstructor.freeze",
@@ -76,7 +75,11 @@ describe("the pure default-lib table", () => {
     ]) {
       expect(isKnownPureBuiltin(name)).toBe(false);
       expect(isMutatingBuiltin(name)).toBe(false);
+      expect(isFirstArgumentMutator(name)).toBe(true);
     }
+    // `Reflect.apply` writes into no argument; it runs one. That stays unknown.
+    expect(isFirstArgumentMutator("Reflect.apply")).toBe(false);
+    expect(isKnownPureBuiltin("Reflect.apply")).toBe(false);
   });
 
   it("leaves out names whose effect depends on what the object is backed by", () => {
@@ -141,8 +144,29 @@ describe("end to end on test/fixtures/builtins", () => {
     expect(await unknownOf("readsAHeaderAndDecodes")).toBe(false);
   });
 
+  it("reads an argument-position mutator through the locality rule", async () => {
+    // The same call twice: into a value from outside, and into one the
+    // function allocated itself.
+    const escaping = (await callsOf("assignsOntoAnArgument")).filter((c) => c.kind === "mutation");
+    expect(escaping.map((c) => c.kind === "mutation" && c.escaping)).toEqual([true]);
+    const local = (await callsOf("assignsOntoAFreshObject")).filter((c) => c.kind === "mutation");
+    expect(local.map((c) => c.kind === "mutation" && c.escaping)).toEqual([false]);
+    expect(await unknownOf("assignsOntoAFreshObject")).toBe(false);
+
+    const { diagnostics } = await analyze();
+    expect(diagnostics.find((d) => d.message.startsWith("freezesAnArgument "))?.id).toBe(
+      "AMB-E001",
+    );
+    // Freezing a record this function built is not observable outside it.
+    expect(diagnostics.find((d) => d.message.startsWith("freezesItsOwnRecord "))).toBeUndefined();
+    // A name that runs a function instead of writing into one stays unknown.
+    expect(await unknownOf("appliesAnOpaqueFunction")).toBe(true);
+  });
+
   it("keeps the neighbouring cases unknown", async () => {
-    expect(await unknownOf("assignsOntoAnArgument")).toBe(true);
+    // `assignsOntoAnArgument` is deliberately absent: it is `state_write`,
+    // a named effect, which is a stronger statement than `unknown`, not a
+    // weaker one. Its assertion is in the locality test above.
     expect(await unknownOf("readsAResponseBody")).toBe(true);
     expect(await unknownOf("logs")).toBe(true);
     expect(await unknownOf("compilesAString")).toBe(true);

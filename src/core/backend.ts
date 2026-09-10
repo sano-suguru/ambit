@@ -203,6 +203,19 @@ export interface CallSite {
    * plain call.
    */
   readonly constructedWithoutArguments?: true;
+  /**
+   * Set when the callee is a function written inside the declaration being
+   * summarized — a nested `function`, or a `const` holding an arrow. Nothing
+   * inside a function body is indexed, so there is no `resolvedCallee` to
+   * name; but the body is not missing either, because `collectCalls` walked
+   * through it and recorded its calls in this same summary.
+   *
+   * The site therefore contributes nothing of its own. It is not
+   * `unresolved`: that would report a body the analysis actually read as one
+   * it could not reach, which overstates `unknown` exactly as badly as the
+   * reverse understates it (DESIGN.md §3.4).
+   */
+  readonly inlinedCallee?: true;
   readonly unresolvedReason?: UnresolvedReason;
 }
 
