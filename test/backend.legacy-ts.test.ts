@@ -281,16 +281,16 @@ describe("legacyTsBackend.extractProject", () => {
 describe("legacyTsBackend.extractProject (self-hosting)", () => {
   const SRC_ROOT = path.join(import.meta.dirname, "..", "src");
 
-  it("resolves Ambit's own legacyTsBackend.extractProject call from main", async () => {
+  it("resolves Ambit's own legacyTsBackend.extractProject call from analyze", async () => {
     // `legacyTsBackend: TsBackend = { extractProject }` makes the checker
     // resolve this callee to TsBackend's member signature in core/backend.ts,
     // so only following the receiver's value reaches the declared function.
     // Nothing smaller than a self-hosting assertion catches that.
     const { files } = await legacyTsBackend.extractProject(SRC_ROOT);
-    const main = files
-      .find((f) => f.filePath === "cli/main.ts")
-      ?.functions.find((fn) => fn.id === "cli/main.ts#main");
-    expect(main?.calls).toContainEqual(
+    const analyze = files
+      .find((f) => f.filePath === "cli/analyze.ts")
+      ?.functions.find((fn) => fn.id === "cli/analyze.ts#analyze");
+    expect(analyze?.calls).toContainEqual(
       expect.objectContaining({
         resolvedCallee: "checker/backend/legacy-ts.ts#extractProject",
       }),

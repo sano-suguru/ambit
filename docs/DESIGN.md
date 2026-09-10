@@ -872,11 +872,29 @@ Optional アクセスなどの型安全性は再実装しない。選択した T
 ```text
 ambit init      推論したエフェクトを JSDoc の修正候補として提案。--config で ambit.config.ts への追記を提案
 ambit check     静的検査。--format json / github / --coverage / --strict
+ambit diff      base ref との権限差分。--format github
 ambit run       ランタイム強制を有効にして実行（開発用）
 ambit agent     エージェントループ（7 章）
 ambit stubs     依存パッケージのスタブ生成・検索
 ambit sbom      依存関係とエフェクト・ケイパビリティを SBOM に出力
 ```
+
+`ambit diff <ref> [dir]` は、作業ツリーの権限を base ref の権限と比べ、
+増えた分を出す。
+
+- base ref は `git worktree` で一時ディレクトリに materialize する。置き場所は
+  OS の一時ディレクトリで、検査対象のツリーの中には作らない。成功・失敗を
+  問わず必ず片付ける。
+- 両側で同じサブディレクトリを同じ解析にかける。シンボル ID は検査対象
+  ディレクトリ基準の相対パスを含む（§5.3）ので、対象がずれれば全シンボルが
+  新規に見える。
+- 作業ツリーに `node_modules` があれば base 側へ symlink する。実測では、
+  無い側で未解決の呼び出しが 19 件増え、片側にしか無い `any-typed` が出る。
+  契約ではなく環境の差を差分として報告しないため。
+- 比較そのものは `kind: "authority"` レコード 2 組だけを入力とする純粋関数で、
+  git には触れない（§6.1「権限の比較」）。
+- どちらかの側の解析が失敗したら終了コード 2。比較できなかったことを
+  「増えていない」と報告しない（§3.4）。
 
 - 配布は `npm install -D @ambit/cli` と `npm install @ambit/runtime`。ネイティブバイナリの対応 OS / CPU と配布条件を公開する。
 - 本番では `@ambit/runtime` と必要なアダプタ・契約データを利用する。コンパイラや開発用 CLI を本番の必須依存にしない。
