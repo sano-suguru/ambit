@@ -624,19 +624,24 @@ ambit sbom      Emit dependencies together with their effects and capabilities a
 - The base ref is materialized into a temporary directory with `git worktree`. It is placed in the OS temporary directory, never inside the tree being checked. It is cleaned up unconditionally, on success and on failure.
 - The same subdirectory on both sides goes through the same analysis. Symbol IDs contain a path relative to the checked directory (§5.3), so if the target shifts, every symbol looks new.
 - If the working tree has `node_modules`, it is symlinked into the base side. Measured, the side without it gains 19 more unresolved calls and produces `any-typed` entries present on only one side. This is so that a difference in environment, rather than in contracts, is not reported as a diff.
-- The comparison itself is a pure function taking only the two sets of `kind: "authority"` records, and touches git not at all (§6.1, "capability comparison").
+- A file git reports as renamed between the two sides carries its symbols with it: the base side's ids are re-expressed under the new path before the comparison, so a moved function is compared against itself instead of appearing as a deletion plus a new symbol. Only git's own rename detection is used; no other guess about identity is made. What this does *not* cover is stated in §6.3.
+- The comparison itself is a pure function taking the two sets of `kind: "authority"` records and the rename map, and touches git not at all (§6.1, "capability comparison").
+- An increase must be approved to pass. The mechanism is §6.3.
 - If analysis fails on either side, exit code 2. Not having been able to compare is not reported as "nothing increased" (§3.4).
 
 Exit codes:
 
 | What happened | Exit code |
 |---|---|
-| An existing symbol's authority increased | 1 |
-| A new symbol with authority appeared | 1 |
+| An existing symbol's authority increased, unapproved | 1 |
+| A new symbol with authority appeared, unapproved | 1 |
+| An increase carrying an approval added in this comparison (§6.3) | 0 (reported) |
+| A function moved with a renamed file, gaining nothing | 0 (reported as moved) |
 | Authority only decreased | 0 (reported) |
 | A symbol only disappeared | 0 (reported) |
 | A new symbol with no authority | 0 |
 | `unknown` increased (authority did not) | 0 (reported) |
+| An approval that grants nothing, or a ledger line that did not parse | 0 (reported) |
 | Analysis failed on either side | 2 |
 
 Reducing authority is not what this command watches for. Failing on a decrease would give the writer a reason not to touch contracts at all. `unknown` is not authority (§4.3) so it does not count as an increase, but it is reported.
@@ -673,6 +678,105 @@ For agents and editors, design a resident check path that holds the analysis eng
 - Do not carry snapshot-specific types and symbol IDs across an update. Maintain a correspondence to files, declaration paths, and the like.
 - Measure initial analysis, type-information retrieval, contract analysis, transfer, and diagnostic output separately, to make clear where the latency comes from.
 
+### 6.3 Approving an authority increase
+
+`ambit diff` (§6) detects that authority grew. Detection alone cannot gate a
+pull request: a change that legitimately adds authority has to be able to say
+so, or the gate blocks honest work and is switched off. What follows is how it
+says so.
+
+Any approval mechanism has to meet four criteria. They are recorded here rather
+than only in the record of the decision, so that a later reconsideration has
+something in the specification to test itself against:
+
+1. **The approval is a reviewable record in the repository.** Ambit's claim is
+   that a human reviews an increase, so a mechanism whose record lives in a CI
+   provider's state — a label, a re-run, an environment approval — leaves
+   nothing in the tree and does not support the claim.
+2. **A stale approval does not let an increase through.** An approval that has
+   outlived what it was written for must fail, not pass quietly.
+3. **Moving and renaming code is not taxed.** Increases that are artifacts of
+   relocation must not be a standing cost, or the ledger becomes a file rewritten
+   by every refactoring, which is a ritual rather than review.
+4. **The apparent guarantee surface does not grow** (§2, P4). That an increase
+   can be approved says nothing about whether the approver was right.
+
+**The approval ledger.** A file named `ambit.approvals.md`, found by walking up
+from the checked directory and stopping at the first directory holding a
+`package.json` or `.git` — the same search `ambit.config.ts` uses (§4.1 (c)).
+
+Approvals are the lines whose first non-space character is `-`, below a heading
+whose text is `Approvals`; every other line is prose and is ignored, so the file
+carries its own explanation and may use bullets in it. A file with no such
+heading is read as approvals throughout. An approval line is:
+
+```text
+- `<symbol id>` `<authority>` — <reason>
+```
+
+The symbol id is as §5.3 defines it and as `ambit diff` prints it. The authority
+is `effect:<name>` or `capability:<resource>:<action>:<target>`, matched as
+**exact text**: an approval of `capability:http:get:*` does not cover
+`capability:http:get:api.example.com`. Containment is how a *grant* relates to a
+*requirement* (§4.4); an approval is neither, it is a record that one named
+increase was looked at, and one line must not quietly cover a family of them.
+The reason is free text and is required. `ambit diff` prints the line to add for
+every increase it fails on, so the ledger is filled in by copying, not by
+recalling the grammar.
+
+A `-` line inside the approvals region that does not parse is reported with its
+line number and grants nothing. It does not by itself change the exit code: the
+increase it failed to approve is still unapproved, and that is what fails.
+
+**An approval is valid only in the comparison that adds it.** The ledger is read
+on *both* sides of the diff. For each `(symbol id, authority)` pair, the number
+of approvals in force is the head side's count of that pair minus the base
+side's; only that many increases of that pair can be approved. A line that is
+already in the base grants nothing, forever.
+
+Three properties follow, and they are how the rule meets criteria 1 and 2:
+
+- The record of an approval is a line added to a file in the pull request that
+  introduces the increase — reviewed by whoever reviews the diff, in the
+  repository, not in a CI provider's state.
+- An approval cannot go stale, because it cannot outlive its own comparison.
+  Authority removed and later reintroduced needs a new line; the old one is
+  spent.
+- The ledger is append-only and never needs pruning. Because what counts is the
+  *count* of a pair rather than its presence, re-approving the same pair later
+  is appending a second identical line. Deleting lines is permitted and can only
+  ever reduce what is approved, never grant.
+
+**What an approval is not.** It records that a line was added alongside an
+increase and shown in the diff. It does not establish that a human wrote it,
+that the human was right, or that the increase is safe — Ambit cannot verify any
+of the three, and does not claim to (P4). What makes a human necessary is the
+repository's own branch protection: requiring review, and naming
+`ambit.approvals.md` in `CODEOWNERS` so that changing it needs an approver. That
+is outside Ambit, and stating it is part of the design rather than a gap in it.
+
+The same holds for the shape of the check itself. `ambit diff` compares two
+trees, so a change made outside the agent loop — hand-edited JSDoc, a rewritten
+`ambit.config.ts`, an updated stub — reaches the gate exactly as an agent's
+change does. §7's in-loop approval is an ergonomic step, not the enforcement
+point; this is.
+
+**What rename detection does not see.** §6 carries symbols across a file git
+reports as renamed. Two cases remain, and both surface as an unapproved increase
+that costs an approval line:
+
+- A function renamed *within* a file. Git reports no rename, and matching two
+  declaration paths inside one file would be a guess about identity — the guess
+  that hides a function which gained authority on the way.
+- A file whose rename git does not detect, because the move was accompanied by
+  enough editing to fall under its similarity threshold, or because the new path
+  is not yet tracked. Rename detection reads the index and the working tree
+  against the base commit; an untracked new file has nothing to be similar to.
+
+Both are over-reporting, never under-reporting, which is the direction §3.4
+requires.
+
+
 ## 7. The Agent Loop
 
 ```text
@@ -686,7 +790,7 @@ For agents and editors, design a resident check path that holds the analysis eng
 - Fixes that loosen a contract (`consistentWithContract: false`) require human approval (relaxable in config).
 - Record the `unknown` rate on each cycle and warn if it increases. Distinguish engine changes and analysis failures from an ordinary improvement cycle.
 
-The limits of enforcing approval solely inside the agent loop, and how to detect direct changes to contracts, settings, and stubs in CI, are treated in chapter 12.
+Approval enforced only inside the agent loop reaches only what the agent did. A contract, setting, or stub edited by hand reaches CI instead, where `ambit diff` compares the whole tree against the base ref and the approval ledger is what lets a legitimate increase through (§6.3).
 
 ## 8. Supply Chain
 
@@ -733,7 +837,6 @@ answer is in the section that now specifies it, and the reasoning in
 - **Edge runtimes**: Phase 1 guarantees Node.js only. For anything else, state explicitly whether runtime enforcement exists.
 - **Precision of budget blocking**: settle the guaranteed range for price-table updates, reserving limits, parallel calls, reconciling actuals, work that does not support cancellation, and calls for which no estimated upper bound can be obtained.
 - **`unknown` fatigue**: in addition to per-directory strict, confirm the total volume of warnings and the measurement denominator in practice.
-- **Approving a contract loosening**: `ambit diff` (§6) has taken care of **detecting** an increase in authority, but there is no **approval**. Because a PR that legitimately increases authority cannot pass the gate, diff remains non-gating in CI (`docs/status.md`). Which of an allowlist, a pinned baseline, or "this increase is approved" to take is undecided, as is how to connect JSDoc / config / stubs changes made outside the agent to an approval in protected CI.
 - **JSDoc limits and symbol identification**: (1) Notation for object-literal members with no identifier name (computed, string, or numeric keys), and for names that can collide with the declaration path's joiner `"."`. These cannot be named even in config, and remain in AMB-E003 and in `--coverage`'s skipped. (2) Whether to resolve the asymmetry §4.1(a) left — that JSDoc can syntactically be written on getters and anonymous default exports with a declaration path, yet is not adopted. Resolving it requires first deciding how to fix JSDoc's attribution uniquely.
 - **Gaps in entry-point granularity**: per-function capabilities within a single request are statically checked only, by default. Confirm this trade-off in the pilot.
 - **Monorepos**: verify multiple tsconfigs, project references, config discovery, unknown at project boundaries, and update propagation.

@@ -49,12 +49,21 @@ jobs:
       - name: Contract check on Ambit's own source
         run: node src/cli/main.ts check src --coverage --format github
 
-      # Reporting-only, and staying that way for now. The step works — it has
-      # run here and annotated the eight symbols the `diff` command itself
-      # added (docs/status.md) — but a pull request that legitimately adds
-      # authority would fail a gate with no way to approve it. There is no
-      # allowlist and no pinned baseline yet, so the annotations are the
-      # product and the exit code is not enforced (DESIGN.md §6).
-      - name: Authority diff against the base commit (non-gating)
-        continue-on-error: true
+      # The second gate: authority that grew since the base commit and has no
+      # approval fails the build (DESIGN.md §6.3). A pull request that adds
+      # authority on purpose passes by adding a line to `ambit.approvals.md`,
+      # which is then part of the diff a reviewer reads — so the gate is
+      # enforced rather than reported. `--format github` annotates each
+      # increase at its own declaration: `::error` for one with nothing
+      # approving it, carrying the line to add, and `::notice` for one that
+      # was approved, carrying the reason.
+      #
+      # On a `pull_request` event `HEAD~1` is the base tip, so this compares
+      # the base branch against the pull request's tree — which is the
+      # comparison the ledger's "only in the comparison that adds it" rule is
+      # written for. The `push` to main afterwards rechecks the same pair when
+      # the branch was squashed or merged as one commit, which is how this
+      # repository merges; a rebase-merge of several commits would make
+      # `HEAD~1` the second-to-last of them instead.
+      - name: Authority diff against the base commit
         run: node src/cli/main.ts diff HEAD~1 src --format github

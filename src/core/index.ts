@@ -1,3 +1,4 @@
+export * from "./approvals.ts";
 export * from "./authority.ts";
 export * from "./authority-diff.ts";
 export * from "./backend.ts";

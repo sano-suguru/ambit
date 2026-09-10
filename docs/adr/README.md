@@ -72,3 +72,4 @@ is left out rather than padded.
 | [0005](0005-mapping-contracts-to-handlers.md) | Contracts reach the runtime by explicit registration, not generated data | Accepted |
 | [0006](0006-runtime-hook-approach.md) | Monkeypatching for builtins, client wrapping for `pg`, and the target formats | Accepted |
 | [0007](0007-http-route-keys.md) | An HTTP `method + path` key does not replace explicit registration | Accepted — confirms 0005 |
+| [0008](0008-approving-an-authority-increase.md) | An authority increase is approved by a ledger line valid only in the comparison that adds it | Accepted (2026-09-10) |

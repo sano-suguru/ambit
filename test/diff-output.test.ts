@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type DiffResult, formatDiffGithub, formatDiffText } from "../src/cli/diff.ts";
-import type { AuthorityRecord, SymbolId } from "../src/core/index.ts";
-import { diffAuthority } from "../src/core/index.ts";
+import type { AuthorityRecord, RenamedFiles, SymbolId } from "../src/core/index.ts";
+import { diffAuthority, parseApprovals, reviewIncreases } from "../src/core/index.ts";
 
 /**
  * The rendering is a function of the comparison, and the comparison is a
@@ -20,16 +20,30 @@ function record(symbol: string, parts: Partial<AuthorityRecord> = {}): Authority
   };
 }
 
+interface Ledgers {
+  /** The ledger text on each side, as `ambit diff` reads it (DESIGN.md §6.3). */
+  readonly base?: string;
+  readonly head?: string;
+  readonly renames?: RenamedFiles;
+  readonly over?: string;
+}
+
 function result(
   base: readonly AuthorityRecord[],
   head: readonly AuthorityRecord[],
-  over = "src",
+  ledgers: Ledgers = {},
 ): DiffResult {
+  const diff = diffAuthority(base, head, ledgers.renames);
+  const baseLedger = parseApprovals(ledgers.base ?? "");
+  const headLedger = parseApprovals(ledgers.head ?? "");
   return {
-    diff: diffAuthority(base, head),
+    diff,
+    review: reviewIncreases(diff, baseLedger.approvals, headLedger.approvals),
+    malformedApprovals: headLedger.malformed,
+    ...(ledgers.head === undefined ? {} : { approvalsFile: "ambit.approvals.md" }),
     ref: "main",
     baseCommit: "0123456789abcdef0123456789abcdef01234567",
-    subdir: over,
+    subdir: ledgers.over ?? "src",
     dir: process.cwd(),
   };
 }
@@ -37,9 +51,9 @@ function result(
 function render(
   base: readonly AuthorityRecord[],
   head: readonly AuthorityRecord[],
-  over = "src",
+  ledgers: Ledgers = {},
 ): string {
-  return formatDiffText(result(base, head, over));
+  return formatDiffText(result(base, head, ledgers));
 }
 
 const WIDENED_HEAD = record("pricing.ts#priceOrder", {
@@ -70,7 +84,7 @@ describe("formatDiffText", () => {
       [WIDENED_HEAD],
     );
     const lines = output.split("\n");
-    const increased = lines.findIndex((line) => line.startsWith("Authority increased"));
+    const increased = lines.findIndex((line) => line.includes("increased without approval"));
     const gone = lines.findIndex((line) => line.includes("no longer present"));
     const unchanged = lines.findIndex((line) => line.includes("unchanged, out of"));
 
@@ -156,8 +170,57 @@ describe("formatDiffText", () => {
     expect(output.split("\n").length).toBeLessThan(10);
   });
 
+  it("prints the approval line to add for an increase nothing approves", () => {
+    const output = render([WIDENED_BASE], [WIDENED_HEAD]);
+    expect(output).toContain("1 authority increased without approval:");
+    expect(output).toContain("    - `pricing.ts#priceOrder` `effect:network` —");
+    expect(output).toContain("ambit.approvals.md");
+  });
+
+  it("still prints an approved increase in full, with the reason and where it came from", () => {
+    // An increase nobody sees is what the ledger exists to prevent, so an
+    // approval moves it out of the failing section, not out of the report.
+    const output = render([WIDENED_BASE], [WIDENED_HEAD], {
+      head: "- `pricing.ts#priceOrder` `effect:network` — rates moved behind an HTTP API",
+    });
+    expect(output).toContain("1 authority increased, approved in this change:");
+    expect(output).not.toContain("without approval");
+    expect(output).toContain("    + network");
+    expect(output).toContain("      -> applyTax (tax.ts:3)");
+    expect(output).toContain("      approved: rates moved behind an HTTP API");
+    expect(output).toContain("(ambit.approvals.md:1)");
+  });
+
+  it("reports a ledger line that granted nothing", () => {
+    const output = render([record("a.ts#f")], [record("a.ts#f")], {
+      head: "- `gone.ts#g` `effect:network` — nothing here gained that",
+    });
+    expect(output).toContain("1 approval added here matched no increase and granted nothing:");
+    expect(output).toContain("ambit.approvals.md:1  gone.ts#g effect:network");
+  });
+
+  it("reports a ledger line that did not parse, and what it said", () => {
+    const output = render([record("a.ts#f")], [record("a.ts#f")], {
+      head: "- a.ts#f effect:network — no code spans",
+    });
+    expect(output).toContain("did not parse as an approval and granted nothing:");
+    expect(output).toContain("line 1: - a.ts#f effect:network — no code spans");
+  });
+
+  it("names a moved symbol by both of its paths rather than calling it new", () => {
+    const output = render(
+      [record("old/a.ts#f", { effects: { declared: ["network"], observed: [], unknown: false } })],
+      [record("new/a.ts#f", { effects: { declared: ["network"], observed: [], unknown: false } })],
+      { renames: new Map([["old/a.ts", "new/a.ts"]]) },
+    );
+    expect(output).toContain("No authority increased.");
+    expect(output).toContain("1 symbol moved with a renamed file");
+    expect(output).toContain("  old/a.ts#f -> new/a.ts#f");
+    expect(output).not.toContain("no longer present");
+  });
+
   it("names the base ref, its commit and the directory compared", () => {
-    const output = render([record("a.ts#f")], [record("a.ts#f")], "src");
+    const output = render([record("a.ts#f")], [record("a.ts#f")], { over: "src" });
     expect(output.split("\n")[0]).toBe("base main (0123456) vs the working tree, over src");
   });
 });
@@ -204,6 +267,43 @@ describe("formatDiffGithub", () => {
     // `llm` implies `network` (DESIGN.md §4.2), so the declared set expands.
     expect(annotations.length).toBeGreaterThanOrEqual(1);
     expect(output).toContain("(new symbol)");
+  });
+
+  it("annotates an approved increase as a notice carrying the reason, not as an error", () => {
+    const output = formatDiffGithub(
+      result([WIDENED_BASE], [WIDENED_HEAD], {
+        head: "- `pricing.ts#priceOrder` `effect:network` — rates moved behind an HTTP API",
+      }),
+    );
+    const annotations = output.split("\n").filter((line) => line.startsWith("::"));
+    expect(annotations).toHaveLength(1);
+    expect(annotations[0]).toContain("::notice file=pricing.ts,");
+    expect(annotations[0]).toContain("approved in this change: rates moved behind an HTTP API");
+  });
+
+  it("carries the ledger line to add in the annotation for an unapproved increase", () => {
+    const output = formatDiffGithub(result([WIDENED_BASE], [WIDENED_HEAD]));
+    expect(output).toContain("::error file=pricing.ts,");
+    expect(output).toContain("add to ambit.approvals.md: - `pricing.ts#priceOrder`");
+  });
+
+  it("annotates nothing for a symbol that only moved", () => {
+    const output = formatDiffGithub(
+      result(
+        [
+          record("old/a.ts#f", {
+            effects: { declared: ["network"], observed: [], unknown: false },
+          }),
+        ],
+        [
+          record("new/a.ts#f", {
+            effects: { declared: ["network"], observed: [], unknown: false },
+          }),
+        ],
+        { renames: new Map([["old/a.ts", "new/a.ts"]]) },
+      ),
+    );
+    expect(output).toBe("");
   });
 
   it("annotates nothing when nothing increased", () => {

@@ -13,20 +13,23 @@ import type { SymbolId } from "./symbol-id.ts";
 
 /**
  * Whether a symbol exists on both sides of the comparison, only on the new
- * side, or only on the old one.
+ * side, only on the old one, or on both under different paths.
  *
- * A symbol id contains the file path (DESIGN.md §5.3), so a function that
- * moved or was renamed is a `"deleted"` and a `"new"` symbol, not a moved
- * one. Nothing here tries to match them up: a guess about identity would put
- * a fabricated "unchanged" in front of a reader whose function may in fact
- * have gained authority on the way.
+ * A symbol id contains the file path (DESIGN.md §5.3), so a function whose
+ * file moved would be a `"deleted"` and a `"new"` symbol. `"moved"` is that
+ * pair recombined, and only ever on evidence git supplied: the caller passes
+ * the renames git reported, and nothing here guesses at identity beyond them.
+ * A guess would put a fabricated "unchanged" in front of a reader whose
+ * function may in fact have gained authority on the way (DESIGN.md §6.3).
  */
-export type SymbolStatus = "present" | "new" | "deleted";
+export type SymbolStatus = "present" | "new" | "deleted" | "moved";
 
 /** What changed about one symbol's authority between two dumps. */
 export interface SymbolAuthorityDiff {
   readonly symbol: SymbolId;
   readonly status: SymbolStatus;
+  /** For a `"moved"` symbol, the id it had on the base side. Absent otherwise. */
+  readonly movedFrom?: SymbolId;
   /** Authority the new side has that the old side did not grant. */
   readonly added: readonly AuthorityRef[];
   /** Authority the old side had that the new side does not. */
@@ -54,6 +57,16 @@ export interface AuthorityDiff {
 }
 
 /**
+ * Files git reported as renamed between the two sides, base path to head
+ * path, each relative to the checked directory and separated by `"/"`.
+ *
+ * Supplied by the caller because this module runs no git (see
+ * {@link diffAuthority}); `ambit diff` reads it from
+ * `git diff --find-renames`.
+ */
+export type RenamedFiles = ReadonlyMap<string, string>;
+
+/**
  * Compare two authority dumps (DESIGN.md §5.1's `kind: "authority"` records).
  *
  * Pure: two arrays in, one result out. It never reads a file, runs git, or
@@ -69,15 +82,57 @@ export interface AuthorityDiff {
 export function diffAuthority(
   base: readonly AuthorityRecord[],
   head: readonly AuthorityRecord[],
+  renames: RenamedFiles = new Map(),
 ): AuthorityDiff {
-  const baseById = indexBySymbol(base, "base");
+  const rebased = rebaseRenamed(base, renames);
+  const baseById = indexBySymbol(rebased.records, "base");
   const headById = indexBySymbol(head, "head");
 
   const symbols = [...new Set([...baseById.keys(), ...headById.keys()])]
     .toSorted()
-    .map((symbol) => compareSymbol(symbol as SymbolId, baseById.get(symbol), headById.get(symbol)));
+    .map((symbol) =>
+      compareSymbol(
+        symbol as SymbolId,
+        baseById.get(symbol),
+        headById.get(symbol),
+        rebased.movedFrom.get(symbol),
+      ),
+    );
 
   return { symbols };
+}
+
+/**
+ * Re-express the base side's symbol ids under the head side's paths, for the
+ * files git reported as renamed.
+ *
+ * This is the whole of move handling: once `old.ts#f` is called `new.ts#f`,
+ * the ordinary comparison does the rest, and a move that also widened a
+ * contract still reports exactly the widening. A remap that would collide
+ * with an id the base side already has is dropped rather than resolved —
+ * git cannot report a rename onto a path that existed on the base side, so
+ * this is unreachable, and guessing which of the two records wins is the one
+ * answer that could hide an increase.
+ */
+function rebaseRenamed(
+  base: readonly AuthorityRecord[],
+  renames: RenamedFiles,
+): { records: readonly AuthorityRecord[]; movedFrom: ReadonlyMap<string, SymbolId> } {
+  if (renames.size === 0) return { records: base, movedFrom: new Map() };
+
+  const existing = new Set(base.map((record) => record.symbol));
+  const movedFrom = new Map<string, SymbolId>();
+  const records = base.map((record) => {
+    const hash = record.symbol.indexOf("#");
+    if (hash < 0) return record;
+    const renamed = renames.get(record.symbol.slice(0, hash));
+    if (renamed === undefined) return record;
+    const moved = `${renamed}${record.symbol.slice(hash)}` as SymbolId;
+    if (existing.has(moved) || movedFrom.has(moved)) return record;
+    movedFrom.set(moved, record.symbol);
+    return { ...record, symbol: moved };
+  });
+  return { records, movedFrom };
 }
 
 function indexBySymbol(
@@ -102,6 +157,7 @@ function compareSymbol(
   symbol: SymbolId,
   base: AuthorityRecord | undefined,
   head: AuthorityRecord | undefined,
+  movedFrom: SymbolId | undefined,
 ): SymbolAuthorityDiff {
   if (head === undefined) {
     if (base === undefined) throw new Error(`no record for ${symbol} on either side`);
@@ -147,7 +203,8 @@ function compareSymbol(
 
   return {
     symbol,
-    status: "present",
+    status: movedFrom === undefined ? "present" : "moved",
+    ...(movedFrom === undefined ? {} : { movedFrom }),
     added,
     removed,
     unchanged,
@@ -205,18 +262,39 @@ function uncoveredCapabilities(
   });
 }
 
-/** Symbols whose authority grew, and new symbols that hold any — what fails a check (DESIGN.md §6). */
+/**
+ * Present under the same id on both sides, or under a renamed path — the two
+ * statuses whose `added` / `removed` are a real comparison rather than the
+ * whole of one side's authority.
+ */
+function comparable(entry: SymbolAuthorityDiff): boolean {
+  return entry.status === "present" || entry.status === "moved";
+}
+
+/**
+ * Symbols whose authority grew, and new symbols that hold any — the increases
+ * an approval is written for (DESIGN.md §6.3).
+ *
+ * A symbol that only moved is not here: it is compared against its own base
+ * record, so `added` is empty unless the move also widened something, and then
+ * only the widening is reported.
+ */
 export function authorityIncreases(diff: AuthorityDiff): readonly SymbolAuthorityDiff[] {
   return diff.symbols.filter(
     (entry) =>
-      (entry.status === "present" && entry.added.length > 0) ||
+      (comparable(entry) && entry.added.length > 0) ||
       (entry.status === "new" && entry.head !== undefined && holdsAuthority(entry.head)),
   );
 }
 
 /** Symbols that lost authority without disappearing. Reported; never a failure. */
 export function authorityDecreases(diff: AuthorityDiff): readonly SymbolAuthorityDiff[] {
-  return diff.symbols.filter((entry) => entry.status === "present" && entry.removed.length > 0);
+  return diff.symbols.filter((entry) => comparable(entry) && entry.removed.length > 0);
+}
+
+/** Symbols carried across a file git reported as renamed. Reported; never a failure on its own. */
+export function movedSymbols(diff: AuthorityDiff): readonly SymbolAuthorityDiff[] {
+  return diff.symbols.filter((entry) => entry.status === "moved");
 }
 
 /** Symbols the new side no longer has. Reported; never a failure. */
@@ -227,7 +305,7 @@ export function deletedSymbols(diff: AuthorityDiff): readonly SymbolAuthorityDif
 /** Symbols present on both sides whose authority is exactly the same. */
 export function unchangedSymbols(diff: AuthorityDiff): readonly SymbolAuthorityDiff[] {
   return diff.symbols.filter(
-    (entry) => entry.status === "present" && entry.added.length === 0 && entry.removed.length === 0,
+    (entry) => comparable(entry) && entry.added.length === 0 && entry.removed.length === 0,
   );
 }
 
