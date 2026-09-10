@@ -13,6 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # `ambit diff` needs the base commit to exist locally, and
+          # `actions/checkout` fetches a single commit by default. 2 is enough
+          # for `HEAD~1`; on a pull request that is the base tip, which is the
+          # comparison the step wants.
+          fetch-depth: 2
 
       - uses: pnpm/action-setup@v6
 
@@ -40,3 +46,11 @@ jobs:
       # docs/status.md, "Ambit's own source".
       - name: Contract check on Ambit's own source
         run: node src/cli/main.ts check src --coverage --format github
+
+      # Not a gate yet. `ambit diff` has never run in GitHub Actions, and
+      # nothing here has observed one: it is added reporting-only so a real
+      # run can be read first, and promoted once that run is green. The
+      # annotations land on the functions whose authority grew (DESIGN.md §6).
+      - name: Authority diff against the base commit (non-gating)
+        continue-on-error: true
+        run: node src/cli/main.ts diff HEAD~1 src --format github
