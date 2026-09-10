@@ -40,12 +40,24 @@ node scripts/m05-probe/native-primitives.ts test/fixtures/backend-conformance
 given `fetch-depth: 0` so the history exists locally — the default of 1 would
 make `HEAD~1` unresolvable, and `test/e2e.diff.test.ts` additionally resolves
 a pinned SHA, which a shallow clone of any fixed depth would eventually not
-reach. It is not a gate yet, and the reason is not
-a judgement about the command: **no CI run of it has been observed**. The work
-was done without pushing, so the only evidence is the same command run
-locally, which exits 0 on a clean tree and 1 on a tree whose authority grew.
-Promoting the step to a gate is a one-line change (drop `continue-on-error`)
-and is deliberately left until a real Actions run has been read.
+reach. It has now run in GitHub Actions
+once, on the pull request that introduced it
+([run 34429541730](https://github.com/sano-suguru/ambit/actions/runs/34429541730)):
+the step exited 1 and emitted 16 annotations naming the eight symbols the
+`diff` command itself added, each with its call path. The job stayed green
+because of `continue-on-error`. On a `pull_request` event `HEAD~1` is the base
+tip, so the comparison was main against the pull request's tree — the
+comparison the step is for.
+
+**Promoting it to a gate is now blocked by something other than evidence.** A
+pull request that legitimately adds authority — the one above is exactly that
+— would fail the build with no way to say so, because there is no approval
+mechanism: no allowlist, no pinned baseline, no "this increase is reviewed".
+DESIGN.md §6 defines the exit codes and this repository implements them; what
+is missing is the step above them. Until that exists, a gate would either
+block every honest authority-adding change or be routinely overridden, and
+neither is worth having. The step stays reporting-only, and the approval
+mechanism is the open question.
 
 `pnpm exec biome ci .` returns 1 in one local shell because of a
 user-installed command wrapper, not because of this repository —
