@@ -261,12 +261,12 @@ the one that keeps the contract and rewrites the code.
 
 ## Why not ESLint / Effect-TS / dependency-cruiser
 
-| Tool | Unit of analysis |
+| Tool | Primary abstraction |
 |---|---|
-| ESLint | syntax, scope, and type-aware rules within a file |
-| dependency-cruiser | the import edges between modules |
-| Effect-TS | effects encoded in the values you construct |
-| **Ambit** | **function authority, propagated across the call graph** |
+| ESLint | code-level lint rules |
+| dependency-cruiser | module dependency edges |
+| Effect-TS | effects represented in program values and types |
+| **Ambit** | **authority propagated across function calls** |
 
 Ambit's abstraction is the authority a function holds after propagation, which
 is why a `pure` function calling an undeclared helper that calls `fetch` is an
@@ -294,12 +294,10 @@ claim:
   and `pg`. `mysql2`, Prisma and the LLM SDKs have static effects but no hook,
   so calling them is neither blocked nor recorded. Native addons, child
   processes, and other `worker_threads` workers are outside every hook.
-- **That the declaration cannot simply be widened.** An agent that edits the
-  `@effects` tag along with the code gets a green check again — measured on the
-  example above, widening `priceOrder` to `network` takes `check` from exit 1 to
-  exit 0. `ambit diff <ref>` is the answer: it compares authority against a base
-  ref and exits 1 on an increase, naming the hop that carried it. `diff` has
-  documented blind spots of its own
+- **That the declaration cannot simply be widened.** `check` validates code
+  against the contract currently written, so changing the contract can make it
+  green again. `ambit diff <ref>` is what reviews increases in authority, and it
+  has documented blind spots of its own
   ([limitations](docs/limitations.md#what-ambit-diff-can-and-cannot-see)).
 - **Targets finer than the resource.** A database target names the database, not
   the table — Ambit does not read table names out of SQL — and a shell spawn
