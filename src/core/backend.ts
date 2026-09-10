@@ -140,11 +140,13 @@ export interface LiteralArgument {
  * declaration, whether a miss would mean "unresolved-symbol" or something
  * more specific (e.g. `builtin-method`). `callbackByReference` is set when
  * one of the call's arguments is a callable passed by reference rather than
- * written inline (`arr.forEach(handler)`, not `arr.forEach(x => ...)`): an
- * inline callback's body is walked by `collectCalls` and its effects
- * attributed to the enclosing function, but a callback passed by reference
- * is never visited, so `pureBuiltinName` must not be trusted as pure when
- * this is set (DESIGN.md §4.2 rule 4) — regardless of what
+ * written inline (`arr.forEach(handler)`, not `arr.forEach(x => ...)`) **and
+ * that reference could not be followed to a function this project extracted**:
+ * an inline callback's body is walked by `collectCalls` and its effects
+ * attributed to the enclosing function, and a resolvable reference becomes a
+ * {@link CallSite.callbackTargets} edge, but a callback that is neither is
+ * never visited, so `pureBuiltinName` must not be trusted as pure when this is
+ * set (DESIGN.md §4.2 rule 4) — regardless of what
  * `src/stubs/pure-builtins.ts` says about the method name itself.
  */
 export interface CallSite {
@@ -153,6 +155,26 @@ export interface CallSite {
   readonly calleeQualifiedName?: string;
   readonly pureBuiltinName?: string;
   readonly callbackByReference?: true;
+  /**
+   * The callable arguments passed *by reference* that do resolve to a
+   * function this project extracted (`arr.map(toCall)` where `toCall` is a
+   * declaration in the analyzed tree).
+   *
+   * DESIGN.md §4.2 rule 4 asks for exactly this — "the effects of a callback
+   * parameter are inferred from the actual argument at the call site" — and
+   * the actual argument here is a function whose body was analyzed. Recorded
+   * apart from {@link CallSite.callbackByReference}, which is what remains
+   * when the argument is *not* resolvable and the call therefore still has to
+   * fall to `unknown`.
+   *
+   * It is a fact about the call, not a verdict: `src/checker/summarize.ts`
+   * turns these into call-graph edges only where the callee itself is known
+   * to invoke what it is handed — a higher-order allowlisted builtin, or a
+   * mutating one whose verdict covers only its receiver (`arr.sort(cmp)`) —
+   * so a method that merely inspects a function value (`Array.isArray(fn)`)
+   * gains no edge it does not have.
+   */
+  readonly callbackTargets?: readonly SymbolId[];
   /**
    * Set when this site mutates a value in place (DESIGN.md §4.2, "Local
    * mutation and `pure`") — a mutating builtin method, or an assignment / `++` /
@@ -181,6 +203,19 @@ export interface CallSite {
    * plain call.
    */
   readonly constructedWithoutArguments?: true;
+  /**
+   * Set when the callee is a function written inside the declaration being
+   * summarized — a nested `function`, or a `const` holding an arrow. Nothing
+   * inside a function body is indexed, so there is no `resolvedCallee` to
+   * name; but the body is not missing either, because `collectCalls` walked
+   * through it and recorded its calls in this same summary.
+   *
+   * The site therefore contributes nothing of its own. It is not
+   * `unresolved`: that would report a body the analysis actually read as one
+   * it could not reach, which overstates `unknown` exactly as badly as the
+   * reverse understates it (DESIGN.md §3.4).
+   */
+  readonly inlinedCallee?: true;
   readonly unresolvedReason?: UnresolvedReason;
 }
 

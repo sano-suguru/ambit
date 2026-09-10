@@ -20,7 +20,7 @@ import type {
 } from "../../core/index.ts";
 import { isOnExceed, symbolId } from "../../core/index.ts";
 import { constructorStubKey } from "../../stubs/constructors.ts";
-import { isMutatingBuiltin } from "../../stubs/mutating-builtins.ts";
+import { isFirstArgumentMutator, isMutatingBuiltin } from "../../stubs/mutating-builtins.ts";
 
 /**
  * `TsBackend` implementation on the TypeScript Compiler API (DESIGN.md §3.4).
@@ -1241,9 +1241,10 @@ function classifyConstruct(
       unresolvedReason: importBindingReason ?? ambientReason,
       // `new Promise(namedExecutor)` runs `namedExecutor` immediately; the
       // pure-constructor allowlist must not cover a body this walk never
-      // visited (DESIGN.md §4.2 rule 4).
-      callbackByReference:
-        (ts.isNewExpression(site) && hasOpaqueCallableArgument(site, checker)) || undefined,
+      // visited (DESIGN.md §4.2 rule 4). A named executor that *is* an
+      // extracted function is a `callbackTargets` edge instead — the body is
+      // right there to propagate from.
+      ...(ts.isNewExpression(site) ? callableArgumentFields(site, checker, declaredNodeToId) : {}),
       // `new Date()` reads the clock; `new Date(2020, 0, 1)` does not
       // (DESIGN.md §4.2 lists the clock under `env`).
       constructedWithoutArguments:
@@ -1255,6 +1256,56 @@ function classifyConstruct(
     location,
     unresolvedReason: importBindingReason ?? ambientReason ?? "unresolved-symbol",
   };
+}
+
+/**
+ * Whether `declaration` is a function-valued node written inside one of the
+ * bodies `collectCalls` walks for `enclosing` — the exact condition under
+ * which its calls are already part of `enclosing`'s own call list.
+ *
+ * Matched against {@link bodiesOf} rather than against `enclosing` itself, so
+ * the two can never drift apart: a body `collectCalls` does not walk (a class's
+ * function-valued property, which has its own entry) must not be reported as
+ * already accounted for.
+ */
+function isWalkedIntoSummaryOf(
+  declaration: ts.Declaration,
+  enclosing: FunctionLikeDeclaration,
+): boolean {
+  if (declaration === enclosing) return false;
+  if (!isFunctionValuedDeclaration(declaration)) return false;
+  const bodies = bodiesOf(enclosing);
+  if (bodies.length === 0) return false;
+  for (let current: ts.Node | undefined = declaration; current; current = current.parent) {
+    if (bodies.includes(current)) return true;
+    if (ts.isSourceFile(current)) return false;
+  }
+  return false;
+}
+
+/** A declaration whose value is a function with a body, in any of the shapes that can hold one. */
+function isFunctionValuedDeclaration(declaration: ts.Declaration): boolean {
+  if (
+    ts.isFunctionDeclaration(declaration) ||
+    ts.isMethodDeclaration(declaration) ||
+    ts.isConstructorDeclaration(declaration) ||
+    ts.isGetAccessor(declaration) ||
+    ts.isSetAccessor(declaration)
+  ) {
+    return declaration.body !== undefined;
+  }
+  if (
+    ts.isVariableDeclaration(declaration) ||
+    ts.isPropertyAssignment(declaration) ||
+    ts.isPropertyDeclaration(declaration)
+  ) {
+    const initializer = declaration.initializer;
+    return (
+      initializer !== undefined &&
+      (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer))
+    );
+  }
+  return ts.isFunctionExpression(declaration) || ts.isArrowFunction(declaration);
 }
 
 /** The indexed `Class.constructor` entry for a class: its explicit constructor, or the class node standing in for the implicit one. */
@@ -1400,7 +1451,9 @@ function classifyCall(
   // `legacyTsBackend: TsBackend = { extractProject }`. Genuine dynamic
   // dispatch is untouched: a receiver with no single literal behind it fails
   // the guards in `objectLiteralReceiverTarget` and stays unresolved.
-  const receiverMemberId = objectLiteralReceiverTarget(callee, checker, declaredNodeToId);
+  const receiverMemberId =
+    objectLiteralReceiverTarget(callee, checker, declaredNodeToId) ??
+    constructedInstanceMemberTarget(callee, checker, declaredNodeToId);
   if (receiverMemberId) return { location, resolvedCallee: receiverMemberId };
 
   // An import binding whose alias couldn't be followed to any declaration at
@@ -1423,6 +1476,22 @@ function classifyCall(
   // project source is checked against the two rules below, so a stub match
   // is attempted for anything ambient instead of being misclassified.
   const isAmbientDeclaration = declaration?.getSourceFile().isDeclarationFile ?? false;
+
+  // A callee written *inside* the declaration being summarized — a nested
+  // `function`, or a `const` holding an arrow — has no id of its own (nothing
+  // inside a function body is indexed), but its body is not missing from this
+  // summary either: `collectCalls` walked straight through it, so every call
+  // it makes is already recorded here. The call site therefore adds nothing,
+  // and reporting it `unknown` would claim the analysis lost a body it in fact
+  // read (DESIGN.md §3.4 cuts the other way too — an *analyzed* path must not
+  // read as an unanalyzed one).
+  //
+  // Deliberately not the same thing as extracting the nested function: it
+  // gets no id, no contract, and no summary of its own. Whether it should is
+  // DESIGN.md §12's "Nested function declarations and the locality rule".
+  if (declaration && !isAmbientDeclaration && isWalkedIntoSummaryOf(declaration, enclosing)) {
+    return { location, inlinedCallee: true };
+  }
 
   if (declaration && !isAmbientDeclaration) {
     // A parameter (higher-order function calling its own callback argument):
@@ -1466,6 +1535,12 @@ function classifyCall(
       calleeQualifiedName: qualifiedName,
       literalArguments: literalArgumentsOf(node),
       unresolvedReason: fallbackReason,
+      // Carried for the same reason it is carried on `pureBuiltinName`: a
+      // name in this namespace can also be allowlisted as pure (a bare global
+      // like `Number(x)`), and an opaque callable argument must refuse that
+      // verdict (DESIGN.md §4.2 rule 4). It says nothing about a stub match,
+      // which is decided by the name and the literal arguments alone.
+      ...callableArgumentFields(node, checker, declaredNodeToId),
     };
   }
 
@@ -1478,7 +1553,27 @@ function classifyCall(
   if (ambientReason === "builtin-method" && resolvedSymbol) {
     const builtinName = checker.getFullyQualifiedName(resolvedSymbol);
     if (builtinName) {
-      const callbackByReference = hasOpaqueCallableArgument(node, checker) || undefined;
+      const callable = callableArgumentsOf(node, checker, declaredNodeToId);
+      const callbackByReference = callable.opaque || undefined;
+      const callbackTargets =
+        callable.targets.length > 0 ? { callbackTargets: callable.targets } : {};
+      // A name that writes into its first argument (`Object.assign(target,
+      // …)`) is a mutation of *that* value. DESIGN.md §4.2's locality rule
+      // reads "the root of the mutation target", which here is the argument,
+      // not the `Object` global the call is spelled through.
+      const mutatedArgument = isFirstArgumentMutator(builtinName) ? node.arguments[0] : undefined;
+      if (mutatedArgument) {
+        const escaping = !isLocallyOwnedMutationTarget(mutatedArgument, enclosing, checker);
+        return {
+          location,
+          ...callbackTargets,
+          mutation: {
+            escaping,
+            qualifiedName: builtinName,
+            ...(escaping && callbackByReference ? { unknownCallback: true as const } : {}),
+          },
+        };
+      }
       if (isMutatingBuiltin(builtinName) && ts.isPropertyAccessExpression(callee)) {
         const escaping = !isLocallyOwnedMutationTarget(callee.expression, enclosing, checker);
         // A local mutation carries no effect, so a callback the walk never
@@ -1490,10 +1585,12 @@ function classifyCall(
             pureBuiltinName: builtinName,
             unresolvedReason: ambientReason,
             callbackByReference,
+            ...callbackTargets,
           };
         }
         return {
           location,
+          ...callbackTargets,
           mutation: {
             escaping,
             qualifiedName: builtinName,
@@ -1506,6 +1603,7 @@ function classifyCall(
         pureBuiltinName: builtinName,
         unresolvedReason: ambientReason,
         callbackByReference,
+        ...callbackTargets,
       };
     }
   }
@@ -1596,6 +1694,77 @@ function objectLiteralReceiverTarget(
     return objectLiteralMemberTarget(member, checker, declaredNodeToId);
   }
   return undefined;
+}
+
+/**
+ * The extracted method a receiver bound by `const` to `new C(...)` names, when
+ * `C` is a class in this project.
+ *
+ * DESIGN.md §4.2 rule 7 requires the annotation not to change the answer:
+ * "Because it follows the entity rather than the type annotation, `const
+ * handlers: H = { read }` and `const handlers = { read }` give the same
+ * result", and "Method resolution on class instances rests on the same
+ * premise". Without this, only the unannotated form resolved — the checker
+ * lands on the class's own member for `const c = new C()`, and on the
+ * *annotation's* member signature for `const c: I = new C()`, which no
+ * declaration path names.
+ *
+ * The premise is the one §4.2 rule 7 already states and no wider: `const`
+ * fixes the binding, so the value really is that `new`; it does not freeze the
+ * properties, so `c.m = other` still defeats it. A receiver that is anything
+ * else — a parameter, a `let`, a factory result — yields nothing and stays
+ * unresolved.
+ *
+ * The `extends` chain is walked because an inherited method is the one that
+ * runs. An override is found first: members are searched from the derived
+ * class outward.
+ */
+function constructedInstanceMemberTarget(
+  callee: ts.Expression,
+  checker: ts.TypeChecker,
+  declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+): SymbolId | undefined {
+  if (!ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.expression)) {
+    return undefined;
+  }
+  const receiver = symbolTargetOf(callee.expression, checker);
+  const declaration = receiver?.declarations?.[0];
+  if (!declaration || !ts.isVariableDeclaration(declaration)) return undefined;
+  if ((declaration.parent.flags & ts.NodeFlags.Const) === 0) return undefined;
+  const initializer = declaration.initializer
+    ? unwrapTypeOnlyExpression(declaration.initializer)
+    : undefined;
+  if (!initializer || !ts.isNewExpression(initializer)) return undefined;
+
+  const name = callee.name.text;
+  const visited = new Set<ts.ClassLikeDeclaration>();
+  let current = classDeclarationOf(initializer.expression, checker);
+  while (current && !visited.has(current)) {
+    visited.add(current);
+    for (const member of current.members) {
+      if (!member.name || !ts.isIdentifier(member.name) || member.name.text !== name) continue;
+      const id = declaredNodeToId.get(member);
+      if (id) return id;
+    }
+    const base = baseTypeExpressionOf(current);
+    current = base ? classDeclarationOf(base, checker) : undefined;
+  }
+  return undefined;
+}
+
+/** The class an expression names, following import aliases. */
+function classDeclarationOf(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.ClassLikeDeclaration | undefined {
+  return symbolTargetOf(expression, checker)?.declarations?.find(ts.isClassLike);
+}
+
+/** `getSymbolAtLocation`, with an import alias followed to what it names. */
+function symbolTargetOf(expression: ts.Expression, checker: ts.TypeChecker): ts.Symbol | undefined {
+  const symbol = checker.getSymbolAtLocation(expression);
+  if (!symbol) return undefined;
+  return (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(symbol) : symbol;
 }
 
 /**
@@ -1801,13 +1970,40 @@ function isLexicallyInside(node: ts.Node, ancestor: ts.Node): boolean {
   return false;
 }
 
+/** {@link callableArgumentsOf}, in the optional-field shape a `CallSite` literal spreads. */
+function callableArgumentFields(
+  node: ts.CallExpression | ts.NewExpression,
+  checker: ts.TypeChecker,
+  declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+): Pick<CallSite, "callbackByReference" | "callbackTargets"> {
+  const callable = callableArgumentsOf(node, checker, declaredNodeToId);
+  return {
+    ...(callable.opaque ? { callbackByReference: true as const } : {}),
+    ...(callable.targets.length > 0 ? { callbackTargets: callable.targets } : {}),
+  };
+}
+
 /**
- * True if any argument is a callable passed by reference (an identifier,
- * property access, or other expression with call signatures) rather than
- * written inline as `x => ...` / `function (...) {...}`. `collectCalls`
- * only walks into an inline callback's body; a callback passed by reference
- * is invisible to it, so a method taking one (`forEach`, `map`, `some`, ...)
- * cannot be trusted as pure even if its own name is allowlisted.
+ * The callable arguments a call passes *by reference*, split by whether the
+ * reference can be followed.
+ *
+ * An inline arrow or function expression is neither: `collectCalls` walks its
+ * body and attributes its calls to the enclosing function already.
+ *
+ * `targets` are the references that name a declaration this project extracted,
+ * so DESIGN.md §4.2 rule 4's "inferred from the actual argument at the call
+ * site" can be carried out literally. `opaque` is what is left — a callable
+ * from a package, a parameter, a `.bind()` result — for which the rule's other
+ * half applies: "If it cannot be inferred, `unknown`".
+ *
+ * An argument counts as callable when it is passed by reference (an
+ * identifier, property access, or other expression with call signatures)
+ * rather than written inline as `x => ...` / `function (...) {...}`.
+ * `collectCalls` only walks into an inline callback's body; a callback passed
+ * by reference is invisible to it, so a method taking one (`forEach`, `map`,
+ * `some`, ...) cannot be trusted as pure on its own name alone — either the
+ * reference resolves to an extracted function, and the effects come from
+ * there, or it does not, and the call is `unknown`.
  *
  * An `any`/`unknown`-typed argument has no call signatures of its own
  * (`getCallSignatures()` returns `[]`), so it must be treated as opaque
@@ -1827,18 +2023,52 @@ function isLexicallyInside(node: ts.Node, ancestor: ts.Node): boolean {
  * rather than skipping it, so this narrowing can only add opacity checks
  * back in, never silently drop the `any`/`unknown` fail-open guard above.
  */
-function hasOpaqueCallableArgument(
+function callableArgumentsOf(
   node: ts.CallExpression | ts.NewExpression,
   checker: ts.TypeChecker,
-): boolean {
+  declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+): { readonly opaque: boolean; readonly targets: readonly SymbolId[] } {
   const signature = checker.getResolvedSignature(node);
-  return (node.arguments ?? []).some((arg, index) => {
-    if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) return false;
-    if (signature && !acceptsCallableArgument(signature, index, checker)) return false;
+  const targets: SymbolId[] = [];
+  let opaque = false;
+  for (const [index, arg] of (node.arguments ?? []).entries()) {
+    if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) continue;
+    if (signature && !acceptsCallableArgument(signature, index, checker)) continue;
     const type = checker.getTypeAtLocation(arg);
-    if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) return true;
-    return type.getCallSignatures().length > 0;
-  });
+    const callable =
+      (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0 ||
+      type.getCallSignatures().length > 0;
+    if (!callable) continue;
+    const target = extractedFunctionTarget(arg, checker, declaredNodeToId);
+    if (target) targets.push(target);
+    else opaque = true;
+  }
+  return { opaque, targets };
+}
+
+/**
+ * The `SymbolId` of the extracted function an expression names, when it names
+ * one. Follows the same path `classifyCall` follows for a callee — import
+ * aliases included — because "the function this expression refers to" is the
+ * same question in both places.
+ */
+function extractedFunctionTarget(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+): SymbolId | undefined {
+  const expr = unwrapNonNullAssertions(expression);
+  if (!ts.isIdentifier(expr) && !ts.isPropertyAccessExpression(expr)) return undefined;
+  const symbol = checker.getSymbolAtLocation(expr);
+  if (!symbol) return undefined;
+  const resolved =
+    (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(symbol) : symbol;
+  const declaration = implementationDeclarationOf(resolved);
+  if (!declaration) return undefined;
+  return (
+    declaredNodeToId.get(declaration) ??
+    objectLiteralMemberTarget(declaration, checker, declaredNodeToId)
+  );
 }
 
 /**

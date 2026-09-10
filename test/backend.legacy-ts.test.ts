@@ -156,11 +156,14 @@ describe("legacyTsBackend.extractProject", () => {
     expect(call?.callbackByReference).toBeUndefined();
   });
 
-  it("marks a call as callbackByReference when its callback is passed by reference, not written inline", async () => {
+  it("follows a by-reference callback that names a function in the same tree (DESIGN.md §4.2 rule 4)", async () => {
     const { files } = await extractFixture(FIXTURE_ROOT);
     const fn = findFn(files, "sample.ts#callsPureBuiltinByReference");
     const call = fn?.calls.find((c) => c.pureBuiltinName === "Array.map");
-    expect(call?.callbackByReference).toBe(true);
+    // Not opaque: the argument is the answer to what the callback does, so the
+    // call site carries an edge to it instead of falling to `unknown`.
+    expect(call?.callbackByReference).toBeUndefined();
+    expect(call?.callbackTargets).toEqual(["sample.ts#double"]);
   });
 
   it("marks a call as callbackByReference for an any-typed callback argument (getCallSignatures() is empty for any/unknown)", async () => {
@@ -221,6 +224,28 @@ describe("legacyTsBackend.extractProject", () => {
     );
   });
 
+  it("resolves a class instance through its value, annotation or not (DESIGN.md §4.2 rule 7)", async () => {
+    const { files } = await extractFixture(FIXTURE_ROOT);
+    // `typedEngine: Runner` makes the checker resolve `.run` to Runner's
+    // member signature, which no declaration path names. Following the value
+    // reaches `Engine.run` anyway, and must give the bare binding's answer.
+    const annotated = findFn(files, "call-resolution.ts#callsInstanceTypedByInterface");
+    const bare = findFn(files, "call-resolution.ts#callsBareInstance");
+    expect(bare?.calls).toContainEqual(
+      expect.objectContaining({ resolvedCallee: "call-resolution.ts#Engine.run" }),
+    );
+    expect(annotated?.calls.map((c) => c.resolvedCallee)).toEqual(
+      bare?.calls.map((c) => c.resolvedCallee),
+    );
+  });
+
+  it("walks the extends chain to the method that actually runs", async () => {
+    const { files } = await extractFixture(FIXTURE_ROOT);
+    expect(findFn(files, "call-resolution.ts#callsInheritedInstanceMethod")?.calls).toContainEqual(
+      expect.objectContaining({ resolvedCallee: "call-resolution.ts#Engine.run" }),
+    );
+  });
+
   it("leaves a call unresolved when no single object literal stands behind the receiver", async () => {
     const { files } = await extractFixture(FIXTURE_ROOT);
     for (const caller of [
@@ -232,6 +257,13 @@ describe("legacyTsBackend.extractProject", () => {
       "callsMutableLiteral",
       // A spread can override the member with something this walk cannot see.
       "callsSpreadLiteral",
+      // The same two shapes on a class instance: a parameter is any object
+      // satisfying the type, and a factory result is not a `new` this walk
+      // can see. (A `let` is deliberately absent here: a class-typed binding
+      // reaches the class's own member through the checker, before any
+      // receiver rule runs, which is a different mechanism from this one.)
+      "callsRunnerParam",
+      "callsFactoryResult",
     ]) {
       const fn = findFn(files, `call-resolution.ts#${caller}`);
       expect(fn?.calls).toContainEqual(
@@ -316,6 +348,31 @@ describe("legacyTsBackend.extractProject (self-hosting)", () => {
     );
     expect(collectCalls?.calls).not.toContainEqual(
       expect.objectContaining({ mutation: expect.objectContaining({ escaping: true }) }),
+    );
+  });
+
+  it("follows Ambit's own `fn.calls.flatMap(toCalls)` to the function it names", async () => {
+    // A by-reference callback whose target is reached through a same-file
+    // declaration inside a nested arrow, on a `ReadonlyArray` receiver: the
+    // shape `test/fixtures/builtins` cannot produce, because there the
+    // referenced function is not also the one doing the referencing. Before
+    // DESIGN.md §4.2 rule 4 was applied to the actual argument, this call was
+    // the most frequent `ReadonlyArray.map` entry in `check src --coverage`.
+    const { files } = await extractFixture(SRC_ROOT);
+    const summarize = files
+      .find((f) => f.filePath === "checker/summarize.ts")
+      ?.functions.find((fn) => fn.id === "checker/summarize.ts#summarizeExtractedFiles");
+    expect(summarize?.calls).toContainEqual(
+      expect.objectContaining({
+        pureBuiltinName: "ReadonlyArray.flatMap",
+        callbackTargets: ["checker/summarize.ts#toCalls"],
+      }),
+    );
+    expect(summarize?.calls).not.toContainEqual(
+      expect.objectContaining({
+        pureBuiltinName: "ReadonlyArray.flatMap",
+        callbackByReference: true,
+      }),
     );
   });
 });

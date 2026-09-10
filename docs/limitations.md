@@ -276,13 +276,20 @@ read-only function that builds its statement dynamically has to declare
 
 ### The pure built-ins allowlist (`src/stubs/pure-builtins.ts`)
 
-A separate, smaller table allowlists default-lib methods reached through a
-local value (`set.has(...)`, `arr.map(...)`). These have no import binding for
-the stub table to key on, so they are named by their default-lib type and
-method (`Set.has`, `Array.map`) in a namespace kept separate from the
-module-specifier one.
+A separate table allowlists default-lib methods reached through a local value
+(`set.has(...)`, `arr.map(...)`). These have no import binding for the stub
+table to key on, so they are named by their default-lib type and method
+(`Set.has`, `Array.map`) in a namespace kept separate from the
+module-specifier one. A second, smaller table beside it covers the globals
+called as a bare identifier (`Number(x)`, `parseInt(s)`), which do have a
+textual name; it is consulted only for a call the backend already resolved
+into TypeScript's own default lib, so the name alone never decides.
 
-It is deliberately narrow:
+Which names are in them is decided by measurement — DESIGN.md §4.2's admission
+rule, applied to `node scripts/bench-corpus.ts` over `test/corpus/corpus.json`
+and to `ambit check --coverage` on Ambit's own source — plus the non-mutating
+siblings on each type that measurement surfaced. What is deliberately left out
+matters as much:
 
 - Anything that mutates is excluded — `Array.push`, `Array.sort`, `Map.set`,
   `Set.add`. Those live in a separate table, `src/stubs/mutating-builtins.ts`,
@@ -298,11 +305,32 @@ It is deliberately narrow:
   a field), and a function that is the direct operand of `new`. There is no
   alias analysis: a fresh value handed to something else and mutated
   afterwards still reads as local.
-- A method that can take a callback (`map`, `filter`, `reduce`, …) is trusted
-  only when that callback is written inline. `arr.map(x => ...)` is walked and
-  its effects attributed to the enclosing function; `arr.map(namedFn)` passes
-  a callback Ambit never sees, so the call stays `unknown` even though
-  `Array.map` itself is allowlisted.
+- A name that mutates an *argument* rather than its receiver — `Object.assign`,
+  `Object.freeze`, `Object.defineProperty`, `Reflect.set` — has its own table,
+  and the locality rule is applied to that argument. `Object.assign({}, x)`
+  writes into a value the function just allocated and carries nothing;
+  `Object.assign(arg, x)` is `state_write`. `Reflect.apply` is not there: it
+  runs a function rather than writing into one, and stays `unknown`.
+- A name whose effect depends on what the object is backed by — `Body.json`
+  and `Response.json`, a `ReadableStream`'s reader and controller,
+  `SubtleCrypto` — is left `unknown`. A `Response` body can be a socket.
+- `console.log` and its siblings write to a stream DESIGN.md §4.2's effect
+  table has no name for, so they are `unknown` rather than `pure`.
+- `Date.now()` and `Math.random()` are not in the pure table at all: §4.2 lists
+  the clock and randomness under `env`, so they carry that effect
+  (`src/stubs/builtin-effects.ts`), exactly as `new Date()` already did.
+- A method that can take a callback (`map`, `filter`, `reduce`, …) is settled
+  by the callback, not by the method name. `arr.map(x => ...)` is walked and
+  its effects attributed to the enclosing function. `arr.map(namedFn)` is
+  followed to `namedFn` when that names a declaration the backend extracted,
+  and the call carries what `namedFn` carries. Only a reference that reaches
+  nothing analyzable — a parameter, a package export, a `.bind()` result — is
+  still `unknown` (DESIGN.md §4.2 rule 4). The same holds for a destructive
+  method handed a comparator: `arr.sort(cmp)` answers for the receiver by the
+  locality rule and for `cmp` by the same rule 4.
+- A method that *cannot* call what it is handed (`Array.isArray(fn)`,
+  `Number(fn)`) is not refused over a callable argument. Which allowlisted
+  members can invoke one is enumerated beside the table, not inferred.
 
 ### Call resolution
 

@@ -71,9 +71,11 @@ function double(n: number): number {
   return n * 2;
 }
 
-// Same allowlisted method ("Array.map"), but the callback is passed by
-// reference: collectCalls never walks into `double`'s body, so this call
-// must stay unresolved even though the method name itself is allowlisted.
+// Same allowlisted method ("Array.map"), with the callback passed by
+// reference. `double` is a declaration in this same tree, so the reference is
+// followed and recorded as a callbackTargets edge — DESIGN.md §4.2 rule 4's
+// "inferred from the actual argument at the call site". The opaque case is
+// `callsPureBuiltinByReferenceAnyTyped` below.
 export function callsPureBuiltinByReference(): number[] {
   return [1, 2, 3].map(double);
 }

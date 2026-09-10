@@ -139,3 +139,55 @@ export function callsSpreadLiteral(): number {
 export function callsTypeAliasParam(d: DispatcherAlias): number {
   return d.run();
 }
+
+// -- the same rule on a class instance ------------------------------------
+// DESIGN.md §4.2 rule 7: "Method resolution on class instances rests on the
+// same premise". The annotated and the bare binding must give one answer.
+
+interface Runner {
+  run(): number;
+}
+
+class Engine implements Runner {
+  run(): number {
+    return 1;
+  }
+}
+
+class TunedEngine extends Engine {
+  tune(): number {
+    return 2;
+  }
+}
+
+const bareEngine = new Engine();
+const typedEngine: Runner = new Engine();
+const derivedEngine = new TunedEngine();
+
+export function callsBareInstance(): number {
+  return bareEngine.run();
+}
+
+export function callsInstanceTypedByInterface(): number {
+  return typedEngine.run();
+}
+
+// An inherited method is the one that runs, so the `extends` chain is walked.
+export function callsInheritedInstanceMethod(): number {
+  return derivedEngine.run();
+}
+
+// A parameter is any object satisfying the type.
+export function callsRunnerParam(runner: Runner): number {
+  return runner.run();
+}
+
+// A factory result is not a `new` this walk can see.
+export function callsFactoryResult(): number {
+  const made = makeEngine();
+  return made.run();
+}
+
+function makeEngine(): Runner {
+  return new Engine();
+}

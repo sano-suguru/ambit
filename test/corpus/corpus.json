@@ -1,0 +1,81 @@
+{
+  "$comment": "The fixed analysis-quality corpus. Selection criterion, applied before any rate was known for a target and never re-applied afterwards: real-world, actively maintained, server-side TypeScript whose sources form a self-contained subtree that TypeScript can load without installing the repository's dependencies. Every target is pinned by commit SHA and by the git tree object of the measured subtree, so `node scripts/bench-corpus.ts` fails loudly if a checkout drifts. Dependencies are deliberately NOT installed: a call into a package whose types are absent stays unresolved, which moves the measurement in the conservative direction only.",
+  "tsconfig": {
+    "compilerOptions": {
+      "target": "ES2023",
+      "lib": ["ES2023", "DOM", "DOM.Iterable"],
+      "module": "Preserve",
+      "moduleResolution": "Bundler",
+      "strict": true,
+      "skipLibCheck": true,
+      "noEmit": true,
+      "types": [],
+      "jsx": "preserve",
+      "experimentalDecorators": true,
+      "allowImportingTsExtensions": true,
+      "allowArbitraryExtensions": true,
+      "resolveJsonModule": true
+    },
+    "include": ["**/*.ts", "**/*.tsx"],
+    "exclude": [
+      "**/node_modules/**",
+      "**/*.test.ts",
+      "**/*.test.tsx",
+      "**/*.spec.ts",
+      "**/*.spec.tsx",
+      "**/*.bench.ts",
+      "**/__tests__/**",
+      "**/test/**",
+      "**/tests/**"
+    ]
+  },
+  "targets": [
+    {
+      "name": "hono",
+      "repo": "https://github.com/honojs/hono",
+      "commit": "90e1b948467961718afd3ae34af9dee582b42248",
+      "subdir": "src",
+      "what": "HTTP server framework (routing, middleware, request/response handling)",
+      "tree": "4f054dcfbba443218f4521c48cccb52db17dca12"
+    },
+    {
+      "name": "trpc-server",
+      "repo": "https://github.com/trpc/trpc",
+      "commit": "66d054454a3339dd8421da9dcf0648f92816f704",
+      "subdir": "packages/server/src",
+      "what": "typed RPC server runtime (procedure building, adapters, streaming)",
+      "tree": "24b28930f101f87ebd02c7729178bdcf655191ca"
+    },
+    {
+      "name": "elysia",
+      "repo": "https://github.com/elysiajs/elysia",
+      "commit": "e037eca710e7ad193be09cc6615ab0dbe54af914",
+      "subdir": "src",
+      "what": "HTTP server framework with schema-driven handlers",
+      "tree": "de7ea2e1a5b68dab687a6d0b315cc8c2ade17a4b"
+    },
+    {
+      "name": "got",
+      "repo": "https://github.com/sindresorhus/got",
+      "commit": "687eb7dcc100ea3e548ebba227173b886789e670",
+      "subdir": "source",
+      "what": "Node.js HTTP client (streams, retries, redirects, timeouts)",
+      "tree": "6e8b7702401724a200fd4aef9a21be6040b19e2d"
+    },
+    {
+      "name": "drizzle-orm",
+      "repo": "https://github.com/drizzle-team/drizzle-orm",
+      "commit": "b7862528fd8fc39bc2653a6c18dad7c1f4e68d10",
+      "subdir": "drizzle-orm/src",
+      "what": "SQL ORM / query builder and database driver bindings",
+      "compilerOptions": {
+        "baseUrl": ".",
+        "paths": {
+          "~/*": ["./*"]
+        }
+      },
+      "$comment": "The repository maps its own `~/*` imports onto `drizzle-orm/src/*` in a tsconfig outside the measured subtree. Reproducing that mapping is corpus setup, not analysis: without it every internal import fails to resolve and the target would measure module resolution rather than contract analysis.",
+      "tree": "69c20ec8bb642bbe9dc940682fca34876bd49c96"
+    }
+  ]
+}
