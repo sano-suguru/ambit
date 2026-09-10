@@ -27,7 +27,7 @@ discarded? If yes, it belongs in `docs/DESIGN.md`. If no, it's
 implementation status, and belongs in `README.md` or `test/`, not in
 `docs/DESIGN.md` — see Documents below. Where the spec requires something
 the code does not yet do, fix the code. File it under `docs/DESIGN.md` §12
-(未解決の問題) only when the gap is an open design question rather than
+(Open Questions) only when the gap is an open design question rather than
 missing work — see Scope below. Don't paper over the gap with a note that
 the code is still catching up.
 
@@ -93,7 +93,7 @@ record is one line: an issue, or a §12 bullet. Never an essay.
 `src/core/` and `src/stubs/` MUST NOT import `typescript`. The only file
 allowed to import it is `src/checker/backend/legacy-ts.ts` —
 `test/architecture.test.ts` enforces this boundary. `legacy-ts.ts` is the
-**adopted** product backend: `docs/DESIGN.md` §3.5「既定バックエンド（決定）」
+**adopted** product backend: `docs/DESIGN.md` §3.5 "Default backend (decided)"
 chose it over native TypeScript 7 on compatibility grounds, with the
 measurements in `docs/status.md`. Changing the default now requires an RFC
 (§9), and the boundary above is what makes that reviewable — do not weaken it
@@ -228,7 +228,7 @@ onward. Before that, edit `docs/DESIGN.md` and this file directly.
 
 ## Language
 
-Write in English: `README.md`, `docs/limitations.md`, diagnostic message text,
-`docs/diagnostics/`, this file. Write in Japanese: `docs/DESIGN.md`, RFCs, commit messages,
-issues. Keep `effects`, `capabilities`, `budget`, `boundary`, and `unknown`
-in English in both.
+Write in English: `README.md`, `docs/DESIGN.md`, `docs/limitations.md`,
+diagnostic message text, `docs/diagnostics/`, this file. Write in Japanese:
+`docs/goals/`, RFCs, commit messages, issues. Keep `effects`, `capabilities`,
+`budget`, `boundary`, and `unknown` in English in both.

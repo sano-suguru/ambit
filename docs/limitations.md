@@ -3,7 +3,7 @@
 Implementation status of `ambit check` — what the analysis actually sees
 today, and where it stops. This file records current behavior, not design
 intent; the specification is [DESIGN.md](DESIGN.md), and design-level open
-questions live in its §12 (未解決の問題).
+questions live in its §12 (Open Questions).
 
 Ambit is experimental. Expect this file to shrink as the analysis grows.
 
@@ -14,7 +14,7 @@ parsed. `@effects` and `@capabilities` are checked statically; `@budget` is
 validated but only `timeMs` is enforced, at runtime, through `withAmbit` or an
 adapter's `ambitHandler` / `ambitRoute`.
 
-The `@capabilities` check has two halves (DESIGN.md §4.4's 二重強制):
+The `@capabilities` check has two halves (DESIGN.md §4.4's dual enforcement):
 
 - **caller → callee narrowing**, across undeclared functions;
 - **a literal target** — an `http:<method>:<host>` read from a literal URL, or
@@ -43,7 +43,7 @@ Two cases fall outside that, and in both the JSDoc tag is still required:
   that is not an object literal of literal limits;
 - **a handler from another module** — the registration names no declaration in
   the file, so there is no summary to attach the declaration to. This is
-  DESIGN.md §12's 「契約とハンドラの対応付け」 (3), still open.
+  DESIGN.md §12's "Mapping contracts to handlers" (3), still open.
 
 Either is reported as `AMB-W004`, whose message says that the handler's own
 JSDoc is the only declaration there. Neither is silently treated as unknown:
@@ -238,7 +238,7 @@ It is deliberately narrow:
   `Set.add`. Those live in a separate table, `src/stubs/mutating-builtins.ts`,
   because a name alone does not decide their effect: mutating a value the
   function itself allocated carries none, and mutating anything reachable from
-  outside is `state_write` (DESIGN.md §4.2, 「ローカル変異と `pure`」). What
+  outside is `state_write` (DESIGN.md §4.2, "Local mutation and `pure`"). What
   counts as "allocated here" is deliberately narrow — a `const` bound to an
   array literal, object literal, or `new` expression inside the function — and
   every other receiver, including a `let` binding nothing reassigns, is
@@ -640,13 +640,13 @@ Limits of what the adapters guarantee:
   unless `process.env.NEXT_RUNTIME === "nodejs"`. **No capability is checked on
   an Edge route.** Nothing further about `ambitRoute` there is claimed either —
   no test runs on the Edge runtime, so whether the context is established at
-  all is unverified. DESIGN.md §12「エッジランタイム」 guarantees the Node.js
+  all is unverified. DESIGN.md §12 "Edge runtimes" guarantees the Node.js
   runtime only in Phase 1. Leaving an Edge route unwrapped is the honest form:
   a registration that reads as enforced and is not would be worse than none.
 - **A file that imports `ambit/runtime/<framework>` does not type-check after
-  `npm remove ambit`.** P5 (DESIGN.md §2, 「いつでも撤退できる」) guarantees that
-  the JSDoc contracts survive removal — they are comments on ordinary
-  TypeScript, and nothing reads them at run time. The adapter call is not
+  `npm remove ambit`.** P5 (DESIGN.md §2, "allow backing out at any time")
+  guarantees that the JSDoc contracts survive removal — they are comments on
+  ordinary TypeScript, and nothing reads them at run time. The adapter call is not
   covered by that: `ambitHandler(spec, handler, decode)` is a value imported
   from Ambit, so removing the package leaves an unresolved import and a route
   registration with no replacement. Backing out of an adapted route means

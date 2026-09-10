@@ -1,170 +1,170 @@
-# Ambit 設計仕様
+# Ambit Design Specification
 
 - Status: Draft
-- Revision: 2（Draft） — 解析バックエンドの分離と技術検証の反映
-- 対象読者: Ambit 本体の開発者、コントリビューター、設計レビュアー
-- 変更手続き: RFC（`rfcs/` 配下、9 章）
-- この版の扱い: レビュー用の改訂案。ネイティブバックエンドの採択は 3.5 の検証ゲート通過後に決定する
+- Revision: 2 (Draft) — separating the analysis backend, and folding in the technical evaluation
+- Intended readers: developers of Ambit itself, contributors, design reviewers
+- Change procedure: RFC (under `rfcs/`, chapter 9)
+- How to read this revision: a revision proposal for review. Adoption of the native backend is decided after the verification gates in 3.5 have been passed
 
 ---
 
-## 1. 目的
+## 1. Purpose
 
-AIエージェントが人間のレビュー速度を超えてコードを生成する環境で、**生成コードの契約違反を機械的に検出・遮断する**ための基盤を、TypeScript を置き換えずに提供する。
+In an environment where AI agents generate code faster than humans can review it, provide a foundation for **mechanically detecting and blocking contract violations in generated code**, without replacing TypeScript.
 
-Ambit が提供するのは次の三つ。
+Ambit provides three things.
 
-1. **契約層** — 副作用（effects）、権限（capabilities）、予算（budget）を既存コードに宣言として付与し、静的検査とランタイム検査で強制する。
-2. **構造化診断** — 検査結果を人間向けだけでなく、AIエージェントが消費できる機械可読形式で返す。
-3. **エージェント統合ツールチェーン** — 生成 → 検査 → 修正 → 実行 → デプロイを一つのループにする。
+1. **A contract layer** — attach side effects (effects), permissions (capabilities), and budget (budget) to existing code as declarations, and enforce them with static and runtime checks.
+2. **Structured diagnostics** — return check results not only for humans but in a machine-readable form that AI agents can consume.
+3. **An agent-integrated toolchain** — make generate → check → fix → run → deploy a single loop.
 
-## 2. 設計原則
+## 2. Design Principles
 
-| # | 原則 | 帰結 |
+| # | Principle | Consequence |
 |---|---|---|
-| P1 | AIが既に得意な言語の上に乗る | 新文法を作らない。利用者のコードには TypeScript の構文と型システムを使う |
-| P2 | AIの能力ではなく行動範囲を制約する | 「次のモデルなら間違えない」を前提にした設計を禁止 |
-| P3 | 段階的導入。宣言なしを禁止しない | 未宣言は `unknown`。禁止ではなく可視化 |
-| P4 | 保証できない範囲を隠さない | 外部境界、動的コード、実行時のみ判定可能な制約、未対応バックエンドを明示する |
-| P5 | 既存ディストリビューションに乗り、いつでも撤退できる | npm 配布。独自ランタイム・レジストリを作らない。撤退手順を自動テストする |
+| P1 | Ride on a language AI is already good at | Invent no new syntax. User code uses TypeScript's syntax and type system |
+| P2 | Constrain AI's range of action, not its capability | Forbid designs that assume "the next model will not get this wrong" |
+| P3 | Incremental adoption. Do not forbid the absence of declarations | Undeclared is `unknown`. Make it visible rather than forbidden |
+| P4 | Do not hide what cannot be guaranteed | State external boundaries, dynamic code, constraints decidable only at runtime, and unsupported backends explicitly |
+| P5 | Ride existing distribution, and allow backing out at any time | Ship on npm. Build no bespoke runtime or registry. Test the removal procedure automatically |
 
-原則間で衝突した場合は P1 → P5 の順に優先する。
+When principles conflict, P1 → P5 is the priority order.
 
-P1 は Ambit 本体の全処理を JavaScript で実行する制約ではない。コンパイラのネイティブ実装を利用しても、利用者の文法や契約宣言は変えない。
+P1 is not a constraint that all of Ambit's own processing run in JavaScript. Using a native implementation of the compiler does not change the user's syntax or contract declarations.
 
-検査速度はエージェントの反復回数と開発の待ち時間に影響する。初回検査と変更後の再検査を別々に測り、正しさ・対応範囲・保守負担と合わせて実装を選ぶ。
+Check speed affects how many iterations an agent can run and how long development waits. Measure the initial check and the re-check after a change separately, and choose an implementation together with correctness, coverage, and maintenance burden.
 
-## 3. スコープと実装基盤
+## 3. Scope and Implementation Base
 
-### 3.1 対象と技術スタック
+### 3.1 Target and technology stack
 
-| 項目 | 内容 |
+| Item | Content |
 |---|---|
-| 対象言語 | TypeScript。既存 TS 5.x コードの段階導入を重視し、ネイティブエンジンで受け入れられる構文・設定・型判定の互換性を検証する。5.x 全体の互換性を未検証のまま保証しない |
-| 対象コードの型検査設定 | `strict: true` を推奨、必須ではない。Ambit の契約用 `strict` とは別設定 |
-| Ambit 本体の実装言語 | TypeScript、`strict: true` |
-| 基準ランタイム | Node.js 24 LTS。追加の Node.js バージョンは検証後に対応表へ追加 |
-| 型解析の最優先候補 | Go 製ネイティブ TypeScript を、公式の TypeScript API クライアント経由で利用 |
-| 採択した解析バックエンド | JS 実装の TypeScript Compiler API（`ts.createProgram` + 型チェッカー）。§3.5 で既定として採択。版は JS 実装系列の最新安定版を追う（2026-09 時点 6.0.3。付録 A の予備検証時点では 5.9.3） |
-| Ambit 固有の静的解析 | 関数要約、呼び出し関係、副作用の固定点計算、権限の比較、診断、修正候補を TypeScript で実装する方針 |
-| エディタ統合 | CLI と共通のチェッカーを利用。Language Service Plugin、LSP 接続、薄いエディタ拡張の適合性を検証して選ぶ |
-| ランタイムライブラリ | `@ambit/runtime`。TypeScript で実装し JavaScript として実行。エントリポイントのコンテキスト、`AsyncLocalStorage`、監査フック、任意の `contract()` |
-| 開発・配布 | pnpm（単一パッケージ。`@ambit/*` への分割は npm publish が視野に入ってから）。開発時はビルドせず Node 24 の型ストリッピングで `.ts` を直接実行し、`tsc --noEmit` は型検査専用。テストランナーは Vitest（node:test から変更）、リンタ・フォーマッタは Biome。適合テスト、GitHub Actions、npm |
-| ドメイン | クラウドバックエンド: HTTP API、ジョブ・ワークフロー、LLM エージェント、データ処理 |
+| Target language | TypeScript. Emphasis on incremental adoption in existing TS 5.x code; verify compatibility of accepted syntax, settings, and type decisions on the native engine. Do not guarantee compatibility across all of 5.x while it is unverified |
+| Type-check settings of target code | `strict: true` recommended, not required. Separate from Ambit's own `strict` for contracts |
+| Implementation language of Ambit itself | TypeScript, `strict: true` |
+| Baseline runtime | Node.js 24 LTS. Additional Node.js versions are added to the support table after verification |
+| First candidate for type analysis | The Go-implemented native TypeScript, used through the official TypeScript API client |
+| Adopted analysis backend | The JS-implemented TypeScript Compiler API (`ts.createProgram` + type checker). Adopted as the default in §3.5. The version tracks the latest stable release of the JS-implementation line (6.0.3 as of 2026-09; 5.9.3 at the time of the preliminary evaluation in appendix A) |
+| Ambit-specific static analysis | Function summaries, call relationships, fixed-point computation of side effects, capability comparison, diagnostics, and fix candidates are to be implemented in TypeScript |
+| Editor integration | Uses the same checker as the CLI. Choose among a Language Service Plugin, an LSP connection, or a thin editor extension after verifying fit |
+| Runtime library | `@ambit/runtime`. Implemented in TypeScript and run as JavaScript. Entry-point context, `AsyncLocalStorage`, audit hooks, optional `contract()` |
+| Development and distribution | pnpm (single package; splitting into `@ambit/*` waits until npm publish is in view). During development there is no build: `.ts` runs directly under Node 24's type stripping, and `tsc --noEmit` is for type checking only. The test runner is Vitest (changed from node:test); the linter and formatter is Biome. Conformance tests, GitHub Actions, npm |
+| Domain | Cloud backends: HTTP APIs, jobs and workflows, LLM agents, data processing |
 
-Bun / Deno / エッジランタイムは Phase 1 の保証対象外。動作確認を行った場合も、Node.js と同じ保証を暗黙に与えない。
+Bun / Deno / edge runtimes are outside Phase 1's guarantee. Even where they have been observed to work, they are not implicitly given the same guarantee as Node.js.
 
-**対象言語の互換性、Ambit のビルド用コンパイラ、解析エンジンのバージョンは別々に管理する。** ビルド用 tsc の選択だけでは、利用者コードの解析方式は決まらない。
+**The target language's compatibility, Ambit's build compiler, and the analysis engine's version are managed separately.** Choosing the build-time tsc does not by itself decide how user code is analyzed.
 
-### 3.2 なぜ TypeScript か
+### 3.2 Why TypeScript
 
-エフェクト契約の静的検査には、型・シンボル・呼び出しシグネチャが有用である。TypeScript のコンパイラからこれらの情報を取得し、Ambit はその上で契約を解析する。
+Types, symbols, and call signatures are useful for statically checking effect contracts. Ambit obtains this information from the TypeScript compiler and analyzes contracts on top of it.
 
-型が付いていることや `getResolvedSignature` が成功することは、実行時の呼び出し先の実装が一意に確定することを意味しない。オーバーロードでは選択された宣言に本体がない場合があり、コールバックでは関数型の宣言だけを取得する場合がある。
+That a value has a type, or that `getResolvedSignature` succeeds, does not mean the implementation reached at runtime is uniquely determined. With overloads the selected declaration may have no body; with callbacks only the function-type declaration may be obtained.
 
-Ambit は型解析に加えて、可能な呼び出し先、実引数とコールバックの対応、ライブラリ要約、解析不能な経路を扱う。解決できない場合は `unknown` を残し、推測を保証として扱わない。
+Beyond type analysis, Ambit handles possible callees, the correspondence between actual arguments and callbacks, library summaries, and paths that cannot be analyzed. Where it cannot resolve, it leaves `unknown` and does not treat a guess as a guarantee.
 
-### 3.3 非目標
+### 3.3 Non-goals
 
-- TypeScript の文法拡張、独自トランスパイル、独自ランタイム、独自ビルドシステム
-- Python など他言語への対応。Phase 1 出口条件（10 章）を満たすまで着手しない。ただし契約モデルと診断形式は言語非依存に保つ
-- 実行時間・メモリ・コストの**静的**保証
-- ブラウザ・フロントエンドコード
-- 完全性（全ての違反を静的に検出すること）。目標は「検出できる違反は止め、検出できない範囲を明示する」こと
-- TypeScript の型システムの再実装
-- 根拠のない全面 Rust 化・Go 化、または全面 JavaScript 実行への固定
-- 比較基準として用意した二つの型解析バックエンドの恒久的な製品サポートを、検証前に約束すること
+- Extending TypeScript's syntax, a bespoke transpiler, a bespoke runtime, a bespoke build system
+- Support for other languages such as Python. Not started until the Phase 1 exit criteria (chapter 10) are met. The contract model and diagnostic format are nonetheless kept language-independent
+- **Static** guarantees about execution time, memory, or cost
+- Browser and frontend code
+- Completeness (detecting every violation statically). The goal is "stop the violations that can be detected, and state explicitly what cannot be"
+- Reimplementing TypeScript's type system
+- An unfounded wholesale move to Rust or Go, or a lock-in to running everything in JavaScript
+- Promising permanent product support, before the evaluation, for the two type-analysis backends prepared as a basis for comparison
 
-### 3.4 解析バックエンドの分離
+### 3.4 Separating the analysis backend
 
-処理を次の責任に分ける。
+Processing is split into the following responsibilities.
 
-| 層 | 責任 | 初期方針 |
+| Layer | Responsibility | Initial policy |
 |---|---|---|
-| コンパイラ接続 | プロジェクトの読み込み、AST、位置、型、シンボル、呼び出しシグネチャ、コンパイラ診断の取得 | ネイティブ公式 API を最優先で検証。旧 API を比較基準にする |
-| Ambit の解析表現 | 契約、関数要約、呼び出し先候補、未解決理由、根拠位置の表現 | コンパイラ固有オブジェクトを外部診断や永続形式に露出させない |
-| 契約解析 | effects の伝播、capabilities の検査、coverage、影響範囲、修正候補 | CLI とエディタで共用 |
-| 提示・制御 | CLI、エディタ、エージェント、CI 用出力 | 共通の診断を各用途へ表示・転送 |
-| ランタイム強制 | 権限照合、予算計測、対応操作の遮断 | コンパイラから独立。解析エンジンを本番依存にしない |
+| Compiler connection | Loading the project, and obtaining ASTs, positions, types, symbols, call signatures, and compiler diagnostics | Evaluate the official native API first. Use the legacy API as the basis for comparison |
+| Ambit's analysis representation | Representing contracts, function summaries, callee candidates, unresolved reasons, and evidence positions | Do not expose compiler-specific objects to external diagnostics or persisted formats |
+| Contract analysis | Effect propagation, capability checks, coverage, impact range, fix candidates | Shared by the CLI and the editor |
+| Presentation and control | Output for the CLI, editors, agents, and CI | Display or forward common diagnostics to each use |
+| Runtime enforcement | Capability matching, budget measurement, blocking of supported operations | Independent of the compiler. Do not make the analysis engine a production dependency |
 
-ネイティブ API の配布クライアントから Go 製エンジンへ接続する構成では、TypeScript で Ambit を実装しても、型解析は Go 側で実行される。
+In a configuration that connects to the Go engine through the native API's distributed client, type analysis runs on the Go side even though Ambit is implemented in TypeScript.
 
-M0.5 予備検証で確認した配布版 7.0.2 は `typescript/unstable/sync`、`typescript/unstable/async` 等を公開している。これを安定 API とみなさず、以下を必須にする。
+The distributed version 7.0.2 examined in the M0.5 preliminary evaluation exposes `typescript/unstable/sync`, `typescript/unstable/async`, and others. Do not treat these as a stable API; the following are required.
 
-- クライアントとエンジンを同じ配布バージョンで固定する。更新時に適合テストと互換性試験を実行する。
-- ネイティブ API の利用を接続層へ集約し、契約モデルや診断形式を API 変更から隔離する。
-- 単件 API 呼び出しの往復、AST 転送、型情報取得の費用を計測する。可能な箇所は一括照会・キャッシュを利用する。
-- 起動不能、未対応設定、解析失敗を「違反なし」に変換しない。解析できなかった範囲と失敗を明示し、CI が失敗を判別できる終了コードを返す。
-- 検証用バックエンド間を無通知で切り替えない。診断・coverage・性能記録に解析エンジンとそのバージョンを識別できる情報を持たせる。出力スキーマは 5 章でバージョン管理する。
+- Pin the client and the engine to the same distributed version. Run the conformance tests and the compatibility trials when updating.
+- Concentrate use of the native API in the connection layer, and insulate the contract model and diagnostic format from API changes.
+- Measure the cost of per-call API round trips, AST transfer, and type-information retrieval. Use batched queries and caching where possible.
+- Do not convert a failure to start, an unsupported setting, or an analysis failure into "no violations". State explicitly what could not be analyzed and what failed, and return an exit code by which CI can tell a failure apart.
+- Do not switch between the evaluation backends without notice. Give diagnostics, coverage, and performance records information that identifies the analysis engine and its version. The output schema is versioned in chapter 5.
 
-Go 内部コンパイラの直接組み込みは、公式 API に必要な情報がない、または通信・転送が実測上の支配要因になる場合に比較する。内部 API、shim、fork の追従費用を評価する。
+Embedding the Go internal compiler directly is compared only if the official API lacks required information, or if communication and transfer become the dominant factor in measurements. Evaluate the cost of tracking internal APIs, shims, and forks.
 
-Rust を追加する場合も、改善対象を明確にする。Rust 製パーサーの採用だけで TypeScript の型解析を置き換えられるとは考えない。Go・Rust・TypeScript の三言語構成を初期の必須条件にしない。
+If Rust is added, make the target of the improvement explicit as well. Do not assume that adopting a Rust parser alone can replace TypeScript's type analysis. Do not make a three-language Go / Rust / TypeScript construction an initial requirement.
 
-### 3.5 バックエンド採択の検証ゲート
+### 3.5 Verification gates for backend adoption
 
-M0.5 で次を検証し、結果を記録してから製品の既定バックエンドを決める。記録先は §9 が決める: 初回公開前は本ファイルに直接、公開後は RFC に。M0.5 は公開前に実施したため、下の「既定バックエンド（決定）」が記録そのものである。
+Verify the following in M0.5 and record the results before deciding the product's default backend. §9 decides where the record goes: before the first public release, directly into this file; after it, into an RFC. M0.5 was carried out before publication, so "Default backend (decided)" below is that record.
 
-1. **API 適合性**: 別名 import / re-export、generic、overload、callback、union、`any`、再帰、JSDoc、Unicode の位置を含む適合テストを実行する。型情報があることと実装が確定することを区別する。
-2. **既存コード互換性**: TS 5.x の代表コードと tsconfig を比較する。未対応設定・型診断差分を記録し、必要な移行を隠さない。
-3. **更新の正しさ**: 関数本体、契約コメント、export、設定、スタブを個別に変更し、依存する契約・診断が更新されることを確認する。
-4. **性能**: 同じコード、契約検査、診断結果、対応範囲で初回・変更後の時間、親子プロセスを含むメモリ、通信量を測る。構文解析のみと型解析を含む検査を速度比較しない。
-5. **配布と保守**: 対象 OS / CPU、起動、npm 配布、API 更新への追従負担を検証する。
+1. **API conformance**: run a conformance test covering aliased imports / re-exports, generics, overloads, callbacks, unions, `any`, recursion, JSDoc, and Unicode positions. Distinguish having type information from having the implementation determined.
+2. **Compatibility with existing code**: compare representative TS 5.x code and tsconfigs. Record unsupported settings and type-diagnostic differences, and do not hide the migration they require.
+3. **Correctness of updates**: change function bodies, contract comments, exports, settings, and stubs individually, and confirm that the dependent contracts and diagnostics are updated.
+4. **Performance**: with the same code, contract checks, diagnostic results, and coverage, measure initial and post-change time, memory including child processes, and communication volume. Do not compare parse-only speed against a check that includes type analysis.
+5. **Distribution and maintenance**: verify target OS / CPU, startup, npm distribution, and the burden of tracking API updates.
 
-パイロットに必要な待ち時間・メモリの許容値を比較前に設定する。未実行のバックエンドに性能値を割り当てない。ゲートを通過できなければ、得られた原因に応じて旧 API 継続・Go 直接組み込み・Rust の追加を比較し、既定を未決定のまま明記する。
+Set the latency and memory allowances the pilot requires before comparing. Do not assign performance numbers to a backend that has not been run. If a gate cannot be passed, compare continuing with the legacy API, embedding Go directly, and adding Rust according to the cause found, and state explicitly that the default remains undecided.
 
-#### 許容値（比較の前に設定する）
+#### Allowances (set before the comparison)
 
-数値は比較を始める前に決める。測ってから通る値を選べば、ゲートは何も落とさない。基準は 7 章のエージェントループであり、1 反復につき `ambit check` が 1 回走る。
+The numbers are decided before the comparison begins. If you measure first and then pick a value that passes, the gate drops nothing. The basis is the agent loop of chapter 7, in which one iteration runs `ambit check` once.
 
-| 項目 | 許容値 | 根拠 |
+| Item | Allowance | Rationale |
 |---|---|---|
-| 初回検査の待ち時間（30 ファイル規模） | 3 秒以内 | 生成 → 検査 → 修正の 1 反復で、検査が支配的な待ち時間にならないこと |
-| 初回検査の待ち時間（300 ファイル規模） | 10 秒以内 | 同上。ファイル数に対して線形を超えて悪化しないこと |
-| 1 ファイル変更後のバックエンド再照会 | 500 ミリ秒以内 | 6.2 の常駐経路が成立する前提。これを超えると常駐化しても待ち時間が残る |
-| メモリ（親子プロセス合計の最大 RSS、300 ファイル規模） | 1 GiB 以内 | CI の標準的な実行環境と、エディタと同居できること |
-| 通信量（プロセス分離構成の 1 回の検査） | 待ち時間の支配要因にならないこと。転送時間が全体の 50% を超えないこと | 3.4 の「通信・転送が実測上の支配要因になる場合」を判定するための線 |
+| Initial-check latency (30-file scale) | within 3 seconds | In one generate → check → fix iteration, the check must not be the dominant wait |
+| Initial-check latency (300-file scale) | within 10 seconds | Same. Must not degrade worse than linearly in file count |
+| Backend re-query after a one-file change | within 500 milliseconds | The premise on which 6.2's resident path holds. Beyond this, latency remains even after going resident |
+| Memory (peak RSS summed over parent and child processes, 300-file scale) | within 1 GiB | A standard CI execution environment, and the ability to coexist with an editor |
+| Communication volume (one check in a process-separated configuration) | Must not be the dominant factor in latency. Transfer time must not exceed 50% of the total | The line for deciding 3.4's "communication and transfer become the dominant factor in measurements" |
 
-適合性・互換性・更新の正しさ（ゲート 1〜3）に許容値はない。これらは通るか通らないかであり、速度と交換しない。
+Conformance, compatibility, and correctness of updates (gates 1–3) have no allowance. They either pass or they do not, and are not traded against speed.
 
-#### 既定バックエンド（決定: 2026-09-09）
+#### Default backend (decided: 2026-09-09)
 
-**初期リリースの既定は、JS 実装の TypeScript Compiler API（`typescript` 6.0.3、`src/checker/backend/legacy-ts.ts`）とする。** ネイティブ TypeScript（Go 実装、配布版 7.0.2）は採択しない。実測は `docs/status.md` の M0.5 節にある。ここに書くのは決定と、その根拠になった事実だけである。
+**The default for the initial release is the JS-implemented TypeScript Compiler API (`typescript` 6.0.3, `src/checker/backend/legacy-ts.ts`).** Native TypeScript (the Go implementation, distributed version 7.0.2) is not adopted. The measurements are in the M0.5 section of `docs/status.md`. What is written here is only the decision and the facts it rests on.
 
-初回公開前のため RFC は起こさず、§9 の手順どおり本ファイルを直接編集した。既定を変更する際は §9 に従い RFC を要する。
+Because this is before the first public release, no RFC was raised; this file was edited directly, per the procedure in §9. Changing the default from here on follows §9 and requires an RFC.
 
-決定の理由を、優先度の高い順に置く。
+The reasons for the decision, in order of weight.
 
-1. **採択の費用が、得られるものに見合わない。** ネイティブ API の入口はすべて `unstable/*` という名前で公開されている。採択とは、その上に 2 つ目のバックエンド実装（現行は 2,100 行）を書き、`getFullyQualifiedName` に相当する欠けた基本操作を自前で再構成し、さらにスナップショット無効化の責任を引き受けることである。
-2. **ゲート 3 に、費用ではなく正しさの差がある。** ネイティブは `fileChanges` を渡さなければ**古い答えを黙って返す**（実測: 契約コメントを書き換えても変更前の状態を答え、エラーも警告も出ない）。JS 実装は毎回プログラムを作り直すため、古くなりようがない。§3.4 の「解析失敗を違反なしに変換しない」に照らすと、違反が黙って消える経路を新たに引き受けることになる。
-3. **速度は、どのゲートも買っていない。** 上の許容値表は比較の前に決めたものであり、JS 実装はその全てを通る（300 ファイルで中央値 458 ms、許容値 10 秒。ピーク RSS 348 MiB、許容値 1 GiB）。ネイティブは 3〜4 倍速いが、速いことで通る項目が 1 つもない以上、それは決定の理由にならない。
+1. **The cost of adoption does not match what it buys.** Every entry point of the native API is published under a name containing `unstable/*`. Adoption means writing a second backend implementation on top of it (2,100 lines at present), reconstructing missing primitives such as the equivalent of `getFullyQualifiedName` ourselves, and additionally taking on responsibility for snapshot invalidation.
+2. **Gate 3 shows a difference in correctness, not cost.** Unless `fileChanges` is passed, the native implementation **silently returns a stale answer** (measured: after rewriting a contract comment it answers with the pre-change state, with no error and no warning). The JS implementation rebuilds the program every time, so it has no way of going stale. Against §3.4's "do not convert an analysis failure into no violations", adopting it would mean newly taking on a path by which a violation silently disappears.
+3. **Speed buys none of the gates.** The allowance table above was decided before the comparison, and the JS implementation passes all of it (median 458 ms on 300 files against an allowance of 10 seconds; peak RSS 348 MiB against an allowance of 1 GiB). The native implementation is 3–4× faster, but as long as being faster passes not a single item, that is not a reason for the decision.
 
-**ゲート 2 は、当初この決定の第一の理由に置いていた。取り下げる。** 配布版 7.0.2 が `node_modules/@types/*` を自動で取り込まないのは実測どおりで、Ambit 自身のソースが 5.9.3 で 0 件・7.0.2 で 198 件の型エラーになること、`src/` の呼び出し 1,213 件のうち解決できたのが 1,212 対 1,143（差 69 のうち 58 が `external`）であることも実測である。しかし**これは Go 移植の性質ではなく TypeScript 6 以降の変更である**: JS 実装の 6.0.3 が 7.0.2 と同一に振る舞うことを後から確認した。したがってネイティブ固有の欠点として数えることはできない。`"types": ["node"]` を tsconfig に明示すれば解消し、6.0.3 を採用した本リポジトリは実際にそうしている。
+**Gate 2 was initially placed as the first reason for this decision. It is withdrawn.** That the distributed version 7.0.2 does not pick up `node_modules/@types/*` automatically is exactly as measured, as is the fact that Ambit's own source produces 0 type errors on 5.9.3 and 198 on 7.0.2, and that of the 1,213 calls in `src/`, 1,212 versus 1,143 resolved (58 of the 69 difference being `external`). But **this is not a property of the Go port; it is a change in TypeScript 6 and later**: the JS-implemented 6.0.3 was afterwards confirmed to behave identically to 7.0.2. It therefore cannot be counted as a native-specific drawback. Writing `"types": ["node"]` explicitly in tsconfig resolves it, and this repository, having adopted 6.0.3, does exactly that.
 
-ゲート 1（API 適合性）はネイティブの脱落理由ではない。必要な基本操作は揃っており、JSDoc タグの位置は AST ノードとして取得でき、位置は UTF-16 コード単位で一致した。欠けているのは `getFullyQualifiedName` のみで、シンボルの親鎖から再構成できる見込みがある（1 形状で確認）。これは費用であって障壁ではない、という記録である。
+Gate 1 (API conformance) is not why the native implementation was dropped. The required primitives are present, JSDoc tag positions can be obtained as AST nodes, and positions matched in UTF-16 code units. The only thing missing is `getFullyQualifiedName`, which looks reconstructible from the symbol's parent chain (confirmed for one shape). This is a record that it is a cost, not a barrier.
 
-**この決定を見直す条件**を先に書く。
+**The conditions for revisiting this decision** are written down in advance.
 
-- ネイティブ API から `unstable` の名前が外れ、2 つ目のバックエンドを書く費用が「不安定な API に賭ける費用」ではなくなる。
-- §6.2 の常駐検査経路が実装される。ネイティブの本当の利点は初回検査ではなく再照会にある（1 ファイル変更後、JS 実装 214–272 ms に対しネイティブ 1.0–1.9 ms）。常駐経路が存在しない現在、その差は製品のどこにも現れない。実装後にゲート 3 と 4 を再実行する。
-- JS 実装系列に安定版が出なくなる。この決定は「JS 実装系列の最新安定版を追う」という版の規則（§3.1、`AGENTS.md`）に依存しており、追う先が無くなればゲート 5 の保守費用の前提が崩れる。
+- The `unstable` name comes off the native API, so that the cost of writing a second backend stops being the cost of betting on an unstable API.
+- The resident check path of §6.2 is implemented. The native implementation's real advantage is not the initial check but re-querying (after a one-file change, 1.0–1.9 ms native against 214–272 ms for the JS implementation). With no resident path in existence, that difference shows up nowhere in the product. Re-run gates 3 and 4 once it is implemented.
+- The JS-implementation line stops producing stable releases. This decision depends on the versioning rule of "track the latest stable release of the JS-implementation line" (§3.1, `AGENTS.md`), and if there is nothing left to track, the premise behind gate 5's maintenance cost collapses.
 
-JS 実装を既定にする代償も記録する。`typescript` 6.0.3 は npm の `latest` ではない（2026-09 時点の `latest` は 7.0.2）。tsconfig の受理範囲は版ごとに食い違い、6.0.3 はちょうど橋渡しの位置にある（実測、同一ファイルを 3 つのコンパイラに与えた結果）。
+The price of making the JS implementation the default is recorded too. `typescript` 6.0.3 is not npm's `latest` (as of 2026-09, `latest` is 7.0.2). Which tsconfig options are accepted differs by version, and 6.0.3 sits exactly at the crossing point (measured, by giving the same file to three compilers).
 
 | tsconfig | 5.9.3 | 6.0.3 | 7.0.2 |
 |---|---|---|---|
-| `baseUrl` / `downlevelIteration` | 受理 | TS5101「非推奨、TS 7 で機能しなくなる」 | TS5102「removed」 |
-| `importsNotUsedAsValues` | 受理 | 受理 | TS5023「unknown」 |
-| `stableTypeOrdering` | TS5023「unknown」 | 受理 | 受理 |
-| `deduplicatePackages` | TS5023「unknown」 | TS5023「unknown」 | 受理 |
+| `baseUrl` / `downlevelIteration` | accepted | TS5101 "deprecated, will stop working in TS 7" | TS5102 "removed" |
+| `importsNotUsedAsValues` | accepted | accepted | TS5023 "unknown" |
+| `stableTypeOrdering` | TS5023 "unknown" | accepted | accepted |
+| `deduplicatePackages` | TS5023 "unknown" | TS5023 "unknown" | accepted |
 
-6.0.3 は 7.0.2 が削除した設定を「非推奨」として拒み、7.0.2 が新設した設定の一部を受理する。5.9.3 に留まった場合より TS 7 側の tsconfig に近いが、一致はしない。この非対称は §12 の「TypeScript 版間の互換性」に残す。
+6.0.3 rejects, as "deprecated", settings that 7.0.2 removed, and accepts some of the settings 7.0.2 introduced. It is closer to the TS 7 side of tsconfig than staying on 5.9.3 would have been, but it is not the same. This asymmetry is left in §12's "TypeScript version compatibility".
 
-## 4. 契約モデル
+## 4. Contract Model
 
-### 4.1 宣言の形式
+### 4.1 Form of declarations
 
-契約は既定では **JSDoc タグ**で宣言する。通常の宣言では、関数本体やシグネチャを変更しない。出所は JSDoc だけではなく、`ambit.config.ts`（下記「コード外宣言」）と `withAmbit` / `ambitHandler` / `ambitRoute` の `spec`（下記「宣言の出所」、§4.4）がある。3 つは同じ 5 つの契約を同じ意味で宣言する。
+Contracts are declared by default with **JSDoc tags**. An ordinary declaration changes neither the function body nor its signature. Declarations come not only from JSDoc but also from `ambit.config.ts` ("Out-of-code declarations" below) and from the `spec` of `withAmbit` / `ambitHandler` / `ambitRoute` ("Where declarations live" below, §4.4). All three declare the same five contracts with the same meaning.
 
 ```ts
 /** @effects pure */
@@ -184,39 +184,39 @@ export async function getUser(id: UserId): Promise<User | null> { /* ... */ }
 export async function GET(req: Request): Promise<Response> { /* ... */ }
 ```
 
-| タグ | 付与先 | 静的検査 | ランタイム強制 |
+| Tag | Attached to | Static check | Runtime enforcement |
 |---|---|---|---|
-| `@effects` | 任意の関数・メソッド | 4.2 の伝播規則で検査 | なし（静的のみ） |
-| `@capabilities` | 任意の関数・メソッド | 縮小則で検査 | エントリポイントに付与したものを強制（4.4） |
-| `@budget` | 主にエントリポイント | ループ内 `llm` 等のパターン警告 | エントリポイントに付与したものを強制（4.5） |
-| `@entrypoint` | HTTP ハンドラ、ジョブ、キューコンシューマ | 未宣言のエントリポイントを警告 | ここでコンテキストを確立する |
+| `@effects` | Any function or method | Checked by the propagation rules of 4.2 | None (static only) |
+| `@capabilities` | Any function or method | Checked by the narrowing rule | What is attached to an entry point is enforced (4.4) |
+| `@budget` | Mainly entry points | Pattern warnings such as `llm` inside a loop | What is attached to an entry point is enforced (4.5) |
+| `@entrypoint` | HTTP handlers, jobs, queue consumers | Warns about undeclared entry points | This is where the context is established |
 
-**粒度の割り切り**
+**The granularity trade-off**
 
-- 静的検査は**関数単位**で細かく行う。
-- ランタイム強制は**エントリポイント単位**で粗く行う。関数ごとにラップせず、リクエストやジョブの権限を照合する。
-- 関数単位のランタイム計測だけは開始と終了を捕まえる必要があるため、オプトインの `contract()` ラッパーを用意する。既定では使わない。
+- Static checking is done finely, at **function granularity**.
+- Runtime enforcement is done coarsely, at **entry-point granularity**. Rather than wrapping every function, it matches the capabilities of a request or job.
+- Only per-function runtime measurement needs to catch a start and an end, so an opt-in `contract()` wrapper is provided. It is not used by default.
 
-**宣言の出所（決定: 2026-09-10）**
+**Where declarations live (decided: 2026-09-10)**
 
-どの契約をどこに置くかは、**実行時に届く必要があるか**の 1 点で決まる。
+Which contract goes where is decided by exactly one question: **does it have to reach runtime?**
 
-| 契約 | ランタイムが見るか | 置き場所 |
+| Contract | Does the runtime read it | Where it lives |
 |---|---|---|
-| `@effects` | 見ない（静的伝播専用） | JSDoc |
-| `@entrypoint` / `@boundary` | 見ない | JSDoc |
-| `capabilities` | フックが照合する | ランタイム強制を入れたなら `spec` |
-| `budget` | `timeMs` を実測して遮断する | 同上 |
+| `@effects` | No (static propagation only) | JSDoc |
+| `@entrypoint` / `@boundary` | No | JSDoc |
+| `capabilities` | The hooks match against it | `spec`, if runtime enforcement is in place |
+| `budget` | `timeMs` is measured and blocks | Same |
 
-JSDoc はビルドで消える。実行時に必ず届かねばならないデータをそこに置くと、届け方の発明が毎回要る（§4.4 が明示登録を選んだ理由）。逆に `effects` は実行時に不要なので JSDoc が正しい置き場所である。この割り方は上の「粒度の割り切り」（静的＝関数単位、ランタイム＝エントリポイント単位）とそのまま一致する。
+JSDoc disappears at build time. Putting data that must reach runtime there requires inventing a delivery mechanism every time (the reason §4.4 chose explicit registration). Conversely `effects` is not needed at runtime, so JSDoc is the right place for it. This split lines up exactly with "the granularity trade-off" above (static = per function, runtime = per entry point).
 
-ランタイム強制を入れないエントリポイントには `spec` が無いので、`@capabilities` / `@budget` は JSDoc（または config）に書く。ここは変わらない。「JSDoc タグが任意になる」のは `spec` が宣言を供給できる場合だけであって、「契約が無くてよい」ではない。
+An entry point with no runtime enforcement has no `spec`, so its `@capabilities` / `@budget` are written in JSDoc (or config). That does not change. "The JSDoc tag becomes optional" holds only where a `spec` can supply the declaration; it does not mean "there need be no contract".
 
-合流はタグ単位で、優先順は JSDoc > config > `spec` とする。`spec` を最後に置く理由は §4.4「二重宣言を消す」に書く。
+Merging is per tag, in the priority order JSDoc > config > `spec`. The reason `spec` comes last is given in §4.4's "Removing the double declaration".
 
-**コード外宣言（決定: 2026-09-09）**
+**Out-of-code declarations (decided: 2026-09-09)**
 
-コードに触れられない場合（サードパーティ、生成コード、導入初期）は `ambit.config.ts` でシンボルを指定して同じ契約を宣言できる。
+Where the code cannot be touched (third-party code, generated code, early adoption), the same contracts can be declared in `ambit.config.ts` by naming the symbol.
 
 ```ts
 import { defineConfig } from "ambit/config";
@@ -232,468 +232,425 @@ export default defineConfig({
 });
 ```
 
-宣言できる契約は JSDoc と同じ 5 つ（`effects` / `capabilities` / `budget` / `entrypoint` / `boundary`）で、意味も同じである。config だから緩い、という扱いはしない。`strict` は `file` 部分と同じ規則のグロブの配列で、一致したファイルの診断にだけ `--strict` と同じ昇格を適用する（§4.3）。
+The contracts that can be declared are the same five as in JSDoc (`effects` / `capabilities` / `budget` / `entrypoint` / `boundary`), with the same meaning. Being in config does not make them weaker. `strict` is an array of globs following the same rules as the `file` part, and applies the same promotion as `--strict` only to the diagnostics of matching files (§4.3).
 
-同一シンボルに JSDoc と config の両方があれば JSDoc を優先し、差異を警告する。差異はタグ単位で比較する（`effects` は JSDoc、`capabilities` は config、という組み合わせは差異ではなく補完である）。
+If a symbol has both JSDoc and config, JSDoc wins and the difference is warned about. Differences are compared per tag (`effects` in JSDoc and `capabilities` in config is not a difference but a complement).
 
-**オーバーロードと本体のない宣言（決定: 2026-09-09）**
+**Overloads and bodyless declarations (decided: 2026-09-09)**
 
-オーバーロード集合は **1 つの宣言先**であり、それは実装である。シグネチャは型であって、走るコードではない。したがって:
+An overload set is **one declaration site**, and that site is the implementation. A signature is a type, not code that runs. Therefore:
 
-- シグネチャ（`function f(x: string): string;`）、`abstract` メンバ、`.ts` 中の `declare function` は、いずれも契約の宣言先にならない。`--coverage` では `bodyless-declaration` として数える。
-- そこに書いた契約タグは採用せず、AMB-E003 として報告する。「実装に書け」が実行可能な助言であり、黙って落とすのは §4.1 が禁じている「何もしない宣言」そのものである。
-- 呼び出しは実装に解決する。実装が存在しない集合（プロジェクト内に本体がない `declare`）への呼び出しは `unknown`（`overload-without-body`）とする。本体のない宣言に解決すると、観測エフェクトが空集合になり、実装が何をしていても呼び出し元が `pure` に見える。これは §3.4 が禁じる「解析失敗を違反なしに変換する」に当たる。
+- A signature (`function f(x: string): string;`), an `abstract` member, and a `declare function` inside a `.ts` file are none of them declaration sites for a contract. `--coverage` counts them as `bodyless-declaration`.
+- A contract tag written there is not adopted, and is reported as AMB-E003. "Write it on the implementation" is actionable advice, whereas dropping it silently is exactly the "declaration that does nothing" that §4.1 forbids.
+- Calls resolve to the implementation. A call into a set with no implementation (a `declare` with no body in the project) is `unknown` (`overload-without-body`). Resolving to a bodyless declaration would make the observed effects the empty set, and the caller would look `pure` whatever the implementation does. That falls under the "converting an analysis failure into no violations" that §3.4 forbids.
 
-この規則は表記の問題ではなく、停止性の要件でもある。1 つの宣言経路に複数の関数が対応すると、§4.2 規則 7 の固定点反復が収束しない（各反復で状態が上書きされ合う）。宣言経路とバックエンドが返す関数は 1 対 1 でなければならない。
+This rule is not a matter of notation but also a termination requirement. If more than one function corresponds to a single declaration path, the fixed-point iteration of §4.2 rule 7 does not converge (each iteration overwrites the other's state). The declaration path and the function the backend returns must be one to one.
 
-**(a) `symbol` 部分の表記と、名指しできる宣言先**
+**(a) Notation of the `symbol` part, and which declaration sites can be named**
 
-`symbol` は checker 内部の宣言経路そのもの（`"."` 連結。`Class.method`、`obj.member`、`Class.constructor`）とし、config はそれに次の 2 種を足した集合を名指しできる。
+`symbol` is the checker's internal declaration path itself (joined with `"."`: `Class.method`, `obj.member`, `Class.constructor`), and config can name that set plus the following two kinds.
 
-- アクセサ: `Class.get total` / `Class.set total`
-- 無名 default export: `default`
+- Accessors: `Class.get total` / `Class.set total`
+- Anonymous default exports: `default`
 
-この 2 種は宣言経路を持つが、**JSDoc を書いても採用されない**（AMB-E003 のまま）。computed / 文字列 / 数値キーのメンバは config でも名指しできない。
+These two kinds have a declaration path, but **writing JSDoc on them is still not adopted** (still AMB-E003). Members with computed, string, or numeric keys cannot be named even in config.
 
-検討した選択肢は 3 つ:
+Three options were considered:
 
-1. config の名前空間 = JSDoc の名前空間。AMB-E003 になる宣言先は config でも名指しできない
-2. 宣言経路を与えた宣言先は JSDoc も採用する。AMB-E003 は「安定経路を持たないノード」だけに縮小する
-3. **config の名前空間 ⊃ JSDoc の名前空間**（採用）
+1. config's namespace = JSDoc's namespace. Declaration sites that produce AMB-E003 cannot be named in config either
+2. Any declaration site with a declaration path also has its JSDoc adopted. AMB-E003 shrinks to "nodes with no stable path" only
+3. **config's namespace ⊃ JSDoc's namespace** (adopted)
 
-採用の理由は、経路の安定性と、コメントの帰属先の一意性が別の問題だからである。`get x` と `set x` は同名で 2 つの宣言を持ち、無名 default export は名前を持たない。config の鍵は「どの宣言か」を書き手が明示する場所なので `get x` のような修飾を鍵の中に持ち込めるが、JSDoc は書かれた位置から帰属先を推定する経路であり、同じ修飾を持ち込む場所がない。§12「JSDoc の限界・シンボル識別」が未決としてきたのは後者の表記であって、前者ではない。config 側だけを先に開ければ、コードに触れられない側（本節の本来の用途）が先に進む。
+The reason for adopting it is that path stability and uniqueness of a comment's attribution are separate problems. `get x` and `set x` have two declarations under the same name, and an anonymous default export has no name. A config key is the place where the writer states explicitly which declaration is meant, so a qualifier like `get x` can be carried inside the key; JSDoc, by contrast, is a path that infers attribution from where it is written, and has no place to carry the same qualifier. What §12's "JSDoc limits and symbol identification" has left undecided is the latter notation, not the former. Opening up only the config side first lets the side that cannot touch the code (this section's actual purpose) move forward.
 
-2 を選ばなかった場合に起きること: getter に JSDoc を書けるようになる代わりに、`ambit init --config` が提案すべき「JSDoc を置けない関数」の集合が暗黙コンストラクタとサードパーティだけに縮み、導入初期の穴が config ではなく JSDoc の話に戻る。1 を選ばなかった場合に起きること: getter/setter と無名 default export の効果は伝播に載っているのに宣言する手段がどこにもなく、`--coverage` の `unknown` に留まり続ける。
+What would happen if 2 were chosen: in exchange for being able to write JSDoc on a getter, the set of "functions where JSDoc cannot be placed" that `ambit init --config` should propose shrinks to implicit constructors and third-party code only, and the early-adoption gap becomes a JSDoc question again rather than a config one. What would happen if 1 were chosen: the effects of getters/setters and anonymous default exports ride on propagation, yet there is nowhere at all to declare them, and they stay in `--coverage`'s `unknown`.
 
-**この決定の正直な限界**: 3 は「構文上は JSDoc を書ける位置なのに採用しない」という非対称を残す。これは原理から導いた区別ではなく、§12 の未決事項のうち config 側だけを先に決めた結果である。JSDoc 側の表記が決まれば 2 へ寄せる余地がある（§12）。
+**The honest limit of this decision**: 3 leaves the asymmetry that "JSDoc can syntactically be written at this position, yet is not adopted". This is not a distinction derived from principle; it is the result of deciding only the config side of §12's open item first. If the notation on the JSDoc side is settled, there is room to move toward 2 (§12).
 
-**(b) `file` 部分のグロブと、複数エントリが同一シンボルに当たったときの優先順位**
+**(b) Globs in the `file` part, and the priority when several entries hit the same symbol**
 
-`file` 部分は `*`（`/` をまたがない任意の文字列）と `**`（0 階層以上のディレクトリ）を解釈する。`symbol` 部分はグロブしない。
+The `file` part interprets `*` (any string not crossing `/`) and `**` (zero or more directory levels). The `symbol` part is not globbed.
 
-- グロブ記号を含まない鍵（完全一致）は、グロブを含む鍵より常に優先する。
-- 同一シンボルに 2 つ以上のグロブ鍵が当たった場合は、両方の鍵を挙げて exit 2 で停止する。
+- A key containing no glob characters (an exact match) always wins over a key containing a glob.
+- If two or more glob keys hit the same symbol, both keys are listed and the run stops with exit 2.
 
-検討した選択肢は 3 つ:
+Three options were considered:
 
-1. 記述順の後勝ち
-2. より特異な鍵が勝つ
-3. **曖昧を設定エラーにする**（採用。完全一致だけは例外）
+1. Later entry wins by written order
+2. The more specific key wins
+3. **Make ambiguity a configuration error** (adopted; exact matches being the only exception)
 
-2 を採らないのは、「より特異」を定義するにはグロブの包含関係を決める必要があり、`src/**/a.ts` と `src/a/*.ts` のどちらが特異かは一般には決まらないからである。1 を採らないのは、契約の意味をオブジェクトリテラルの鍵順に預けることになり、どちらに転んだかが読み手に見えないからである（§3.4 と同じ理由）。完全一致を例外にできるのは、包含関係の判定を要さず、書き手の意図が一意だからである。
+2 is not taken because defining "more specific" requires deciding the containment relation between globs, and which of `src/**/a.ts` and `src/a/*.ts` is more specific is not decidable in general. 1 is not taken because it would entrust the meaning of a contract to the key order of an object literal, and which way it fell would not be visible to the reader (the same reason as §3.4). An exact match can be the exception because it needs no containment judgment and the writer's intent is unique.
 
-3 を選ばなかった場合に起きること: config に行を足した順で既存シンボルの契約が黙って変わり、契約を緩める変更が差分レビューに現れない。
+What would happen if 3 were not chosen: the contract of an existing symbol would silently change with the order in which lines were added to config, and a change that loosens a contract would not appear in diff review.
 
-**(c) 読み込む形式と探索起点**
+**(c) The formats read, and the search origin**
 
-- 形式: `ambit.config.ts` / `ambit.config.mts` / `ambit.config.js` / `ambit.config.mjs`。この順に探し、最初に見つかった 1 つだけを使う。同一ディレクトリに複数あっても残りは読まない。
-- 探索起点: `check <dir>` / `init <dir>` の `<dir>` から親へ遡り、最初に見つかったものを使う。cwd は見ない。遡行は `package.json` か `.git` を持つディレクトリを検査した時点で止める — プロジェクトの外にある config を黙って拾わないためである。
-- `contracts` の鍵の `file` 部分と `strict` のパターンは、**config ファイルのあるディレクトリからの相対パス**として解決する。
+- Formats: `ambit.config.ts` / `ambit.config.mts` / `ambit.config.js` / `ambit.config.mjs`. They are looked for in this order and only the first one found is used. If several exist in the same directory, the rest are not read.
+- Search origin: from the `<dir>` of `check <dir>` / `init <dir>` upward through parents, using the first one found. cwd is not consulted. The walk stops once it has examined a directory holding a `package.json` or a `.git` — so that a config outside the project is not silently picked up.
+- The `file` part of `contracts` keys and the patterns in `strict` are resolved **relative to the directory holding the config file**.
 
-検討した選択肢は 3 つ:
+Three options were considered:
 
-1. cwd 起点
-2. **`<dir>` から親へ遡る**（採用）
-3. `--config` を必須にする
+1. cwd as the origin
+2. **Walk up from `<dir>`** (adopted)
+3. Require `--config`
 
-`ambit check src` は「`src` を検査する」であって「cwd のプロジェクトを検査する」ではない。1 では `cd packages/a && ambit check ../b/src` が b の契約を無視して a の config を当てることになり、読み手が説明できない。3 は導入時に 1 手増やすので P3（段階導入）に反する。
+`ambit check src` means "check `src`", not "check the project in cwd". Under 1, `cd packages/a && ambit check ../b/src` would ignore b's contracts and apply a's config, which the reader cannot explain. 3 adds one step at adoption time, which is against P3 (incremental adoption).
 
-鍵を config ファイル基準にするのは、同じ config が `ambit check src` でも `ambit check .` でも同じシンボルを指すために要る。`<dir>` 基準にすると、検査範囲を狭めただけで鍵が全部ずれる。
+Keys are relative to the config file so that the same config points at the same symbols under both `ambit check src` and `ambit check .`. Making them relative to `<dir>` would shift every key merely because the checked range was narrowed.
 
-`.json` を形式に含めないのは、`defineConfig` の型検査が効かない書き方を 1 つ増やす利得がないからである（`effects` の定義も `strict` も式ではないので JSON でも書けるが、書ける必要がない）。
+`.json` is not among the formats because there is no gain in adding one more way to write config for which `defineConfig`'s type checking does not apply (the `effects` definitions and `strict` are not expressions, so they could be written in JSON, but there is no need for that).
 
-2 を選ばなかった場合に起きること: モノレポで検査対象と config の対応が cwd 依存になり、CI とローカルで別の契約が当たる。
+What would happen if 2 were not chosen: in a monorepo, the correspondence between what is checked and which config applies would become cwd-dependent, and CI and local runs would apply different contracts.
 
-**(d) ユーザー定義エフェクトの診断への出方**
+**(d) How user-defined effects appear in diagnostics**
 
-`effects: { payments: ["network", "db_write"] }` は**パース時に標準エフェクトへ展開する**。診断の `contract.declared` / `contract.observed` には展開後の標準エフェクト名だけが現れる。ユーザー定義名が存在するのは config と JSDoc の入力側だけである。
+`effects: { payments: ["network", "db_write"] }` is **expanded into standard effects at parse time**. Only expanded standard effect names appear in a diagnostic's `contract.declared` / `contract.observed`. User-defined names exist only on the input side, in config and JSDoc.
 
-検討した選択肢は 3 つ:
+Three options were considered:
 
-1. 定義名のまま出す
-2. **展開して出す**（採用）
-3. 両方出す
+1. Emit the defined name as written
+2. **Emit the expansion** (adopted)
+3. Emit both
 
-展開は多対一である。`payments: ["network", "db_write"]` と `sync: ["network", "db_write"]` が両方定義されていれば、観測された `{network, db_write}` をどちらの名前で呼ぶかは決まらない。`observed` は解析が観測した集合であって書き手の語彙ではないので、逆写像を発明すれば、書いていない名前が診断に現れる。`declared` だけ定義名にすると `declared` と `observed` が別の語彙になり、差集合が読めなくなる。3 は同じ集合を 2 通りで書くことになり、どちらが検査に使われたのかを曖昧にする。
+Expansion is many-to-one. If `payments: ["network", "db_write"]` and `sync: ["network", "db_write"]` are both defined, there is no deciding which name to call an observed `{network, db_write}` by. `observed` is the set the analysis observed, not the writer's vocabulary, so inventing an inverse mapping would make a name that was never written appear in a diagnostic. Using defined names only in `declared` would leave `declared` and `observed` in different vocabularies, and their difference unreadable. 3 writes the same set two ways and makes it ambiguous which one the check used.
 
-定義の値は標準エフェクト名だけとし、定義名を再帰的に展開しない。定義名が標準エフェクト名と衝突する場合は exit 2 とする。
+The value of a definition may only be standard effect names; defined names are not expanded recursively. If a defined name collides with a standard effect name, exit 2.
 
-1 を選ばなかった場合に起きること: 診断本文が利用者の語彙で読めるようになる代わりに、`observed` に現れる名前が config の内容に依存し、同じコードが config を変えただけで違う診断を出す。
+What would happen if 1 were not chosen: in exchange for diagnostic text becoming readable in the user's vocabulary, the names appearing in `observed` would depend on the contents of config, and the same code would produce different diagnostics merely because config changed.
 
-**`ambit init` による導入**
+**Adoption via `ambit init`**
 
-`ambit init` は既存コードのエフェクトを 4.2 の根拠から推論し、JSDoc の追加を診断の修正候補（5 章 `fixes[].edits`）として出力する。推論できない関数は `unknown` のまま残り、`--coverage` に現れる。
+`ambit init` infers the effects of existing code from the evidence in 4.2 and emits JSDoc additions as fix candidates in diagnostics (chapter 5, `fixes[].edits`). Functions it cannot infer remain `unknown` and appear in `--coverage`.
 
-`ambit init --config` は同じ推論の結果を、**JSDoc を置けない宣言先**についてだけ `ambit.config.ts` への追記パッチとして出力する。対象は (a) の 2 種と、コンストラクタを書いていないクラスの構築（`Class.constructor`）である。後者は宣言経路を持つがコメントを書く場所そのものが無く、(a) の 2 種と同じ理由で config だけが宣言できる。JSDoc を置ける関数には従来どおり JSDoc を提案する。`unknown` に達した関数にはどちらも提案しない — 理由は §4.3 と同じで、「判らなかった」を宣言に変えないためである。
+`ambit init --config` emits the results of the same inference, only for **declaration sites where JSDoc cannot be placed**, as an append patch for `ambit.config.ts`. The targets are the two kinds in (a), plus the construction of a class that does not write a constructor (`Class.constructor`). The latter has a declaration path but no place at all to write the comment, so, for the same reason as the two kinds in (a), only config can declare it. For functions where JSDoc can be placed, JSDoc is proposed as before. For functions that reached `unknown`, neither is proposed — for the same reason as §4.3: so that "could not tell" is not turned into a declaration.
 
-### 4.2 エフェクト（effects）
+### 4.2 Effects
 
-関数が外界に対して持つ作用。
+What a function does to the outside world.
 
-| 名前 | 意味 |
+| Name | Meaning |
 |---|---|
-| `pure` | 外界に一切触れない。引数のみに依存し、関数外から観測できる副作用なし（関数内で生成した値への変異は含まない — 後述「ローカル変異と `pure`」） |
-| `network` | 外部ネットワーク通信（`fetch`、`node:http`、任意のソケット） |
-| `db_read` / `db_write` | データストアの読み取り / 書き込み |
-| `fs_read` / `fs_write` | ファイルシステム |
-| `state_write` | 関数外から到達可能な値の変更。引数・モジュールスコープの束縛・`this` への代入、およびそれらに対する `Array.push` / `Map.set` / `Set.add` 等の破壊的メソッド呼び出し |
-| `llm` | LLM API 呼び出し。`network` を含意し、予算対象になる |
-| `env` | 環境変数、時刻、乱数など非決定的入力 |
-| `process` | `child_process`、シグナル、`process.exit` |
-| `unknown` | 解析不能。全てのエフェクトを含みうる（未宣言そのものとの関係は伝播規則の直後を参照） |
-
-ユーザー定義エフェクトは `ambit.config.ts` で標準エフェクトの組み合わせとして宣言できる（例: `payments: ["network", "db_write"]`）。
-
-**ローカル変異と `pure`（決定: 2026-09-09）**
-
-`pure` は**関数内で生成した値への変異を許す**。関数外から到達可能な値への
-変異だけを `state_write` として扱い、宣言を超えれば伝播規則1により違反に
-なる。
-
-検討した選択肢は3つ:
-
-1. **ローカル変異を許し、外部到達可能な変異だけを効果にする**（採用）
-2. あらゆる変異を効果として報告する。`pure` は `const out: T[] = []` への
-   `push` すら許さない
-3. 変異を効果モデルの外に置いたままにする。破壊的メソッドは名前が
-   解決できても効果が決まらないので `unknown` に落ちる
-
-採用の理由は2つある。
-
-第一に、意味論として1が正しい。関数内で生成した値への変異は、その値が
-関数外へ漏れる前であれば呼び出し元から観測できない。観測できない作用を
-効果として数えると、`pure` は「外界に触れない」ではなく「特定の書き方を
-していない」という別の意味になり、原則 P2（行動範囲の制約）ではなく
-スタイル規則に変わる。
-
-第二に、3（据え置き）は `unknown` を実際に膨らませていた。2026-09-09 の
-`ambit check src --coverage` で `builtin-method` 由来の未解決 131 件のうち
-69 件（`Array.push` 50、`Map.set` 13、`Set.add` 6）が破壊的メソッドであり、
-その大半はローカルに生成した配列・Map への追加である。原則 P4 は保証でき
-ない範囲を隠さないことを要求するが、観測不能な作用を `unknown` として数え
-続けることは、隠すことの逆方向の不正確さ（保証できる範囲を実際より狭く
-見せる）であり、`unknown` 率を主要 KPI とする §4.3 の運用を歪める。計測値
-の before/after は `docs/status.md` に記録する。
+| `pure` | Touches nothing outside. Depends only on its arguments, with no side effect observable from outside the function (mutation of values created inside the function does not count — see "Local mutation and `pure`" below) |
+| `network` | External network communication (`fetch`, `node:http`, any socket) |
+| `db_read` / `db_write` | Reading from / writing to a data store |
+| `fs_read` / `fs_write` | The file system |
+| `state_write` | Modifying a value reachable from outside the function. Assignment to arguments, module-scope bindings, or `this`, and destructive method calls on them such as `Array.push` / `Map.set` / `Set.add` |
+| `llm` | LLM API calls. Implies `network` and is subject to budget |
+| `env` | Non-deterministic input such as environment variables, the clock, and randomness |
+| `process` | `child_process`, signals, `process.exit` |
+| `unknown` | Not analyzable. May include any effect (for its relation to being simply undeclared, see immediately after the propagation rules) |
 
-2 を選ばなかった場合に起きること: TypeScript で純粋な関数を書く通常の方法
-（ローカル配列に `push` して返す）が `pure` を宣言できなくなり、`pure` は
-実際にはほとんど誰も宣言できないタグになる。効果表に新しい名前が増えても
-利用者が使えなければ、P3 の段階導入は成立しない。
+User-defined effects can be declared in `ambit.config.ts` as combinations of standard effects (for example `payments: ["network", "db_write"]`).
 
-1 を選ばなかった場合（=2 または 3 のまま）に起きること: 3 のままなら
-`state_write` は存在せず、`param.push(x)` を行う関数が `@effects pure` を
-宣言しても、それは `unknown` の**警告**にとどまり `ambit check` の終了
-コードを 0 にする（§4.3）。引数を書き換える関数が `pure` を名乗れる状態は
-§3.4 の「解析失敗を無違反にすり替えない」に反する。
+**Local mutation and `pure` (decided: 2026-09-09)**
 
-**ローカル判定の規則**
+`pure` **permits mutation of values created inside the function**. Only mutation of a value reachable from outside the function is treated as `state_write`, and if it exceeds the declaration it becomes a violation under propagation rule 1.
 
-変異対象の**根**（`a.b.c = 1` なら `a`、`out.push(x)` なら `out`）を見て
-判定する。根が次のいずれかのときだけローカルとみなす。
+Three options were considered:
 
-- その関数の中で `const` により束縛され、初期化子が配列リテラル・オブジェ
-  クトリテラル・`new` 式のいずれかである識別子
-- 変異対象そのものが配列リテラル・オブジェクトリテラル・`new` 式
-- `this` のうち、その `this` を束縛する関数が `new` 式の直接の被演算子で
-  あるもの（`new function () { this.x = 1 }`）。`new` が確保したばかりの値
-  であり、他の誰もまだ持っていない
-- `extends` を持たないクラスのコンストラクタ本体の `this`。オブジェクトを
-  確保したのはそのコンストラクタ自身であり、外に出るのは戻り値としてだけ
-  である。`extends` を持つ場合は基底コンストラクタが先に走り、そこで
-  `this` を外へ渡している可能性があるのでローカルとしない
+1. **Permit local mutation, and count only externally reachable mutation as an effect** (adopted)
+2. Report every mutation as an effect. `pure` would not even permit a `push` onto `const out: T[] = []`
+3. Leave mutation outside the effect model. A destructive method would fall to `unknown` because its effect is undetermined even when the name resolves
 
-それ以外（引数、上記以外の `this`、モジュールスコープ、外側の関数の束縛、
-`let` / `var` 束縛、根が式で識別子でない場合、根を解決できない場合）は
-すべて `state_write` とする。分割代入（`[a.x] = xs`、`({ y: o.z } = v)`）は
-代入先を1つずつ同じ規則にかけ、1つでもローカルでなければ全体を
-`state_write` とする。判定できない側を `unknown` ではなく効果に倒すのは、
-§4.2「読み書きの向きが静的に決まらない操作」で `db_read` と `db_write` の
-両方を返すのと同じ理由による。
+There are two reasons for adopting 1.
 
-これは規則7と同じく**健全性の主張ではない**。ローカルに生成した値を他へ
-渡してから変異させた場合（`sink(out); out.push(x)`）、Ambit はこれを
-ローカル変異と判定する。エイリアス解析は行わない。この穴は `boundary`
-でも `unknown` でも表現されないため、ここに明記しておく。
+First, 1 is semantically correct. Mutation of a value created inside the function is unobservable from the caller as long as that value has not escaped. Counting an unobservable action as an effect turns `pure` from "touches nothing outside" into "is not written in a particular way", which makes it a style rule rather than principle P2 (constraining the range of action).
 
-破壊的メソッドの表は `pure` 表と同じ収録規則に従う。実測で現れた名前と、
-同じ組み込み型上のその場変更の兄弟メソッドだけを載せ、迷ったら載せない。
-どちらの表も、載せ落としは `unknown` に落ちるだけで、保証を広げる方向には
-壊れない。
+Second, 3 (leaving it alone) was in fact inflating `unknown`. In `ambit check src --coverage` on 2026-09-09, 69 of the 131 unresolved sites originating from `builtin-method` (`Array.push` 50, `Map.set` 13, `Set.add` 6) were destructive methods, and most of them were appends to locally created arrays and Maps. Principle P4 requires not hiding what cannot be guaranteed, but continuing to count an unobservable action as `unknown` is inaccuracy in the opposite direction from hiding (it shows the guaranteed range as narrower than it is), and it distorts §4.3's practice of treating the `unknown` rate as a primary KPI. The before/after measurements are recorded in `docs/status.md`.
 
-コールバックを参照で受け取る破壊的メソッド（`arr.sort(cmp)`）は、規則4に
-より `unknown` を伴う。根が外部到達可能ならば `state_write` と `unknown`
-の両方を持つ。
+What would happen if 2 were chosen: the ordinary way to write a pure function in TypeScript (`push` onto a local array and return it) could no longer declare `pure`, and `pure` would become a tag almost nobody can actually declare. Adding a new name to the effect table does not make P3's incremental adoption work if users cannot use it.
 
-**不正なタグの扱い**
+What would happen if 1 were not chosen (i.e. staying with 2 or 3): under 3, `state_write` would not exist, and a function doing `param.push(x)` could declare `@effects pure` while that remained only an `unknown` **warning**, leaving `ambit check`'s exit code at 0 (§4.3). A state in which a function that rewrites its arguments can call itself `pure` runs against §3.4's "do not pass off an analysis failure as no violation".
 
-`@effects` が上表にない名前（誤字を含む）を含む場合、そのタグは契約として採用しない。関数は未宣言として扱い（`pure` へ暗黙に縮退させない）、AMB-E002 を報告する。未宣言なので違反そのものが存在せず、AMB-E001 は併発しない。これはパース/採用の規則であり、以下の伝播規則（宣言済みの契約を前提とする）とは性質が異なる。
+**The rule for deciding locality**
 
-**伝播規則**
+The decision looks at the **root** of the mutation target (`a` for `a.b.c = 1`, `out` for `out.push(x)`). Only when the root is one of the following is it regarded as local.
 
-1. 関数が直接行う既知の作用と、呼び出し先から伝播する既知のエフェクトは、関数の宣言した集合に含まれなければならない。宣言を超える既知の作用は違反。
-2. `pure` は空集合の別名。`pure` から既知の副作用を持つ関数を呼べば違反。
-3. `unknown` を呼んだ関数は、宣言に関わらず `unknown` を含む。宣言済みの関数がこれを含めば**警告**（宣言が `pure` かどうかを問わない）。Ambit の `strict: true` でエラーに昇格できる。
-4. 高階関数: コールバック引数のエフェクトは呼び出し側の実引数から推論する。型シグネチャだけで推論を完了したことにしない。推論できない場合は `unknown`。
-5. メソッド、getter、ジェネレータ、`async` 関数も同じ規則。`await` は透過。
-6. 動的 `import()`、`eval`、`new Function`、`any` 型を経由した呼び出しは `unknown`。
-7. プロパティ経由の呼び出しは、レシーバの**値**から解決する。型注釈ではなく実体を辿るため、`const handlers: H = { read }` と `const handlers = { read }` は同じ結果になる。単一のオブジェクトリテラルが確実に背後にある場合に限り解決し、それ以外（引数・`let` 束縛・spread を含むリテラル）は `unknown`。これは健全性の主張ではない。`const` は束縛を固定するがプロパティを凍結しないため、再代入には勝てない。クラスインスタンスのメソッド解決も同じ前提に立つ。
+- An identifier bound by `const` inside that function whose initializer is an array literal, an object literal, or a `new` expression
+- A mutation target that is itself an array literal, an object literal, or a `new` expression
+- A `this` whose binding function is the direct operand of a `new` expression (`new function () { this.x = 1 }`). It is a value `new` has just allocated, and nobody else holds it yet
+- The `this` in the constructor body of a class with no `extends`. That constructor is what allocated the object, and it leaves only as the return value. With `extends`, the base constructor runs first and may already have passed `this` outward, so it is not local
 
-契約を宣言できない位置（シンボル ID を持たないノード）に契約タグを書いた場合、その宣言は伝播にも検査にも入らない。黙って捨てず AMB-E003 として報告する。何もしない宣言が保証に見えることを許さない。
+Everything else (arguments, any other `this`, module scope, bindings of an enclosing function, `let` / `var` bindings, a root that is an expression rather than an identifier, and a root that cannot be resolved) is `state_write`. Destructuring assignment (`[a.x] = xs`, `({ y: o.z } = v)`) puts each assignment target through the same rule one at a time, and if even one is not local the whole is `state_write`. Falling to an effect rather than to `unknown` on the undecidable side is for the same reason as returning both `db_read` and `db_write` in §4.2's "operations whose read/write direction is not statically determined".
 
-呼び出し関係の循環は、強連結成分などを使って固定点に達するまで伝播させる。解析バックエンドを変更しても、契約モデルの意味を暗黙に変えない。
+Like rule 7, this is **not a soundness claim**. If a locally created value is handed elsewhere and then mutated (`sink(out); out.push(x)`), Ambit judges it local mutation. No alias analysis is performed. This gap is expressed neither by `boundary` nor by `unknown`, so it is stated explicitly here.
 
-「未宣言」と「`unknown`」は同じではない。呼び出し先が `@effects` を宣言している場合、呼び出し元はその宣言を信頼して伝播に使う（呼び出し先自身の本体がその宣言と整合するかは、呼び出し先自身の診断で別途検査する — 通常のモジュール型エフェクトシステムの形）。呼び出し先が無宣言の場合は、呼び出し先自身の本体から再帰的に推論した観測エフェクト集合を使って伝播を続ける。`unknown` が実際に生じるのは、動的 `import()` ・`eval`・`any` 型経由の呼び出し・解決できない呼び出し先など、規則6が指す「解析不能」に到達したときのみである。したがって「未宣言」はそれ自体では `unknown` を意味せず、`--coverage`（4.3）が可視化する集計対象であって、伝播規則への入力ではない。宣言済みの呼び出し先の内部に `unknown` が残っていれば、それは呼び出し先自身の AMB-W001 として現れ、宣言を信頼した呼び出し元には伝播しない。
+The table of destructive methods follows the same inclusion rule as the `pure` table. Only names that showed up in measurements, and their in-place-mutation sibling methods on the same builtin type, are listed; when in doubt, not listed. In either table, an omission merely falls to `unknown`; it does not break in the direction of widening a guarantee.
 
-`unknown` のみの診断（規則3の警告）は、既知の作用が宣言を超えていない限り `ambit check` の終了コードを 0 のままにする。3.4 の「解析失敗を無違反にすり替えない」とは別の話で、こちらは「解析できたが不明」の扱い。
+A destructive method that takes a callback by reference (`arr.sort(cmp)`) carries `unknown` by rule 4. If the root is externally reachable it holds both `state_write` and `unknown`.
 
-**エフェクト検出の根拠**
+**Handling of invalid tags**
 
-- Ambit 宣言（`contract()` / JSDoc / config）
-- Node.js 標準モジュールと主要ライブラリのエフェクト定義（`stubs/`、Ambit 本体が同梱・保守）
-- サードパーティが自パッケージに同梱する `ambit.stubs.json`
-- いずれもなければ `unknown`
+If `@effects` contains a name not in the table above (including a typo), that tag is not adopted as a contract. The function is treated as undeclared (it is not implicitly degraded to `pure`) and AMB-E002 is reported. Since it is undeclared, no violation exists and AMB-E001 does not co-occur. This is a parsing/adoption rule, and is different in kind from the propagation rules below (which presuppose an adopted contract).
 
-**読み書きの向きが静的に決まらない操作**
+**Propagation rules**
 
-`pg` の `query(sql)` のように、同じメソッドが文の内容によって読み取りにも書き込みにもなる操作は、スタブ表がエフェクト集合を返す（単一のエフェクトではない）。判定はリテラル文字列または テンプレートリテラルの静的な先頭部分の先頭キーワードのみで行い、それで決まらない場合は `db_read` と `db_write` の両方を返す。読み取りだけを返す設計は採らない。動的に組まれた `UPDATE` が `@effects db_read` の契約を通ってしまい、3.4 の「解析失敗を無違反にすり替えない」に反するためである。過大評価の代償として、文を動的に組む読み取り専用の関数も `db_write` の宣言を要する。
+1. The known actions a function performs directly, and the known effects propagated from its callees, must be contained in the set the function declared. A known action exceeding the declaration is a violation.
+2. `pure` is another name for the empty set. Calling a function with known side effects from `pure` is a violation.
+3. A function that calls `unknown` contains `unknown` regardless of its declaration. If a declared function contains it, that is a **warning** (whether or not the declaration is `pure`). Ambit's `strict: true` can promote it to an error.
+4. Higher-order functions: the effects of a callback parameter are inferred from the actual argument at the call site. Do not treat inference as complete on the basis of a type signature alone. If it cannot be inferred, `unknown`.
+5. Methods, getters, generators, and `async` functions follow the same rules. `await` is transparent.
+6. Calls through dynamic `import()`, `eval`, `new Function`, or an `any` type are `unknown`.
+7. A call through a property resolves from the **value** of the receiver. Because it follows the entity rather than the type annotation, `const handlers: H = { read }` and `const handlers = { read }` give the same result. It resolves only when a single object literal is definitely behind the receiver; anything else (arguments, `let` bindings, literals containing a spread) is `unknown`. This is not a soundness claim. `const` fixes the binding but does not freeze the properties, so it cannot beat reassignment. Method resolution on class instances rests on the same premise.
 
-この規則はエフェクトの向きにのみ適用する。SQL からテーブル名を読み取ってケイパビリティを導出することはしない（4.4 の但し書き「任意の SQL のテーブル単位権限を判定できるとみなさない」）。
+If a contract tag is written at a position that cannot declare a contract (a node with no symbol ID), that declaration enters neither propagation nor checking. It is not dropped silently but reported as AMB-E003. A declaration that does nothing is not allowed to look like a guarantee.
 
-### 4.3 unknown の扱い
+Cycles in the call graph are propagated to a fixed point using strongly connected components or the like. Changing the analysis backend does not implicitly change the meaning of the contract model.
 
-`unknown` は Ambit の中核概念で、未解決の保証範囲を表す。無宣言のコードは `unknown` の代入先ではなく、可能な限り推論を続ける対象である（4.2）。`unknown` は推論してもなお解析不能だった経路にのみ生じる。
+"Undeclared" and "`unknown`" are not the same thing. If a callee declares `@effects`, the caller trusts that declaration and uses it in propagation (whether the callee's own body is consistent with that declaration is checked separately, in the callee's own diagnostics — the shape of an ordinary modular effect system). If the callee has no declaration, propagation continues using the observed effect set inferred recursively from the callee's own body. `unknown` actually arises only on reaching the "not analyzable" of rule 6: dynamic `import()`, `eval`, a call through an `any` type, an unresolvable callee, and so on. "Undeclared" therefore does not by itself mean `unknown`; it is something `--coverage` (4.3) makes visible in its tallies, not an input to the propagation rules. If `unknown` remains inside a declared callee, it appears as that callee's own AMB-W001 and does not propagate to a caller that trusted the declaration.
 
-- 禁止しない。禁止した瞬間に段階導入が成立しない。
-- `ambit check --coverage` で、コードベース中の `unknown` 依存の割合と発生箇所を出力する。主要 KPI として扱うが、この数値だけで保証全体を表すとはみなさない。境界宣言への信頼やスタブの信頼レベルも合わせて表示する。
-- `unknown` を減らす手段は、検証可能な宣言追加、スタブ追加、または `boundary` による明示的隔離（4.6）。境界への移行は解析成功と区別して集計する。
-- `ambit.config.ts` でディレクトリ単位に `strict` を設定できる。新規コードから締め、レガシーは警告のままにする。
-- バックエンドやそのバージョンが変わった測定では、その変更を明記する。互換性差による `unknown` の増減を、契約の改善と混同しない。
+A diagnostic that is only about `unknown` (the warning of rule 3) leaves `ambit check`'s exit code at 0, as long as no known action exceeds a declaration. This is a separate matter from 3.4's "do not pass off an analysis failure as no violation"; this one is about handling "analyzed, but unclear".
 
-### 4.4 ケイパビリティ（capabilities）
+**Evidence for effect detection**
 
-エフェクトが「何をするか」なら、ケイパビリティは「何に対してしてよいか」。
+- Ambit declarations (`contract()` / JSDoc / config)
+- Effect definitions for Node.js standard modules and major libraries (`stubs/`, bundled and maintained by Ambit itself)
+- An `ambit.stubs.json` a third party bundles in its own package
+- If there is none of these, `unknown`
 
-- 形式: `<resource>:<action>:<target>`。`target` はグロブ可（`http:get:*.example.com`）。
-- 呼び出し元から呼び出し先へ**縮小のみ**可能。呼び出し先が呼び出し元より広いケイパビリティを要求すれば違反。
-- エントリポイントは `@entrypoint` と `@capabilities` を JSDoc または `ambit.config.ts` で明示する。未指定は `unknown` 相当として警告。
-- **二重強制**: リテラル URL や既知クライアントなど静的に判定できる違反はチェッカーが止める。動的 URL・テーブル名などは対応するランタイムフックで照合する。フック非対応の操作まで遮断可能とは保証しない。
+**Operations whose read/write direction is not statically determined**
 
-**静的側の照合範囲**
+For an operation where the same method is a read or a write depending on the statement's content, such as `pg`'s `query(sql)`, the stub table returns a set of effects (not a single effect). The decision is made only from the leading keyword of a literal string, or of the static leading part of a template literal, and where that does not settle it, both `db_read` and `db_write` are returned. A design that returns only the read is not taken: a dynamically assembled `UPDATE` would pass a contract of `@effects db_read`, which runs against 3.4's "do not pass off an analysis failure as no violation". The price of this over-approximation is that a read-only function that assembles its statement dynamically also needs to declare `db_write`.
 
-チェッカーが照合するのは `http:<method>:<host>` のみで、対象は同梱スタブの HTTP 入口（`fetch`、`node:http` / `node:https` の `get` / `request`）に限る。ホストはリテラル文字列、またはテンプレートリテラルの静的な先頭部分が authority を終端している場合にのみ確定したとみなす。`` `https://api.${env}.example.com/` `` のように静的部分が authority の途中で終わる場合、前方一致でホストを名乗らせない。確定できない対象は要求なしではなく `unknown` として扱い、ランタイム側の責務であることを診断文に書く。ホストはソースに書かれたまま（ポートを含み、userinfo を除く）を対象とする。既定ポートの補完や省略はしない。
+This rule applies to the direction of the effect only. Table names are not read out of SQL to derive capabilities (see 4.4's caveat, "the ability to decide table-level permissions for arbitrary SQL is not assumed").
 
-SQL 文からテーブル名を読み取って `db:` のケイパビリティを導出することはしない。上の但し書き（任意の SQL のテーブル単位権限を判定できるとみなさない）と同じ理由であり、読み取る場所を変えても主張は変わらない。
+### 4.3 Handling `unknown`
 
-**ランタイム強制はエントリポイント単位**
+`unknown` is Ambit's core concept, representing the unresolved extent of a guarantee. Code with no declaration is not something assigned `unknown`; it is something inference continues on as far as possible (4.2). `unknown` arises only on paths that remained unanalyzable even after inference.
 
-`@ambit/runtime` はエントリポイントに入った時点でケイパビリティ集合を `AsyncLocalStorage` に積む。以降の対応操作は、この集合と照合される。`AsyncLocalStorage` はコンテキストの保持を担い、遮断そのものはアダプタが実装する。
+- Do not forbid it. The moment it is forbidden, incremental adoption stops working.
+- `ambit check --coverage` outputs the proportion of the codebase that depends on `unknown` and where it occurs. It is treated as a primary KPI, but this number alone is not regarded as expressing the whole guarantee. Trust in boundary declarations and the trust level of stubs are shown alongside it.
+- The ways to reduce `unknown` are adding verifiable declarations, adding stubs, or explicit isolation via `boundary` (4.6). Moving something to a boundary is tallied separately from succeeding at analysis.
+- `strict` can be set per directory in `ambit.config.ts`. Tighten new code while leaving legacy code at warnings.
+- For a measurement in which the backend or its version changed, state that change. Do not confuse a rise or fall in `unknown` caused by a compatibility difference with an improvement in contracts.
 
-コンテキストの確立は次の方式を用意する。
+### 4.4 Capabilities
 
-- フレームワークアダプタ（`ambit/runtime/hono` 等）でルート登録ごとにハンドラを包む。宣言と実際のハンドラを対応付け、実行時にコンテキストを積む。アプリ全体に 1 つ差すミドルウェアではない: 契約はルートごとに違い、`spec` とハンドラを同じ呼び出しに並べることが下の一致検査の前提である。
-- アダプタがない場合は `withAmbit(spec, handler)` を手動で挟む。
+If effects are "what it does", capabilities are "what it may do it to".
 
-ケイパビリティ集合を書く場所は 1 箇所でよい。同一ファイルに宣言されたハンドラを包む `withAmbit` のリテラル配列は、そのハンドラの `@capabilities` 宣言そのものである（下の「二重宣言を消す」）。JSDoc にも書いた場合に限り、チェッカーは**ソース上の一致のみ**を検査する: 宣言を読むのと同じ条件（リテラル配列、同一ファイルの宣言を指す `handler`）で両者を集合として比較し、食い違えばエラーにする。動的に組まれた配列と別ファイルのハンドラは宣言としても読めず比較もできないので、警告で可視化する（黙って通さない）。同じ規則をアダプタの登録にも適用する（下の決定）。
+- Form: `<resource>:<action>:<target>`. `target` may be globbed (`http:get:*.example.com`).
+- Only **narrowing** is possible from caller to callee. If a callee requires a broader capability than its caller, that is a violation.
+- An entry point states `@entrypoint` and `@capabilities` explicitly, in JSDoc or in `ambit.config.ts`. Leaving them unspecified is warned about as equivalent to `unknown`.
+- **Dual enforcement**: violations that can be decided statically, such as literal URLs and known clients, are stopped by the checker. Dynamic URLs, table names and the like are matched by the corresponding runtime hook. Operations with no hook are not guaranteed blockable.
 
-**契約とハンドラの対応付け（決定）**
+**What the static side matches**
 
-12 章の同名項目のうち、方式の選択と導入手順を決めた部分である。性能に関する事項はすべて**未計測**である。
+The checker matches only `http:<method>:<host>`, and only at the HTTP entry points in the bundled stubs (`fetch`, and `get` / `request` of `node:http` / `node:https`). A host is regarded as determined only if it is a literal string, or if the static leading part of a template literal terminates the authority. Where the static part ends partway through the authority, as in `` `https://api.${env}.example.com/` ``, a prefix match is not allowed to claim a host. A target that cannot be determined is treated as `unknown` rather than as no requirement, and the diagnostic text says that it is the runtime's responsibility. The host is taken as written in the source (including the port, excluding userinfo). Default ports are neither filled in nor elided.
 
-選択肢:
+Table names are not read out of SQL statements to derive `db:` capabilities. The reason is the same as the caveat above (the ability to decide table-level permissions for arbitrary SQL is not assumed), and changing where it is read from does not change the claim.
 
-1. **明示登録** — アダプタにハンドラと契約（`spec`）を一緒に渡す。契約はモジュール内の実行時の値になる。
-2. **契約データ生成** — `ambit check` が JSDoc から契約データ（シンボル ID → 契約）を書き出し、ランタイムがそれを読んで実行中のハンドラと突き合わせる。
-3. **両方の併用** — 明示登録を基本とし、登録のないハンドラを契約データで補う。
+**Runtime enforcement is per entry point**
 
-選んだもの: 1（明示登録）。アダプタは `ambitHandler(spec, handler, decode)` の形を取り、`spec`（契約）と `handler`（契約を宣言した関数）を同一の呼び出しに並べる。
+`@ambit/runtime` pushes the capability set onto `AsyncLocalStorage` at the moment an entry point is entered. Supported operations from then on are matched against that set. `AsyncLocalStorage` is responsible for holding the context; the blocking itself is implemented by the adapter.
 
-理由:
+The following ways of establishing the context are provided.
 
-- 契約が**モジュール内の値**なので、コメントを落とすビルド（`tsc`、esbuild、SWC の JSDoc 除去）でも、バンドル・ミニファイ後でも、そのまま実行時に届く。ランタイムは JSDoc を読まず、シンボル ID・ファイルパス・関数名のいずれも参照しない。ランタイムに型解析エンジンを持ち込まないという条件も、これで自動的に満たされる。
-- 2 は、契約データと実行中のハンドラを結ぶ鍵を必要とする。**シンボルを鍵にする限り**、候補（シンボル ID = ファイルパス + 宣言経路、`fn.name`）はいずれもバンドラとミニファイアが書き換える対象で、既定では保存されない（実測は下の「再検討: HTTP の鍵」）。JSDoc からラッパーを注入する変換は §4.5 で Phase 1 の非目標としており、その変換を前提とする方式は今は選べない。シンボル以外の鍵については下で別に扱う。
-- 2 はさらに、生成した契約データが**古くなる**失敗様式を持ち込む。ソースを直して `ambit check` を通していない状態で走らせると、ランタイムは現在のソースのどこにも書かれていない契約を強制する。静的検査と実行が同じ契約について黙って別の答えを出す状態であり、採らない。
-- 3 は 2 の鍵の問題を解かないまま、失敗様式（登録された契約と契約データが食い違ったときどちらを採るか）を増やす。1 で足りている間は、増やす分の対価がない。
-- 実行時 overhead（コンテキスト 1 つと `decode` 1 回分）は**未計測**。
+- A framework adapter (`ambit/runtime/hono` and so on) wraps the handler at each route registration. It maps the declaration to the actual handler and pushes the context at run time. It is not one middleware inserted for the whole application: contracts differ per route, and placing `spec` and the handler in the same call is the premise of the agreement check below.
+- Where there is no adapter, insert `withAmbit(spec, handler)` by hand.
 
-選ばなかった場合に起きること:
+The capability set need be written in one place only. A literal array in a `withAmbit` wrapping a handler declared in the same file *is* that handler's `@capabilities` declaration ("Removing the double declaration" below). Only when it is also written in JSDoc does the checker check **agreement at the source level**: under the same conditions as reading a declaration (a literal array, and a `handler` naming a declaration in the same file), it compares the two as sets and errors if they disagree. A dynamically assembled array and a handler in another file can be read neither as a declaration nor for comparison, so they are made visible with a warning (they are not passed silently). The same rule applies to adapter registration (the decision below).
 
-- 1 を採らず 2 だけにすると、バンドル後の対応付けは「`--keep-names` のようなビルド設定があれば動く」という条件付きの保証になり、その設定のない構成では契約が見つからないハンドラだけが並ぶ。
-- どちらも採らないと、アダプタは契約を知らないままコンテキストを積めず、`@entrypoint` を宣言したハンドラのケイパビリティは実行時に一切照合されない。
+**Mapping contracts to handlers (decided)**
 
-**再検討: HTTP の鍵（決定は変えない）**
+This is the part of the identically named item in chapter 12 for which the approach and the adoption procedure have been decided. Everything concerning performance is **unmeasured**.
 
-上の「2 を退けた理由」はシンボルを鍵にした場合の話である。HTTP エントリポイントには `method + path` という別の鍵があり、バンドラはそれを書き換えない。案 2 を `method + path` で組み直せば、既存のルート登録に触れず `app.use(ambitMiddleware(contracts))` の 1 行で全ルートに契約を届けられるのではないか、という問いを立て直した。計測は Node.js v24.19.0 / macOS (darwin arm64)、esbuild 0.28.2、hono 4.13.7。スパイクは作業ツリーに残していない。
+Options:
 
-比較したもの: (A) 現行の明示登録、(B) `ambit check --emit-contracts` が `method + path` を鍵にした契約データを出し、フレームワークのミドルウェア 1 つがそれを読む、(C) B を既定とし鍵で解決できないルートだけ A。
+1. **Explicit registration** — pass the handler and the contract (`spec`) to the adapter together. The contract becomes a runtime value inside the module.
+2. **Contract-data generation** — `ambit check` writes out contract data (symbol ID → contract) from JSDoc, and the runtime reads it and matches it against the running handler.
+3. **Both** — explicit registration as the base, with contract data filling in for unregistered handlers.
 
-計測:
+Chosen: 1 (explicit registration). The adapter takes the form `ambitHandler(spec, handler, decode)`, placing `spec` (the contract) and `handler` (the function that declared the contract) in the same call.
 
-- **鍵の生存**: `esbuild --bundle --minify --format=esm` で、スパイクのルート path リテラルは 15/15 そのまま残った（`/users/:email`、`/posts/:id{[0-9]+}`、`/files/*`、配列に置いてループで登録した `/loop/one` を含む）。関数宣言名は 1 文字に潰れ、実測 `fn.name` は `listUsers`→`"a"`、`getUser`→`"u"`、`createOrder`→`"c"`。ただし `--keep-names` はビルドプラグインではなく**フラグ 1 つ**で、付ければ `fn.name` は全て元に戻る（1213B → 1520B）。したがって「シンボルを鍵にすると保存されない」は既定の話であって、path 鍵に対する反論としては成り立たない。ここは問いの言うとおりである。
-- **実行時に鍵が読めるか（hono）**: `app.use("*")` の中で `next()` の**前**に読める `c.req.routePath` はミドルウェア自身の `/*` を返す。契約はハンドラの前に積まねばならないので、`routePath` では足りない。`c.req.matchedRoutes` は `next()` の前から `[/*, /users/:email]` を持っており、こちらなら鍵になる。フレームワークごとに別の API であり、hono 以外では未検証。
-- **静的側で鍵が決まるか**: スパイクの `app.*` 登録 14 件を TypeScript の AST で走査すると、リテラル path が取れるのは 12/14 (86%)。取れないのは配列からループで登録した 1 件と `app.route("/api", sub)` 自身。問題は残る 1 件で、`sub.get("/items", …)` は静的には `/items`、実行時の鍵は `/api/items` である。マウントを解決しない限り、実行時に一致する鍵 11・**一致しない鍵 1**・鍵なし 2 になる。一致しない鍵は鍵なしより悪い: そのルートは黙って `runtime.unscoped` に落ちるのに、emit 側は 12/14 を網羅したと報告する。鍵なしなら見える欠落が、ここでは見えない。（同じ path が上位アプリにも登録されていれば別ルートの契約が当たりうるが、これは**未計測**である。）
-- **`test/fixtures/realistic-api` に対する割合は測れない**。fixture に `app.<method>(...)` は 0 件、`new Hono()` も 0 件で、母数が存在しない（あるのは `ambitHandler` 登録 7 件）。現行 checker にも `method + path` を抽出する経路はなく（`RUNTIME_WRAPPER_NAMES` は `withAmbit`・`ambitHandler`・`ambitRoute` の 3 つで、いずれも `method + path` を持たない）、任意のアプリに対して 0/N である。上の 86% はスパイクの数値であって fixture の数値ではない。
-- **導入コスト**: fixture の 7 ルートで、`ambitHandler` 登録が占めるのは 44 行（orders 10 / users 13 / audit 21）= 6.3 行/ルート。既存 N ルートの API に A を入れるコストは概ね 6N 行、B は 1 行 + ビルド／CI への emit 工程 1 つである。この差は B の実在する利点であり、小さくない。
+Reasons:
 
-それでも選ぶのは A（変更なし）。理由は鍵の生存ではなく、次の 3 つ:
+- Because the contract is a **value inside the module**, it reaches runtime as-is even through a build that drops comments (`tsc`, esbuild, SWC JSDoc removal) and after bundling and minification. The runtime does not read JSDoc, and refers to neither symbol IDs, file paths, nor function names. The condition of not bringing a type-analysis engine into the runtime is automatically satisfied as well.
+- 2 requires a key linking the contract data to the running handler. **As long as the key is a symbol**, every candidate (symbol ID = file path + declaration path, `fn.name`) is something bundlers and minifiers rewrite, and is not preserved by default (measurements in "Reconsidered: an HTTP key" below). A transform that injects wrappers from JSDoc is a Phase 1 non-goal in §4.5, so an approach premised on that transform cannot be chosen now. Keys other than symbols are treated separately below.
+- 2 further introduces a failure mode in which the generated contract data goes **stale**. Run in a state where the source has been fixed but `ambit check` has not been passed, the runtime enforces a contract that is written nowhere in the current source. That is a state in which the static check and execution silently give different answers about the same contract, and it is not taken.
+- 3 does not solve 2's key problem and adds a failure mode (which to take when a registered contract and the contract data disagree). While 1 suffices, there is nothing to pay for the addition.
+- The runtime overhead (one context and one `decode`) is **unmeasured**.
 
-1. **`decode` の分離が失われる**。B が包むのはフレームワークのハンドラそのもの（`(c) => …`）であり、その中には `c.req.json()` がある。`Context` API はスタブ表にないので、契約を宣言した関数が `unknown` を含む（`AMB-W001` / `AMB-W003`）。第 3 引数 `decode` はまさにこれを避けるために置いた。ドメイン関数を切り出せば静的解析は戻るが、そのとき鍵はルートハンドラを指し、JSDoc はドメイン関数に付く。B は対応付けの問題を減らさず、置き場所を変えるだけである。
-2. **マウントは欠落を見えなくする**。上の実測のとおり、`app.route()` を解決しない抽出は静的には鍵ありと数える `/items` を作るが、実行時の鍵は `/api/items` で、決して一致しない。A なら登録のないルートはソースに `ambitHandler` がないことで見えるが、B では網羅したという報告の下に隠れる。検証できないものを保証面に数えないという原則（§2）に正面から反する。B を安全にするにはマウント解決が必須要件になり、`app.route()` の引数が静的に追えない構成では要件を満たせない。
-3. **生成物が古くなる問題に、ビルド非依存の答えがない**（下の項）。
+What would happen otherwise:
 
-C も採らない。C は 1 と 2 を B から丸ごと引き継いだうえで、「登録された契約と契約データが食い違ったときどちらを採るか」を足す。B の 1 行という利点は、鍵で解決できないルートに A を書く分だけ削れる。
+- Taking only 2 and not 1 would make post-bundle mapping a conditional guarantee — "it works if you have a build setting like `--keep-names`" — and in configurations without that setting there would be nothing but handlers whose contracts cannot be found.
+- Taking neither would leave the adapter unable to push a context without knowing the contract, and the capabilities of a handler declaring `@entrypoint` would never be matched at run time.
 
-**案 B・C を採る場合の、契約データが古くなる問題への答え**
+**Reconsidered: an HTTP key (the decision does not change)**
 
-採らないが、答えを持たずに退けたのではないので書く。`ambit check --emit-contracts` は契約データに、契約を読み取ったソースの内容ハッシュ（ファイル単位）を埋める。ランタイムは起動時に照合し、ずれていれば**起動失敗**とする。
+The "reasons for rejecting 2" above concern the case of a symbol as the key. An HTTP entry point has another key, `method + path`, and bundlers do not rewrite it. The question was posed again: if option 2 were rebuilt around `method + path`, could the contract be delivered to every route with the single line `app.use(ambitMiddleware(contracts))`, without touching existing route registrations? Measurements were on Node.js v24.19.0 / macOS (darwin arm64), esbuild 0.28.2, hono 4.13.7. The spike is not left in the working tree.
 
-- `warn` は採らない。静的検査と実行が同じ契約について別の答えを出したまま走り続ける状態であり、ログ 1 行を足しただけで失敗様式は変わらない。これは 2 を退けた理由そのものである。
-- `deny`（全拒否のコンテキストを積む）も採らない。空集合は全拒否であり、これは「契約が見つからないハンドラ」で空コンテキストを積まないと決めたのと同じ理由で、ビルド順序の事故を方針決定と区別できなくする。
-- 起動失敗を選ぶのは、ずれの原因が常に「`ambit check` を通していない」という直せる事故だからである。実行を止めれば直すまで進まない。
+What was compared: (A) the current explicit registration, (B) `ambit check --emit-contracts` emits contract data keyed on `method + path` and one framework middleware reads it, (C) B as the default with A only for routes the key cannot resolve.
 
-ただしこの答えには前提がある: 起動時にソースが在ることである。バンドルして配る構成ではソースは配布物に含まれず、ハッシュを照合する相手がない。照合するにはハッシュを成果物に運ぶビルド工程が要り、それは B が避けたはずのビルドとの結合そのものである。3 番目の理由はこれを指す。
+Measurements:
 
-**二重宣言を消す（決定: 2026-09-10）**
+- **Survival of the key**: under `esbuild --bundle --minify --format=esm`, all 15/15 route path literals in the spike survived intact (including `/users/:email`, `/posts/:id{[0-9]+}`, `/files/*`, and `/loop/one` registered by looping over an array). Function declaration names were crushed to one character; measured `fn.name` went `listUsers`→`"a"`, `getUser`→`"u"`, `createOrder`→`"c"`. However, `--keep-names` is **a single flag**, not a build plugin, and with it every `fn.name` comes back (1213B → 1520B). So "a symbol key is not preserved" is a statement about defaults, and does not stand as an objection to a path key. The question is right on this point.
+- **Whether the key is readable at run time (hono)**: inside `app.use("*")`, the `c.req.routePath` readable **before** `next()` returns the middleware's own `/*`. Since the contract must be pushed before the handler, `routePath` is not enough. `c.req.matchedRoutes` holds `[/*, /users/:email]` already before `next()`, and would serve as a key. It is a different API per framework, and is unverified outside hono.
+- **Whether the key is determined on the static side**: walking the spike's 14 `app.*` registrations with the TypeScript AST, a literal path is obtainable for 12/14 (86%). The two that are not are one registered by looping over an array, and `app.route("/api", sub)` itself. The problem is the remaining one: `sub.get("/items", …)` is statically `/items` while the runtime key is `/api/items`. Unless mounts are resolved, the result is 11 keys that match at run time, **1 key that does not**, and 2 with no key. A key that does not match is worse than no key: that route silently falls to `runtime.unscoped`, while the emit side reports having covered 12/14. A gap that would be visible with no key is invisible here. (If the same path is also registered on the parent app, another route's contract could apply, but this is **unmeasured**.)
+- **The proportion against `test/fixtures/realistic-api` cannot be measured**. The fixture has 0 `app.<method>(...)` and 0 `new Hono()`; there is no denominator (what it has is 7 `ambitHandler` registrations). The current checker has no path for extracting `method + path` either (`RUNTIME_WRAPPER_NAMES` holds the three `withAmbit`, `ambitHandler`, `ambitRoute`, none of which carries a `method + path`), so against an arbitrary application it is 0/N. The 86% above is the spike's number, not the fixture's.
+- **Adoption cost**: across the fixture's 7 routes, `ambitHandler` registration accounts for 44 lines (orders 10 / users 13 / audit 21) = 6.3 lines per route. Putting A into an API with N existing routes costs roughly 6N lines; B costs 1 line plus one emit step in the build/CI. This difference is a real advantage of B, and not a small one.
 
-`spec` が `capabilities` / `budget` をリテラルで固定し、`handler` が同一ファイルの宣言を指す識別子であるとき、その値を**そのハンドラの `@capabilities` / `@budget` 宣言そのものとして読む**。同じ内容を JSDoc に書き直す必要はない。`@effects` と `@entrypoint` は JSDoc のままである（§4.1「宣言の出所」）。
+A (no change) is chosen even so. The reasons are not about key survival, but these three:
 
-判別式は「実行時に届く必要があるか」の 1 つである。`capabilities` はフックが照合し、`budget` の `timeMs` は実測して遮断する。どちらも実行時に届かねばならず、JSDoc はビルドで消えるので、正は `spec` に置く。`effects` は実行時に使わないので JSDoc に残す。
+1. **The separation of `decode` is lost.** What B wraps is the framework's handler itself (`(c) => …`), and inside it is `c.req.json()`. The `Context` API is not in the stub table, so the function that declared the contract contains `unknown` (`AMB-W001` / `AMB-W003`). The third parameter `decode` exists precisely to avoid this. Extracting a domain function restores static analysis, but then the key points at the route handler while the JSDoc sits on the domain function. B does not reduce the mapping problem; it only moves where it lives.
+2. **Mounting makes the gap invisible.** As measured above, an extraction that does not resolve `app.route()` produces an `/items` counted as having a key statically, while the runtime key is `/api/items` and will never match. Under A, a route with no registration is visible from the absence of `ambitHandler` in the source; under B it is hidden beneath a report of full coverage. That runs head-on against the principle of not counting the unverifiable toward the guarantee (§2). Making B safe would make mount resolution a hard requirement, and a configuration in which `app.route()`'s arguments cannot be traced statically cannot meet it.
+3. **There is no build-independent answer to the staleness of the generated artifact** (next item).
 
-退けた代案:
+C is not taken either. C inherits 1 and 2 wholesale from B, and on top of that adds "which to take when a registered contract and the contract data disagree". B's one-line advantage is eroded by exactly the amount of A that has to be written for the routes the key cannot resolve.
 
-- **JSDoc を正としてランタイムへ届ける**（上の案 2 / `--emit-contracts` / ミドルウェア方式）。上の 3 つの理由がそのまま効き、判断は変わらない。加えて、二重記述が発生するのは**ランタイム強制を入れた人だけ**であり、その人は既にラッパーを書いている。`spec` を正にすれば行は 1 行も増えず JSDoc から 2 行消えるが、JSDoc を正にすると既存のラッパーに**加えて**届け方の機構が要る。侵襲は減らないまま機構だけ増える。
-- **JSDoc からラッパーを注入するビルド時変換**（§4.5 の Phase 1 非目標）。ビルド工程との結合を持ち込む点が案 B と同じで、退ける理由も同じである。
-- **`@effects` も `spec` に入れる**。`effects` は全関数に付くものであり、エントリポイントにしか無いラッパーでは受けきれない。粒度が合わない。
-- **ラップされていることから `@entrypoint` を推論する**。`@entrypoint` は 1 行であり、そもそも重複していない。推論すれば「ラップし忘れ」と「エントリポイントではない」が区別できなくなる。
+**The answer to contract-data staleness, were B or C to be taken**
 
-一致検査（`AMB-E010` / `AMB-E011`）は**残す。意味も severity も変えない**。両方書かれていて食い違えば error である。変わったのは「JSDoc 側が無くてもよい」ことだけで、「食い違ってもよい」ではない。合流で `spec` を最後に置くのはこのためで、JSDoc か config が宣言していればそちらが有効となり、`spec` はその宣言と比較される。`ambitHandler(spec, handler, decode)` と `ambitRoute(spec, handler, decode)` にも `withAmbit` と同じ規則を適用する。
+They are not taken, but they were not rejected without an answer, so it is written down. `ambit check --emit-contracts` embeds in the contract data a content hash (per file) of the source the contract was read from. The runtime checks it at startup and **fails to start** if it does not match.
 
-この決定が捨てる検査を明記する。二重に書かれていた時代は、`spec` だけを広げた編集が「対の不一致」として `AMB-E010` に当たった。宣言が 1 箇所になれば対が無いので、この当たり方は無くなる。ただしこれは契約の保証面積の縮小ではない。`AMB-E010` / `AMB-E011` は権限拡大そのものを捕まえる仕組みではなく、複製が食い違っていないことを見張る仕組みだった（両側を同時に広げる編集は以前から黙って通っていた）。`spec` に書いた宣言は他のあらゆる Ambit の契約と同じく diff に現れ、§4.4 の縮小則で呼び出し元から縛られ（`AMB-E005`）、リテラル target は `AMB-E009` で検査される。
+- `warn` is not taken. It is a state in which the static check and execution keep running while giving different answers about the same contract, and adding one line of log does not change the failure mode. This is precisely the reason 2 was rejected.
+- `deny` (pushing a deny-everything context) is not taken either. The empty set is a total denial, and for the same reason as the decision not to push an empty context for "a handler whose contract cannot be found", it makes an accident of build ordering indistinguishable from a policy decision.
+- Failing to start is chosen because the cause of a mismatch is always a fixable accident — "`ambit check` was not run". Stopping execution means no progress until it is fixed.
 
-届かない範囲は残り、そこでは JSDoc が要る。`spec` がリテラルでない場合と、`handler` が別ファイルの宣言である場合（§12 (3)）である。どちらも `AMB-W004` で可視化し、メッセージが「読めない `spec` は何も宣言しない。ここではハンドラ自身の `@capabilities` / `@budget` が唯一の宣言である」と述べる。エントリポイントに宣言が無いままなら `AMB-W002` も併せて出る。黙って `unknown` にはしない。
+This answer has a premise, though: that the source is present at startup. In a configuration that bundles for distribution, the source is not part of the artifact and there is nothing to check the hash against. Checking it would require a build step carrying the hash into the artifact, and that is exactly the coupling to the build that B was supposed to avoid. The third reason refers to this.
 
-一致検査の対象は `@capabilities` だけではない。`spec.budget` と `@budget` も同じ扱いで、`spec.budget` がリテラルオブジェクトで各値がリテラルであれば、それが宣言になる。`@budget` も書かれていれば比較し、`timeMs` / `costUsd` / `llmCalls` / `onExceed` のいずれかが食い違えば `AMB-E011`、片側にしかない限度も食い違いとして扱う。`onExceed` は両側を既定値 `throw` に揃えてから比較する（JSDoc 側は `@budget` の解析時点で既定値が入るので、`spec` 側の省略と比較できる「不在」の状態がない）。二つの半分は独立に判定する: `spec` が片方をリテラルで書き、もう片方を実行時に組むことがあるためで、比較できなかった半分だけを `AMB-W004` で可視化する。`AMB-E010` を拡張せず別 id にしたのは、`AMB-E010` の `contract` フィールドがケイパビリティの文字列（`declared` / `required` / `excess`）であり、予算の食い違いはそこに入れられるものを持たないからである。
+**Removing the double declaration (decided: 2026-09-10)**
 
-**`decode` を分ける理由**
+When a `spec` fixes `capabilities` / `budget` as literals and `handler` is an identifier naming a declaration in the same file, that value **is read as that handler's own `@capabilities` / `@budget` declaration**. There is no need to write the same content again in JSDoc. `@effects` and `@entrypoint` stay in JSDoc (§4.1 "Where declarations live").
 
-フレームワークの `Context` API は Ambit のスタブ表にない。ハンドラが `c.req.json()` のようなフレームワークの呼び出しを直接含むと、そのハンドラは `unknown` を含み（`AMB-W001` / `AMB-W003`）、宣言したケイパビリティが「完全には分からない」状態になる。`decode`（`Context` からハンドラの引数を作る関数）を第 3 引数に分けると、フレームワーク依存の呼び出しは登録の 1 式に閉じ、契約を宣言したハンドラはフレームワークに依存しない・静的に解析できる関数のまま残る。`decode` はコンテキストの**内側**で走る: リクエスト本体の読み取りも `timeMs` に数える。
+The discriminator is the single question of whether it has to reach runtime. `capabilities` is what the hooks match against, and `budget`'s `timeMs` is measured and blocks. Both have to reach runtime, and JSDoc disappears at build time, so the authoritative copy lives in `spec`. `effects` is not used at runtime, so it stays in JSDoc.
 
-**契約が見つからないハンドラ**
+Rejected alternatives:
 
-アダプタを通さず登録されたハンドラ（`app.get(path, handler)` を直接書いた場合）は、コンテキストを積まない。そのハンドラの中の対応操作は `runtime.unscoped`（`allow` 既定 / `warn` / `deny`）が決める。アダプタは契約の見つからないハンドラに**空のケイパビリティ集合のコンテキストを積まない**: 空集合は全拒否であり、登録漏れという事故を方針決定と区別できなくする。拒否の理由を 2 系統に分けるより、`unscoped` の 1 設定に寄せるほうが読める。アダプタの登録 API は `spec` を必須とするので、「アダプタ経由で登録されたが契約がない」状態は作れない。
+- **Make JSDoc authoritative and deliver it to the runtime** (option 2 above / `--emit-contracts` / the middleware approach). The three reasons above apply unchanged, and the judgment does not change. In addition, the double writing arises **only for people who put runtime enforcement in place**, and those people have already written the wrapper. Making `spec` authoritative adds not one line and removes two from JSDoc, whereas making JSDoc authoritative requires a delivery mechanism **on top of** the existing wrapper. The intrusion does not shrink; only the machinery grows.
+- **A build-time transform that injects wrappers from JSDoc** (a Phase 1 non-goal in §4.5). It brings in coupling to the build step just as option B does, and is rejected for the same reason.
+- **Put `@effects` in `spec` too**. `effects` is attached to every function, and a wrapper that exists only at entry points cannot carry it. The granularity does not match.
+- **Infer `@entrypoint` from the fact of being wrapped**. `@entrypoint` is one line and was never duplicated in the first place. Inferring it would make "forgot to wrap" indistinguishable from "not an entry point".
 
-**拒否の伝え方**
+The agreement check (`AMB-E010` / `AMB-E011`) **stays. Neither its meaning nor its severity changes.** If both are written and they disagree, it is an error. What changed is only that "the JSDoc side may be absent", not that "disagreement is allowed". This is why `spec` is placed last in the merge: if JSDoc or config declares something, that takes effect, and `spec` is compared against that declaration. The same rules as `withAmbit` apply to `ambitHandler(spec, handler, decode)` and `ambitRoute(spec, handler, decode)`.
 
-`AmbitCapabilityError` / `AmbitBudgetError` はアダプタが HTTP ステータスに翻訳せず、そのままフレームワークのエラーハンドラへ投げる。403 は「クライアントに権限がない」であって、実際に起きたのは「サーバのコードが自分の grant を超えた」であり、別のことである。504 も同様にゲートウェイの状態を名乗る。翻訳すれば、例外メッセージ（許可されているケイパビリティの一覧）をクライアントに出すか、出さないために情報を落とすかの選択も抱える。フレームワークの既定のエラーハンドラに委ね、アプリのログに残す。
+The check this decision gives up is stated explicitly. In the era of writing it twice, an edit that widened only `spec` was caught by `AMB-E010` as "the pair disagrees". Once the declaration is in one place there is no pair, so that way of catching it is gone. This is not a reduction in the contract's guaranteed surface, however. `AMB-E010` / `AMB-E011` were never a mechanism for catching capability expansion itself; they were a mechanism for watching that duplicates did not disagree (an edit widening both sides at once always passed silently). A declaration written in `spec` shows up in the diff like every other Ambit contract, is bound from its callers by the narrowing rule of §4.4 (`AMB-E005`), and its literal targets are checked by `AMB-E009`.
 
-**ランタイムフックの方式（決定）**
+There remains a range this does not reach, and JSDoc is required there: when `spec` is not a literal, and when `handler` is a declaration in another file (§12 (3)). Both are made visible with `AMB-W004`, whose message states that "an unreadable `spec` declares nothing; here the handler's own `@capabilities` / `@budget` is the only declaration". If the entry point still has no declaration, `AMB-W002` is emitted alongside. It is never silently made `unknown`.
 
-以下 (a)(b)(c) は 12 章「ランタイムフックの網羅性と壊れやすさ」のうち、方式・target 形式・DB クライアント対応を決めた部分である。計測は Node.js v24.19.0 / macOS (darwin arm64) で行い、計測していない事項は「未計測」と明記する。
+The agreement check is not limited to `@capabilities`. `spec.budget` and `@budget` are treated the same way: if `spec.budget` is a literal object and each value is a literal, that is the declaration. If `@budget` is also written, they are compared, and if any of `timeMs` / `costUsd` / `llmCalls` / `onExceed` disagrees it is `AMB-E011`; a limit present on only one side is also treated as a disagreement. `onExceed` is compared after aligning both sides to the default `throw` (the JSDoc side gets the default at `@budget` parse time, so there is no "absent" state to compare against an omission on the `spec` side). The two halves are judged independently: a `spec` may write one half as a literal and assemble the other at run time, and only the half that could not be compared is made visible with `AMB-W004`. A separate id was used rather than extending `AMB-E010` because `AMB-E010`'s `contract` field holds capability strings (`declared` / `required` / `excess`), and a budget disagreement has nothing that fits there.
 
-**(a) フックの方式と、遮断できる対象・監査のみの対象**
+**Why `decode` is separated**
 
-選択肢:
+A framework's `Context` API is not in Ambit's stub table. If a handler directly contains framework calls such as `c.req.json()`, that handler contains `unknown` (`AMB-W001` / `AMB-W003`) and the capabilities it declared end up "not fully determined". Separating `decode` (the function building the handler's arguments from the `Context`) into the third parameter confines framework-dependent calls to the single registration expression, and leaves the handler that declared the contract a framework-independent, statically analyzable function. `decode` runs **inside** the context: reading the request body counts toward `timeMs` as well.
 
-1. monkeypatch — モジュールオブジェクトのメソッドを差し替える。
-2. `diagnostics_channel` — 公式のイベント通知を購読する。
-3. ローダーフック — `module.register` で `node:fs` を差し替えモジュールへ解決する。
-4. クライアントラップ — 利用側が渡したモジュール／インスタンスのプロトタイプを包む。
+**Handlers whose contract cannot be found**
 
-選んだもの:
+A handler registered without going through an adapter (writing `app.get(path, handler)` directly) pushes no context. Supported operations inside such a handler are decided by `runtime.unscoped` (`allow` default / `warn` / `deny`). The adapter **does not push a context with an empty capability set** for a handler whose contract cannot be found: the empty set is a total denial, and it would make the accident of a missing registration indistinguishable from a policy decision. Concentrating on the single `unscoped` setting reads better than splitting the reason for denial into two systems. Since the adapter's registration API requires `spec`, the state of "registered via the adapter but with no contract" cannot be created.
 
-| 対象 | 方式 | 遮断 | 監査 |
+**How denial is conveyed**
+
+`AmbitCapabilityError` / `AmbitBudgetError` are not translated by the adapter into an HTTP status; they are thrown to the framework's error handler as they are. 403 means "the client lacks permission", whereas what actually happened is "the server's code exceeded its own grant", which is a different thing. 504 likewise claims a state of the gateway. Translating would also bring the choice of either exposing the exception message (the list of permitted capabilities) to the client, or dropping information in order not to. Leave it to the framework's default error handler, and record it in the application's log.
+
+**The approach to runtime hooks (decided)**
+
+(a), (b) and (c) below are the parts of chapter 12's "Coverage and fragility of runtime hooks" for which the approach, the target format, and DB client support have been decided. Measurements were on Node.js v24.19.0 / macOS (darwin arm64); anything not measured is marked "unmeasured".
+
+**(a) The hooking approach, and what can be blocked versus audited only**
+
+Options:
+
+1. monkeypatch — replace methods on the module object.
+2. `diagnostics_channel` — subscribe to the official event notifications.
+3. Loader hooks — resolve `node:fs` to a replacement module via `module.register`.
+4. Client wrapping — wrap the prototype of the module or instance the caller passes in.
+
+Chosen:
+
+| Target | Approach | Blocks | Audits |
 |---|---|---|---|
-| `globalThis.fetch` | monkeypatch (`installFetchHook`) | できる | する |
-| `node:fs` / `node:fs/promises` | monkeypatch (`installFsHook`) | できる | する |
-| `node:child_process` | monkeypatch (`installChildProcessHook`) | できる | する |
-| `pg` | クライアントラップ (`installPgHook(pg)`) | できる | する |
-| `mysql2`、`@prisma/client`、`drizzle-orm`、`mongodb`、LLM SDK（`openai`、`@anthropic-ai/sdk`、`ai`） | フックなし | できない | しない |
+| `globalThis.fetch` | monkeypatch (`installFetchHook`) | yes | yes |
+| `node:fs` / `node:fs/promises` | monkeypatch (`installFsHook`) | yes | yes |
+| `node:child_process` | monkeypatch (`installChildProcessHook`) | yes | yes |
+| `pg` | client wrapping (`installPgHook(pg)`) | yes | yes |
+| `mysql2`, `@prisma/client`, `drizzle-orm`, `mongodb`, LLM SDKs (`openai`, `@anthropic-ai/sdk`, `ai`) | no hook | no | no |
 
-理由:
+Reasons:
 
-- `diagnostics_channel` は**遮断できない**。実測: 購読者が `throw` しても `publish()` は正常に戻り、例外は次の tick の `uncaughtException` になる。§12 の「監査通知があることと遮断できることを区別する」への答えはこれで、通知しかできない経路を遮断として数えない。監査だけが要るケースは現れていないので、今回は採用しない（採用しても遮断列は埋まらない）。
-- ローダーフックは、monkeypatch がすでに覆う範囲を**超えない**。実測: `node:fs` の ESM 名前空間がまだ生成されていない時点で `require("fs")` のプロパティを差し替えると、後から `import { readFileSync } from "node:fs"` した名前付きインポートも差し替え後の関数を見る。逆に `node:fs` を先に `import` した後で差し替えると、名前付きインポートと `import * as` の名前空間は元の関数に束縛されたままになり、覆えるのは `fs.readFileSync()` のプロパティ経由だけになる。この差は導入順序の差であって方式の差ではない。
-- `pg` にクライアントラップを使うのは、Ambit が `pg` に依存しないため。利用側が `installPgHook(pg)` にモジュールを渡し、Ambit は `Pool.prototype.query` / `Client.prototype.query` を包む。Ambit 側が `pg` を import すれば、`pg` を使わない利用者にも依存が増える。
-- 性能への影響（差し替えた関数を通す分の overhead）は**未計測**。
+- `diagnostics_channel` **cannot block**. Measured: even when a subscriber throws, `publish()` returns normally and the exception becomes an `uncaughtException` on the next tick. This is the answer to §12's "distinguish having an audit notification from being able to block": a path that can only notify is not counted as blocking. No case requiring audit alone has appeared, so it is not adopted this time (adopting it would not fill in the blocking column anyway).
+- Loader hooks do **not exceed** what monkeypatching already covers. Measured: if the properties of `require("fs")` are replaced before the ESM namespace of `node:fs` has been created, a later named import `import { readFileSync } from "node:fs"` also sees the replaced function. Conversely, if `node:fs` is imported first and replacement happens after, named imports and the `import * as` namespace stay bound to the original functions, and only property access via `fs.readFileSync()` is covered. That difference is a difference in adoption order, not in approach.
+- Client wrapping is used for `pg` because Ambit does not depend on `pg`. The caller passes the module to `installPgHook(pg)`, and Ambit wraps `Pool.prototype.query` / `Client.prototype.query`. If Ambit imported `pg` itself, users who do not use `pg` would gain a dependency.
+- The performance impact (the overhead of going through the replaced function) is **unmeasured**.
 
-選ばなかった場合に起きること:
+What would happen otherwise:
 
-- `diagnostics_channel` だけを採用すると「フックがある」とは言えても呼び出しは素通りする。遮断できていないものに、ドキュメントが遮断の印を付けることになる。
-- ローダーフックを採用すると、`node:` 組み込みの解決書き換えに伴う再入制御・ワーカースレッド・`--import` の順序という壊れやすさを、覆う範囲を広げないまま抱え込む。
-- `pg` を Ambit 側から import すると、`pg` を使わない利用者の依存グラフに `pg` が入る。
+- Adopting only `diagnostics_channel` would let us say "there is a hook" while calls pass straight through. The documentation would be putting a blocking mark on something that does not block.
+- Adopting loader hooks would take on the fragility of rewriting resolution of `node:` builtins — reentrancy control, worker threads, `--import` ordering — without widening what is covered.
+- Importing `pg` from Ambit's side would put `pg` into the dependency graph of users who do not use `pg`.
 
-導入モードと覆う範囲（`node:fs` / `node:child_process`）:
+Installation modes and what they cover (`node:fs` / `node:child_process`):
 
-| 導入 | 覆う呼び出し | 覆わない呼び出し |
+| Installation | Calls covered | Calls not covered |
 |---|---|---|
-| プリロード（`node --import`／`--require` でアプリのモジュールグラフより前に `install*Hook()` を実行） | `import { readFileSync } from "node:fs"`、`import fs from "node:fs"; fs.readFileSync()`、`require("fs").readFileSync()` | 下の共通の非対象のみ |
-| グラフ内（エントリモジュールの先頭で `install*Hook()` を呼ぶ） | `fs.readFileSync()`（既定エクスポート／`require` のプロパティ経由） | 束縛済みの名前付きインポート `import { readFileSync } from "node:fs"`、`import * as fs from "node:fs"` |
+| Preload (running `install*Hook()` ahead of the application's module graph via `node --import` / `--require`) | `import { readFileSync } from "node:fs"`, `import fs from "node:fs"; fs.readFileSync()`, `require("fs").readFileSync()` | Only the common exclusions below |
+| In-graph (calling `install*Hook()` at the top of the entry module) | `fs.readFileSync()` (via the default export's or `require`'s properties) | Already-bound named imports `import { readFileSync } from "node:fs"`, and `import * as fs from "node:fs"` |
 
-どちらの導入でも覆わないもの: `node:fs` の内部が公開 API を経由せずに呼ぶ経路、ネイティブアドオン、子プロセスの中、`worker_threads` の別ワーカー（フックはワーカーごとに導入が要る）。
+Not covered under either installation: paths where `node:fs`'s internals call without going through the public API, native addons, inside child processes, and other workers of `worker_threads` (the hook must be installed per worker).
 
-拒否の伝え方は API の形に合わせる: 同期 API は `throw`、コールバック API は `process.nextTick(callback, error)`、Promise API は reject。`existsSync` は拒否時に `false` を返さず `throw` する — 「存在しない」と「見てはいけない」は別の答えであり、`false` を返せば後者を前者に化けさせる。
+How denial is conveyed follows the shape of the API: synchronous APIs `throw`, callback APIs use `process.nextTick(callback, error)`, and Promise APIs reject. `existsSync` throws on denial rather than returning `false` — "does not exist" and "must not look" are different answers, and returning `false` would turn the latter into the former.
 
-Node.js のモジュールローダー自身が公開 API の `fs.readFileSync` でファイルを読む（実測）。したがって `installFsHook()` の後は、`require()` と動的 `import()` もフックを通る。`runtime.unscoped` が `deny` の状態、あるいは `fs:read` を持たないコンテキストの中で遅延読み込みを行うと、その読み込みが拒否される。これは仕様どおりの動作であり、`docs/limitations.md` に導入手順として記載する。
+Node.js's own module loader reads files with the public `fs.readFileSync` (measured). After `installFsHook()`, therefore, `require()` and dynamic `import()` also go through the hook. Performing a lazy load while `runtime.unscoped` is `deny`, or inside a context that does not hold `fs:read`, gets that load denied. This is behavior as specified, and is documented in `docs/limitations.md` as part of the installation procedure.
 
-**(b) `node:fs` と `node:child_process` の target 形式**
+**(b) The target format for `node:fs` and `node:child_process`**
 
-選択肢:
+Options:
 
-1. 呼び出し時に解決した**絶対パス**を target とする。
-2. ソースに書かれたままの文字列を target とする（相対パスは相対のまま）。
-3. パスを見ず、操作単位（`fs:read:*`）だけで許可する。
+1. Use the **absolute path** resolved at call time as the target.
+2. Use the string as written in the source as the target (relative paths stay relative).
+3. Ignore paths and permit per operation only (`fs:read:*`).
 
-選んだもの: 1。`fs:read:<絶対パスのグロブ>`、`fs:write:<絶対パスのグロブ>`、`proc:spawn:<コマンド>`。
+Chosen: 1. `fs:read:<glob over an absolute path>`, `fs:write:<glob over an absolute path>`, `proc:spawn:<command>`.
 
-- パス引数は呼び出し時に正規化する: `Buffer` は `toString()`、`file:` URL は `fileURLToPath`、相対パスは呼び出し時点の `process.cwd()` を基準に `path.resolve`。
-- グロブは許可側（granted）にのみ書ける。`*` は `/` を跨ぐ（`globMatches` の既存の意味をそのまま使う）。`fs:read:/srv/app/*` は `/srv/app/a/b.txt` にも一致する。ディレクトリ 1 段だけを許可する書き方はない。
-- fd を取る操作（`fs.readSync(fd)`、`FileHandle.read`）は fd の時点でパスを持たない。`open` / `openSync` / `promises.open` の時点で flags から read / write を決めて照合する。`createReadStream` / `createWriteStream` は `fs.open` を経由するので同じ入口で捕まる（実測）。
-- 2 つのパスを取る操作（`rename`、`copyFile`、`link`）は、書き込み先に `fs:write`、読み出し元に `fs:read` を要求する。
-- `proc:spawn:<コマンド>`: `spawn` / `execFile` とその `Sync` 版は argv[0] を**書かれたまま**（PATH 解決をしない）target とする。`fork` は `process.execPath`。シェル形式（`exec`、`execSync`、`shell: true`）は、実際に起動されるプログラムがシェル文字列の中にあり、シェルのパーサなしには決まらないので、target は**シェル自身**（`options.shell` が文字列ならそれ、そうでなければ `/bin/sh`）とする。例外メッセージには「シェルを起動した／許可されたシェルは任意のプログラムを実行できる」と書く。シェル文字列の先頭語を「本当のコマンド」として名乗ることはしない。これは任意の SQL からテーブル名を読み取らないのと同じ理由で、場所が変わっても主張は変わらない。
-- target セグメントの文字種を「コンマ（`@capabilities` の区切り）と制御文字以外」に広げる。パスには空白・`+`・`~`・`%` が現れる。この緩和は閉じる方向にしか効かない: タグの書き損じは「何にも一致しない target」になり、拒否として現れる。
+- Path arguments are normalized at call time: `Buffer` via `toString()`, `file:` URLs via `fileURLToPath`, and relative paths via `path.resolve` against `process.cwd()` at the time of the call.
+- Globs may be written only on the granting side. `*` crosses `/` (the existing meaning of `globMatches` is used as is). `fs:read:/srv/app/*` also matches `/srv/app/a/b.txt`. There is no way to write a grant covering exactly one directory level.
+- Operations taking an fd (`fs.readSync(fd)`, `FileHandle.read`) have no path by the time the fd exists. Read versus write is decided from the flags and matched at `open` / `openSync` / `promises.open`. `createReadStream` / `createWriteStream` go through `fs.open`, so they are caught at the same entry point (measured).
+- Operations taking two paths (`rename`, `copyFile`, `link`) require `fs:write` on the destination and `fs:read` on the source.
+- `proc:spawn:<command>`: `spawn` / `execFile` and their `Sync` variants take argv[0] **as written** (no PATH resolution) as the target. `fork` uses `process.execPath`. For the shell forms (`exec`, `execSync`, `shell: true`), the program actually launched is inside the shell string and is not determined without a shell parser, so the target is **the shell itself** (`options.shell` if it is a string, otherwise `/bin/sh`). The exception message says "a shell was launched / a permitted shell can run an arbitrary program". The first word of the shell string is not claimed as "the real command". This is for the same reason as not reading table names out of arbitrary SQL; the location changes but the claim does not.
+- The character set for a target segment is widened to "anything but a comma (the `@capabilities` separator) and control characters". Paths contain spaces, `+`, `~` and `%`. This relaxation can only act in the closing direction: a mistyped tag becomes "a target that matches nothing", and shows up as a denial.
 
-理由: 呼び出し時に見えるのは解決後のパスであり、許可と照合できる形はこれしかない。正規化のコスト（`path.resolve` 1 回分）は**未計測**。
+Reason: what is visible at call time is the resolved path, and that is the only form that can be matched against a grant. The cost of normalization (one `path.resolve`) is **unmeasured**.
 
-選ばなかった場合に起きること:
+What would happen otherwise:
 
-- 2 を選ぶと、`./data/x` と `/srv/app/data/x` が別の target になり、同じファイルを 2 通りに書ける。cwd が変われば同じ文字列が別のファイルを指すので、許可の意味がプロセスの起動場所に依存する。
-- 3 を選ぶと「どのファイルを読んでよいか」を宣言できず、`fs:read` は「ファイルを読む」以上を意味しなくなる。
+- Choosing 2 would make `./data/x` and `/srv/app/data/x` different targets, so the same file could be written two ways. If cwd changes, the same string points at a different file, so the meaning of a grant would depend on where the process was started.
+- Choosing 3 would make it impossible to declare which files may be read, and `fs:read` would mean nothing beyond "reads files".
 
-**(c) DB クライアント: `pg`**
+**(c) DB client: `pg`**
 
-選択肢: `pg` / `@prisma/client`。
+Options: `pg` / `@prisma/client`.
 
-選んだもの: `pg`。
+Chosen: `pg`.
 
-理由: `pg` は `Pool.prototype.query` / `Client.prototype.query` という安定した差し替え点を持ち、`installFetchHook` と同じ install / restore の対称な形で書ける。Prisma の公式拡張点 `$extends` は**新しいクライアントを返す**ので、元のクライアントを元に戻す restore が書けない。また `prisma generate` を通さないとクライアントが存在せず、実接続のテストが重い。両者の性能比較は**未計測**。
+Reason: `pg` has stable replacement points in `Pool.prototype.query` / `Client.prototype.query`, and can be written in the same symmetric install / restore shape as `installFetchHook`. Prisma's official extension point `$extends` **returns a new client**, so a restore putting the original client back cannot be written. Also, the client does not exist without running `prisma generate`, and testing against a real connection is heavy. A performance comparison of the two is **unmeasured**.
 
-選ばなかった場合に起きること: Prisma を選ぶと restore のないフックになり、P5（撤退できること）を満たさない。
+What would happen otherwise: choosing Prisma would give a hook with no restore, which does not satisfy P5 (being able to back out).
 
-操作とケイパビリティの対応:
+Operations and the capabilities they require:
 
-| 操作 | 要求するケイパビリティ |
+| Operation | Capability required |
 |---|---|
-| `Pool.query(text, …)` / `Client.query(text, …)`、`text` の先頭キーワードが `select` / `show` / `explain` / `describe` | `db:read:<データベース名>` |
-| 同、先頭キーワードが `insert` / `update` / `delete` / `create` / `drop` 等 | `db:write:<データベース名>` |
-| 同、`text` が文字列でない・先頭キーワードが読めない・`Submittable` を渡す形 | `db:read:<…>` と `db:write:<…>` の**両方** |
-| `query({ text })` の設定オブジェクト形式 | `text` を上と同じ規則で判定 |
+| `Pool.query(text, …)` / `Client.query(text, …)` where `text`'s leading keyword is `select` / `show` / `explain` / `describe` | `db:read:<database name>` |
+| The same, where the leading keyword is `insert` / `update` / `delete` / `create` / `drop` and the like | `db:write:<database name>` |
+| The same, where `text` is not a string, its leading keyword cannot be read, or a `Submittable` is passed | **both** `db:read:<…>` and `db:write:<…>` |
+| The configuration-object form `query({ text })` | `text` is judged by the same rules as above |
 
-- 方向の判定は静的側（`src/stubs/data-clients.ts` の SQL キーワード表）と**同一の規則**を使う。規則を 2 か所に置けば、同じ文について静的検査とランタイムが別の答えを出しうる。規則は `src/core/` に 1 つ置き、両方がそれを読む。
-- target は**データベース名**であって、テーブル名ではない。`pg` のクライアントから決まるのは接続先データベースまでで、任意の SQL からテーブルを読み取ることは上の但し書きが禁じている。テーブル単位の `db:read:users` のような target は静的な縮小則（AMB-E005）でのみ意味を持ち、`pg` のランタイムフックはそれを満たさない。この非対称は README と診断文に明記する。
-- 接続先データベースが決まらない場合（`connectionString` にパスがない、環境変数のみ、など）、target は `unknown` とする。`db:read:app` のような狭い許可では満たされず、`db:read:*` のようにデータベースを問わない許可だけが通す。例外メッセージに「接続先データベースを特定できなかった」と書く。
+- The direction is decided by the **same rules** as the static side (the SQL keyword table in `src/stubs/data-clients.ts`). Putting the rules in two places would let the static check and the runtime give different answers about the same statement. The rules live in one place under `src/core/`, and both read them.
+- The target is the **database name**, not a table name. What can be determined from a `pg` client goes as far as the database connected to, and reading tables out of arbitrary SQL is forbidden by the caveat above. A table-level target such as `db:read:users` has meaning only in the static narrowing rule (AMB-E005), and `pg`'s runtime hook does not satisfy it. This asymmetry is stated explicitly in the README and in the diagnostic text.
+- Where the database connected to cannot be determined (no path in the `connectionString`, environment variables only, and so on), the target is `unknown`. A narrow grant like `db:read:app` does not satisfy it; only a database-agnostic grant like `db:read:*` lets it through. The exception message says "the database connected to could not be determined".
 
-対応ライブラリ・バージョン・操作と保証の限界を公開する。DB クライアントへのフックの存在だけで、任意の SQL のテーブル単位権限を判定できるとみなさない。
+Publish the supported libraries, versions, operations, and the limits of the guarantee. The mere existence of a hook into a DB client is not taken to mean that table-level permissions can be decided for arbitrary SQL.
 
-コンテキストがない状態の挙動は `runtime.unscoped` で指定する: `allow`（既定。導入初期向け）/ `warn` / `deny`。
+Behavior with no context is specified by `runtime.unscoped`: `allow` (the default, for early adoption) / `warn` / `deny`.
 
-関数単位の `@capabilities` は既定のランタイムでは強制しない。静的検査で縮小則を確認する用途に限る。より細かい粒度が必要な場合は、オプトインの `contract()` が内側で新しいコンテキストを積む。
+Per-function `@capabilities` is not enforced by the default runtime. It is used only for checking the narrowing rule in the static check. Where finer granularity is needed, the opt-in `contract()` pushes a new context inside.
 
-Node.js の Permission Model は、対応する Node.js バージョンでプロセス全体の外枠として併用を検討する。エントリポイント単位の検査の代替ではなく、悪意あるコードに対する隔離の保証とも区別する。
+Node.js's Permission Model is considered as an outer frame for the whole process, on Node.js versions that support it. It is not a substitute for per-entry-point checking, and is also distinguished from a guarantee of isolation against malicious code.
 
-### 4.5 予算（budget）
+### 4.5 Budget
 
-予算は**型ではなく、宣言・計測・遮断**である。静的に保証しない。
+A budget is **not a type; it is a declaration, a measurement, and a block**. It is not guaranteed statically.
 
-**既定: エントリポイント単位**
+**Default: per entry point**
 
 ```ts
 /**
@@ -704,12 +661,12 @@ Node.js の Permission Model は、対応する Node.js バージョンでプロ
 export async function POST(req: Request): Promise<Response> { /* ... */ }
 ```
 
-- **宣言**: エントリポイントに、リクエストやジョブ 1 回あたりの上限を書く。
-- **計測**: コンテキストに実行時間、LLM 呼び出し回数、推定コスト（料金表 × トークン数）を累積する。対応フックが `llm` 呼び出しを捕まえる。
-- **遮断**: `onExceed` は `throw`（既定）/ `warn` / `abort`（`AbortSignal` 経由でキャンセル）。既に発生した支出の取り消しや、キャンセル非対応の処理の強制停止まで意味しない。
-- **静的補助**: ループ内の `llm`、`llmCalls=1` のエントリポイントから到達可能な `llm` 関数が複数ある等、違反の可能性を示すパターンを警告する。
+- **Declaration**: write the per-request or per-job limit on the entry point.
+- **Measurement**: accumulate elapsed time, LLM call count, and estimated cost (price table × token count) on the context. The corresponding hooks catch `llm` calls.
+- **Block**: `onExceed` is `throw` (default) / `warn` / `abort` (cancellation via `AbortSignal`). It does not extend to undoing spending already incurred, or to force-stopping work that does not support cancellation.
+- **Static assistance**: warn about patterns indicating a possible violation, such as `llm` inside a loop, or more than one `llm` function reachable from an entry point with `llmCalls=1`.
 
-**オプトイン: 関数単位**
+**Opt-in: per function**
 
 ```ts
 import { contract } from "@ambit/runtime";
@@ -720,15 +677,15 @@ export const summarize = contract(
 );
 ```
 
-- `contract()` は元の関数と同じ型を返す。契約オブジェクトはリテラル必須で、チェッカーは JSDoc と同様に AST から読む。
-- 関数予算はエントリポイント予算の内側に入り、子の消費は親に加算される。
-- JSDoc からラッパーを注入する変換は Phase 1 の非目標。将来の導入は RFC を要し、旧 tsc のトランスフォーマ API を全バックエンド共通の拡張点とはみなさない。
+- `contract()` returns a function of the same type as the original. The contract object must be a literal, and the checker reads it from the AST as it does JSDoc.
+- A function budget sits inside the entry-point budget, and a child's consumption is added to the parent's.
+- A transform injecting wrappers from JSDoc is a Phase 1 non-goal. Introducing it later requires an RFC, and the legacy tsc transformer API is not regarded as an extension point common to all backends.
 
-料金表は `ambit.config.ts` に記述し、Ambit 本体は既定値を同梱する。呼び出し前の予算予約、並列実行、推定値と実績の精算、厳密な上限を示せない呼び出しの扱いは 12 章の設計課題として残す。
+The price table is written in `ambit.config.ts`, and Ambit itself bundles defaults. Reserving budget before a call, parallel execution, reconciling estimates against actuals, and handling calls for which no strict upper bound can be given are left as design questions in chapter 12.
 
-### 4.6 境界（boundary）
+### 4.6 Boundary
 
-保証は Ambit が解析・強制できる範囲で成立する。境界を隠さない。
+A guarantee holds within the range Ambit can analyze and enforce. Do not hide the boundary.
 
 ```ts
 /**
@@ -738,25 +695,25 @@ export const summarize = contract(
 export function callLegacySdk(payload: Payload) { return legacy.send(payload); }
 ```
 
-- `@boundary` は「この関数の中は静的検査しない。外側に対して宣言したエフェクト・ケイパビリティを信じる」という明示的な信頼宣言。
-- `reason` は必須。診断と `--coverage` に集計される。
-- `@effects` を伴わない `@boundary` は違反とする。境界の取引は「中は見ない、代わりに外向きの宣言を信じる」であり、信じる対象が宣言されていなければ検査を取り除くだけになる。宣言していない次元（`@capabilities` を書かなかった場合の権限など）は空集合ではなく `unknown` として扱い、呼び出し元から穴が見えたままにする。
-- 境界内でも、対応しているランタイム強制は有効なまま。静的検査だけを止める。
-- サードパーティのモジュール全体を境界にしたい場合は config でパッケージ名を指定する。
+- `@boundary` is an explicit declaration of trust: "do not statically check inside this function; trust the effects and capabilities it declares outward."
+- `reason` is required. It is tallied in diagnostics and in `--coverage`.
+- A `@boundary` without an accompanying `@effects` is a violation. The bargain of a boundary is "we do not look inside, and in exchange we trust the outward declaration", and if there is nothing declared to trust, it merely removes the check. A dimension that is not declared (such as permissions when `@capabilities` was not written) is treated as `unknown` rather than the empty set, leaving the hole visible from the caller.
+- Inside a boundary, supported runtime enforcement stays in effect. Only the static check is stopped.
+- To make an entire third-party module a boundary, name the package in config.
 
-### 4.7 型と null 安全
+### 4.7 Types and null safety
 
-Optional アクセスなどの型安全性は再実装しない。選択した TypeScript 解析バックエンドに委譲し、その診断を Ambit の構造化診断へ変換する。
+Type safety such as optional access is not reimplemented. It is delegated to the chosen TypeScript analysis backend, and its diagnostics are converted into Ambit's structured diagnostics.
 
-非 null アサーション `!` は、それ自体で型を `any` にするものではない。`any` 経由の呼び出しと区別し、アサーションを契約解析でどのように扱うかは適合テストと RFC で定める。
+A non-null assertion `!` does not by itself make a type `any`. It is distinguished from a call through `any`, and how assertions are handled in contract analysis is settled by the conformance tests and an RFC.
 
-## 5. 構造化診断
+## 5. Structured Diagnostics
 
-診断の第一の消費者はAIエージェント。人間向け表示は構造化診断からのレンダリングとして実装する。
+The primary consumer of diagnostics is the AI agent. Human-facing display is implemented as a rendering of the structured diagnostics.
 
-### 5.1 出力形式
+### 5.1 Output format
 
-`ambit check --format json` は NDJSON（1 行 1 診断）を出力する。以下は読みやすさのため整形した一診断の例。
+`ambit check --format json` outputs NDJSON (one diagnostic per line). Below is one diagnostic, formatted for readability.
 
 ```json
 {
@@ -787,18 +744,9 @@ Optional アクセスなどの型安全性は再実装しない。選択した T
 }
 ```
 
-`ambit check --format github` は同じ構造化診断を GitHub Actions のワークフロー
-コマンド（`::error file=...,line=...,col=...,title=<診断 ID>::<本文>`）として出力する。
-本文には診断メッセージに続けて呼び出し経路の各段と `contract.operation` を `%0A`
-区切りで畳み込み、注釈だけで経路が読める形にする。`severity` は
-`error` / `warning` / `info` をそれぞれ `error` / `warning` / `notice` に対応させ、
-`location.file` は検査対象ディレクトリ基準の相対パスなので、注釈が解決される
-ワークスペース基準に直して出す。§6 の「専用 CI プラグインを必須にしない」を
-満たすための出力形式であり、NDJSON の消費者には影響しない。
+`ambit check --format github` outputs the same structured diagnostics as GitHub Actions workflow commands (`::error file=...,line=...,col=...,title=<diagnostic ID>::<body>`). The body folds each step of the call path and `contract.operation` after the diagnostic message, separated by `%0A`, so that the path is readable from the annotation alone. `severity` maps `error` / `warning` / `info` onto `error` / `warning` / `notice` respectively, and since `location.file` is a path relative to the checked directory, it is rewritten to be relative to the workspace where annotations are resolved. This output format exists to satisfy §6's "do not require a dedicated CI plugin", and does not affect consumers of the NDJSON.
 
-`ambit check --format json` は診断に続けて、解析した関数 1 つにつき 1 行、
-`kind: "authority"` のレコードを出力する。これは診断ではなく、その関数が
-持つ権限そのものである。違反の無い関数も含めて全件出る。
+`ambit check --format json` follows the diagnostics with one `kind: "authority"` record per analyzed function. This is not a diagnostic; it is the authority that function holds. Every function is emitted, including those with no violation.
 
 ```json
 {
@@ -819,262 +767,240 @@ Optional アクセスなどの型安全性は再実装しない。選択した T
 }
 ```
 
-- `declared` は `null` が「タグが無い」、`[]` が「`pure` と宣言した」。区別する。
-  解析できなかったタグ（`AMB-E002`）は `null` 側に置く。壊れた宣言を、書かれて
-  いない宣言より狭い許可として読まない。
-- `observed` / `required` は伝播後の値。`unknown` は権限ではなく「解析が届いて
-  いない」という別の主張なので、`effects` / `capabilities` それぞれの独立した
-  真偽値として持つ（§4.3）。
-- `paths` は実際に到達している権限にだけ付き、`via` と `operation` は
-  `AMB-E001` と同じ計算で作る。宣言だけあって本体が到達しない権限に経路は
-  付けない（§5.3、経路を捏造しない）。
-- レコードはシンボル ID 順、レコード内の配列も整列済み。同じツリーを 2 回
-  解析すれば同一の出力になる。順序の揺れが差分として出ないようにするため。
-- 位置は既存の診断行と `kind: "summary"` 行の間。末尾のレコードを `summary`
-  として読む既存の消費者を壊さない（§5.2）。`init` は出さない。提案は
-  「まだ無い契約」についての出力であり、権限の現状ではない。
+- In `declared`, `null` means "there is no tag" and `[]` means "declared `pure`". They are distinguished. A tag that could not be parsed (`AMB-E002`) goes on the `null` side. A broken declaration is not read as a narrower grant than one that was never written.
+- `observed` / `required` are post-propagation values. `unknown` is not an authority but a separate claim — "the analysis did not reach" — so it is held as an independent boolean on each of `effects` and `capabilities` (§4.3).
+- `paths` is attached only to authority actually reached, and `via` and `operation` are built by the same computation as `AMB-E001`. No path is attached to authority that is merely declared but not reached by the body (§5.3, do not fabricate paths).
+- Records are in symbol ID order, and the arrays within a record are sorted. Analyzing the same tree twice produces identical output. This is so that ordering jitter does not show up as a diff.
+- The position is between the existing diagnostic lines and the `kind: "summary"` line. Existing consumers that read the last record as `summary` are not broken (§5.2). `init` does not emit these: its proposals are output about "contracts that do not exist yet", not about the current state of authority.
 
-これはチェッカー側の成果物であり、実行時に読まれることはない。§4.4 案 2 が
-退けたのは**ランタイムに配る**契約データであって、この出力には当たらない。
-`ambit diff`（§6）はこのレコードだけを入力に権限差分を計算する。
+This is an artifact of the checker side and is never read at run time. What §4.4's option 2 rejected was contract data **distributed to the runtime**, which this output is not. `ambit diff` (§6) computes the authority difference from these records alone.
 
-`via` は関数の列であり、各要素の位置はその関数の宣言位置である。効果を起こす操作そのものの位置（`fetch(...)` の行）は `contract.operation` が持つ。読み手が診断だけで操作の行に到達できるようにするためで、`via` の意味は変えない。
+`via` is a sequence of functions, and each element's position is that function's declaration position. The position of the operation that causes the effect (the line of `fetch(...)`) is held by `contract.operation`. This exists so that a reader can reach the operation's line from the diagnostic alone; the meaning of `via` is unchanged.
 
-この例では修正対象の41行目が `/** @effects pure */` の20文字であると仮定する。位置は例示用で、実際のパッチは解析した元ファイルに基づいて生成する。契約を守る具体的パッチを生成できないため、緩和候補だけを表示している。元仕様の省略記号を含む擬似パッチを、適用可能な修正として出力しない。
+This example assumes that line 41, the target of the fix, is the 20 characters `/** @effects pure */`. The positions are illustrative; an actual patch is generated from the analyzed source file. Since no concrete patch that keeps the contract can be generated, only the loosening candidate is shown. A pseudo-patch containing the ellipses of the original specification is not emitted as an applicable fix.
 
-### 5.2 フィールド
+### 5.2 Fields
 
-| フィールド | 内容 |
+| Field | Content |
 |---|---|
-| `id` | 安定した診断コード。削除・再利用しない |
+| `id` | A stable diagnostic code. Never deleted or reused |
 | `severity` | `error` / `warning` / `info` |
 | `category` | `effects` / `capabilities` / `budget` / `boundary` / `types` |
-| `contract` | 契約診断の宣言・観測差分と経路。`category` によって形が変わる: `effects` は `{declared, observed, via}`、`capabilities` は `{declared, required, excess, via}`（`declared` は付与された権限、`required` は本体が必要とする権限、`excess` はそのうち `declared` が許可しないもの）。判別用の追加フィールドは持たせない — 消費者は `category` を見る。コンパイラ由来の型診断などへの適用はスキーマで定義する |
-| `fixes` | 修正候補。`consistentWithContract` で契約を守る修正と緩める修正を区別する |
-| `fixes[].impact` | 契約を緩める修正で影響を受ける呼び出し元など |
-| `contract.operation` | 効果を起こす操作の位置。`{qualifiedName, file, line}`。`via` の末尾の関数（`via` が空なら診断対象の関数）の中で、その効果を起こすスタブ呼び出しの位置。`effects` の超過診断（`AMB-E001`）にのみ付く。位置が確定できない場合 — 効果が callee の `@effects` 宣言だけから来ていて本体に対応する操作が無い、代入やミューテーション由来で名前を持つ操作が無い — はフィールドごと省く。宣言位置で代用しない |
-| `engine` | `{name, version}`。診断を生成した解析バックエンドの識別（`name` は接続層の実装名、`version` はそのバックエンドが依存するコンパイラのバージョン） |
+| `contract` | The declared/observed difference and path of a contract diagnostic. The shape varies by `category`: `effects` is `{declared, observed, via}`, `capabilities` is `{declared, required, excess, via}` (`declared` is the granted capabilities, `required` is what the body needs, and `excess` is the part of that which `declared` does not permit). No extra discriminator field is added — consumers look at `category`. Application to compiler-derived type diagnostics and the like is defined in the schema |
+| `fixes` | Fix candidates. `consistentWithContract` distinguishes fixes that keep the contract from those that loosen it |
+| `fixes[].impact` | Callers and the like affected by a fix that loosens the contract |
+| `contract.operation` | The position of the operation causing the effect. `{qualifiedName, file, line}`. The position of the stub call causing that effect, within the last function of `via` (or the diagnosed function if `via` is empty). Attached only to effect-excess diagnostics (`AMB-E001`). Where the position cannot be determined — the effect comes only from the callee's `@effects` declaration with no corresponding operation in the body, or it comes from an assignment or mutation with no named operation — the field is omitted entirely. The declaration position is not used as a substitute |
+| `engine` | `{name, version}`. Identification of the analysis backend that produced the diagnostic (`name` is the implementation name of the connection layer, `version` is the version of the compiler that backend depends on) |
 
-診断はバージョン付き JSON Schema で管理する。スキーマ版、Ambit 版、解析失敗の表現、coverage の母数・信頼区分を M1 で定義する（`engine` フィールドのみ先行して確定済み）。NDJSON の既存コンシューマを壊すメタデータ行を無断で追加しない。
+Diagnostics are managed by a versioned JSON Schema. The schema version, the Ambit version, the representation of analysis failures, and coverage's denominator and trust categories are defined in M1 (only the `engine` field is settled ahead of that). Metadata lines that would break existing NDJSON consumers are not added without notice.
 
-### 5.3 設計上の注意
+### 5.3 Design notes
 
-- `fixes[].edits` は適用可能な具体的パッチ。要約だけや省略記号を含む候補を、自動適用可能な修正として出さない。
-- 契約を守る修正が生成できる場合は上位に置き、緩和候補はその後に置く。生成できない候補を順位のために捏造しない。
-- 契約を緩める候補の生成が不能な場合の表現はスキーマで定める。「常に提示」と「常に具体的パッチ」の整合を M1 で確定する。
-- 診断コードの意味は `docs/diagnostics/` に一覧化し、破壊的変更は RFC を要する。
-- 形式はホスト言語に依存させない。コンパイラ固有のオブジェクトやスナップショット内 ID を公開シンボル ID にしない。
-- シンボル ID の宣言経路は `"."` で連結する（`src/tax.ts#Foo.bar`）。オブジェクトリテラルのメンバも同じ表記を使い、`const handlers = { read() {} }` は `handlers.read` とする。連結子と衝突する名前（computed / 文字列 / 数値キー）は安定表記を持たないため、シンボル ID を与えない（§12 に残る未解決を参照）。
-- `location` は1始まり、編集範囲は0始まり・終端排他を基本とし、文字列オフセットは UTF-16 単位に統一する。バックエンド側の位置を変換して検証する。
+- `fixes[].edits` are applicable, concrete patches. A candidate that is only a summary, or that contains ellipses, is not emitted as an automatically applicable fix.
+- Where a fix that keeps the contract can be generated, it is placed higher, with loosening candidates after it. Candidates that cannot be generated are not fabricated for the sake of ranking.
+- The representation for when a loosening candidate cannot be generated is defined in the schema. The consistency of "always present a candidate" with "always a concrete patch" is settled in M1.
+- The meaning of diagnostic codes is listed in `docs/diagnostics/`, and breaking changes require an RFC.
+- The format does not depend on the host language. Compiler-specific objects and in-snapshot IDs are never used as public symbol IDs.
+- A symbol ID's declaration path is joined with `"."` (`src/tax.ts#Foo.bar`). Members of object literals use the same notation, so `const handlers = { read() {} }` is `handlers.read`. Names that collide with the joiner (computed, string, or numeric keys) have no stable notation and are given no symbol ID (see the open items remaining in §12).
+- `location` is 1-based; edit ranges are 0-based and end-exclusive by default, and string offsets are unified on UTF-16 units. Positions from the backend are converted and validated.
 
-## 6. ツールチェーン
-
-```text
-ambit init      推論したエフェクトを JSDoc の修正候補として提案。--config で ambit.config.ts への追記を提案
-ambit check     静的検査。--format json / github / --coverage / --strict
-ambit diff      base ref との権限差分。--format github
-ambit run       ランタイム強制を有効にして実行（開発用）
-ambit agent     エージェントループ（7 章）
-ambit stubs     依存パッケージのスタブ生成・検索
-ambit sbom      依存関係とエフェクト・ケイパビリティを SBOM に出力
-```
-
-`ambit diff <ref> [dir]` は、作業ツリーの権限を base ref の権限と比べ、
-増えた分を出す。
-
-- base ref は `git worktree` で一時ディレクトリに materialize する。置き場所は
-  OS の一時ディレクトリで、検査対象のツリーの中には作らない。成功・失敗を
-  問わず必ず片付ける。
-- 両側で同じサブディレクトリを同じ解析にかける。シンボル ID は検査対象
-  ディレクトリ基準の相対パスを含む（§5.3）ので、対象がずれれば全シンボルが
-  新規に見える。
-- 作業ツリーに `node_modules` があれば base 側へ symlink する。実測では、
-  無い側で未解決の呼び出しが 19 件増え、片側にしか無い `any-typed` が出る。
-  契約ではなく環境の差を差分として報告しないため。
-- 比較そのものは `kind: "authority"` レコード 2 組だけを入力とする純粋関数で、
-  git には触れない（§6.1「権限の比較」）。
-- どちらかの側の解析が失敗したら終了コード 2。比較できなかったことを
-  「増えていない」と報告しない（§3.4）。
-
-終了コード:
-
-| 何が起きたか | 終了コード |
-|---|---|
-| 既存シンボルの権限が増えた | 1 |
-| 権限を持つ新規シンボルが増えた | 1 |
-| 権限が減っただけ | 0（報告する） |
-| シンボルが消えただけ | 0（報告する） |
-| 権限を持たない新規シンボル | 0 |
-| `unknown` が増えた（権限は増えていない） | 0（報告する） |
-| どちらかの側の解析が失敗した | 2 |
-
-権限を減らすことはこのコマンドが見張っている対象ではない。減少で落とせば、
-契約に手を付けない理由を書き手に与えてしまう。`unknown` は権限ではないので
-（§4.3）増加に数えないが、報告はする。
-
-- 配布は `npm install -D @ambit/cli` と `npm install @ambit/runtime`。ネイティブバイナリの対応 OS / CPU と配布条件を公開する。
-- 本番では `@ambit/runtime` と必要なアダプタ・契約データを利用する。コンパイラや開発用 CLI を本番の必須依存にしない。
-- エディタは CLI と共通のチェッカーから診断・修正候補を取得する。旧 Language Service Plugin がネイティブ版でもそのまま動くことを前提にしない。採用方式を M4 までに検証する。
-- CI は終了コードと構造化出力で統合する。専用 CI プラグインを必須にしない。GitHub Actions では `ambit check --format github` の出力がそのまま注釈になる（§5.1）。専用の Action やプラグインの導入は要求しない。
-- JSDoc 宣言自体は実行時挙動を変えない。ランタイムへの契約の受け渡しに必要な設定・手順は、フレームワークごとに明示する。
-
-### 6.1 パッケージの責任
-
-| パッケージ | 責任 |
-|---|---|
-| `@ambit/core` | 契約モデル、解析表現、権限の比較、診断形式。コンパイラ API に依存しない |
-| `@ambit/checker` | 接続層から得た情報を用いる契約解析、推論、coverage、修正候補 |
-| `@ambit/cli` | コマンド、終了コード、構造化出力、反復検査の制御 |
-| `@ambit/runtime` | コンテキスト、対応操作の照合・遮断、予算計測、アダプタ |
-| `@ambit/stubs` | 外部ライブラリの契約定義と信頼情報 |
-| エディタ接続パッケージ | 共通チェッカーへの接続。名称と Plugin / LSP 方式は検証後に確定 |
-
-コンパイラ接続層は checker から分離して実装するが、独立した公開 npm パッケージにするかは未決定。不要な公開 API を増やさない。
-
-上記の表はパッケージ分割の目標であり、単一パッケージ内のディレクトリ分割で同じ責任分離を表現してもよい（`AGENTS.md` Toolchain）。
-
-### 6.2 反復検査とキャッシュ
-
-エージェント・エディタ向けに、解析エンジンの状態と Ambit の関数要約・依存関係を保持する常駐検査経路を設計する。単発の `ambit check` も維持する。起動・接続方法や CLI オプション名は M1 で確定する。
-
-- 変更ファイルだけでなく、契約の依存関係を逆向きにたどり、影響する呼び出し元を再検査する。
-- 再帰を含む範囲は固定点まで更新する。
-- JSDoc、コード外契約、スタブ、tsconfig、依存解決、解析エンジン版の変更を失効条件に含める。
-- コンパイラの型情報に変更がなくても、契約コメントだけの変更を無視しない。
-- スナップショット固有の型・シンボル ID を更新後へ持ち越さない。ファイル・宣言経路などとの対応を管理する。
-- 初回解析、型情報取得、契約解析、転送、診断出力を分けて計測し、どこが待ち時間を生むかを明らかにする。
-
-## 7. エージェントループ
+## 6. Toolchain
 
 ```text
-[生成] → ambit check → [診断 JSON] → [修正] → ambit check → ... → ambit run → [テスト] → [デプロイ]
+ambit init      Propose inferred effects as JSDoc fix candidates. --config proposes additions to ambit.config.ts
+ambit check     Static checking. --format json / github / --coverage / --strict
+ambit diff      Authority difference against a base ref. --format github
+ambit run       Run with runtime enforcement enabled (for development)
+ambit agent     The agent loop (chapter 7)
+ambit stubs     Generate and search stubs for dependency packages
+ambit sbom      Emit dependencies together with their effects and capabilities as an SBOM
 ```
 
-- `ambit agent` はエージェント実装を内蔵しない。プロトコルを定義し、任意のエージェントを接続する。
-- 標準入出力または HTTP で、タスク・診断・パッチを NDJSON でやりとりする。初期は標準入出力を優先する。
-- 各反復では常駐検査経路を利用できるようにする。外部エージェントが単発 CLI を呼ぶ方式も維持する。
-- 同一診断 `id` × 同一位置での修正が N 回（既定 3）失敗したら停止し、人間へエスカレーションする。
-- 契約を緩める修正（`consistentWithContract: false`）は人間の承認を要求する（config で緩和可）。
-- 各サイクルで `unknown` 率を記録し、増加した場合は警告する。エンジン変更・解析失敗を通常の改善サイクルと区別する。
+`ambit diff <ref> [dir]` compares the working tree's authority against the base ref's and emits what has increased.
 
-承認をエージェントループの内部だけで強制する場合の限界、契約・設定・スタブの直接変更を CI で検知する方式は 12 章で扱う。
+- The base ref is materialized into a temporary directory with `git worktree`. It is placed in the OS temporary directory, never inside the tree being checked. It is cleaned up unconditionally, on success and on failure.
+- The same subdirectory on both sides goes through the same analysis. Symbol IDs contain a path relative to the checked directory (§5.3), so if the target shifts, every symbol looks new.
+- If the working tree has `node_modules`, it is symlinked into the base side. Measured, the side without it gains 19 more unresolved calls and produces `any-typed` entries present on only one side. This is so that a difference in environment, rather than in contracts, is not reported as a diff.
+- The comparison itself is a pure function taking only the two sets of `kind: "authority"` records, and touches git not at all (§6.1, "capability comparison").
+- If analysis fails on either side, exit code 2. Not having been able to compare is not reported as "nothing increased" (§3.4).
 
-## 8. 供給網
+Exit codes:
 
-既存の `package-lock.json` / `pnpm-lock.yaml`、npm provenance（Sigstore）を利用し、契約層の情報を重ねる。
-
-- `ambit sbom` は依存パッケージごとに、スタブから得たエフェクト・ケイパビリティを SBOM に付与する。
-- 依存更新でエフェクトが拡大した場合、`ambit check` が差分を報告する。
-- スタブの信頼レベル: Ambit 同梱 > パッケージ作者提供 > コミュニティ > 自動推論。診断に信頼レベルを含める。
-- 解析クライアントとネイティブエンジンの版も固定・記録する。エンジン更新時の解析差分は、利用者の依存パッケージの契約差分と区別する。
-
-## 9. ガバナンス
-
-- 仕様、診断コード、チェッカー、ランタイム、スタブは全てオープンソース。
-- `rfcs/` への提案 → レビュー → 採択。診断コードの意味、標準エフェクト、伝播規則の変更は RFC 必須。
-- バックエンドの既定変更や TypeScript 対応範囲の破壊的変更も RFC を要する。
-- 適合テストスイート（`conformance/`）を公開し、代替実装が可能な状態を保つ。型エンジンへの接続試験と、契約モデル自体の試験を分ける。
-- 商標・仕様の管理主体を初期段階で明文化する。npm スコープ `@ambit` の確保は M0 の作業であり、確保済みとは記載しない。
-- `rfcs/` と `conformance/` は初回公開以降に整備する。それまで本ファイルは直接編集し、適合テストは `test/` 配下の Vitest で代替する。
-
-## 10. 成功指標
-
-Phase 1 で計測する。
-
-| 指標 | 目標 |
+| What happened | Exit code |
 |---|---|
-| `unknown` 率（採用チームの中央値、導入3か月後） | 30% 以下。母数・境界の信頼区分・解析エンジン版も公開 |
-| エージェント生成 PR のうち契約違反が本番前に止まった割合 | 計測できること自体が第一目標 |
-| 生成 → 本番投入のリードタイム | 導入前比で改善 |
-| 重大障害件数 | 導入前比で減少 |
-| 撤退コスト | JSDoc・設定・アダプタ等、導入した構成の撤去手順を自動テスト。オプトインラッパーは別に扱う |
-| 初回検査と変更後再検査の待ち時間 | 代表プロジェクトで別々に計測。採択前に定めた許容値と比較 |
-| 解析時のメモリ・通信量 | 親子プロセスを含む条件と測定範囲を公開 |
+| An existing symbol's authority increased | 1 |
+| A new symbol with authority appeared | 1 |
+| Authority only decreased | 0 (reported) |
+| A symbol only disappeared | 0 (reported) |
+| A new symbol with no authority | 0 |
+| `unknown` increased (authority did not) | 0 (reported) |
+| Analysis failed on either side | 2 |
 
-「AI生成コードの本番投入速度が2倍、重大障害が半分」を示せるチームを1つ作ることが Phase 1 の出口条件。他言語対応はこの後にのみ検討する。解析単体の高速化だけで出口条件達成とはしない。
+Reducing authority is not what this command watches for. Failing on a decrease would give the writer a reason not to touch contracts at all. `unknown` is not authority (§4.3) so it does not count as an increase, but it is reported.
 
-## 11. マイルストーン
+- Distribution is `npm install -D @ambit/cli` and `npm install @ambit/runtime`. The supported OS / CPU and distribution conditions of any native binary are published.
+- Production uses `@ambit/runtime` and the necessary adapters and contract data. The compiler and the development CLI are not made required production dependencies.
+- Editors obtain diagnostics and fix candidates from the same checker as the CLI. Do not assume the legacy Language Service Plugin works unchanged on the native version. The chosen approach is verified by M4.
+- CI integrates via the exit code and the structured output. A dedicated CI plugin is not required. On GitHub Actions, the output of `ambit check --format github` becomes annotations directly (§5.1). Installing a dedicated Action or plugin is not demanded.
+- A JSDoc declaration by itself does not change runtime behavior. The settings and steps needed to deliver contracts to the runtime are stated explicitly per framework.
 
-| M | 内容 | 出口条件 |
+### 6.1 Package responsibilities
+
+| Package | Responsibility |
+|---|---|
+| `@ambit/core` | The contract model, analysis representation, capability comparison, diagnostic format. Does not depend on a compiler API |
+| `@ambit/checker` | Contract analysis using information from the connection layer, inference, coverage, fix candidates |
+| `@ambit/cli` | Commands, exit codes, structured output, control of iterative checking |
+| `@ambit/runtime` | Context, matching and blocking of supported operations, budget measurement, adapters |
+| `@ambit/stubs` | Contract definitions and trust information for external libraries |
+| Editor connection package | Connection to the shared checker. The name and the Plugin / LSP approach are settled after verification |
+
+The compiler connection layer is implemented separately from the checker, but whether it becomes an independently published npm package is undecided. Do not add public API that is not needed.
+
+The table above is a goal for package splitting; expressing the same separation of responsibilities as directories within a single package is acceptable (`AGENTS.md` Toolchain).
+
+### 6.2 Iterative checking and caching
+
+For agents and editors, design a resident check path that holds the analysis engine's state together with Ambit's function summaries and dependency information. One-shot `ambit check` is retained as well. The startup and connection method and the CLI option names are settled in M1.
+
+- Rather than only the changed files, walk the contract dependencies backwards and re-check the callers affected.
+- Update ranges containing recursion to a fixed point.
+- Include changes to JSDoc, out-of-code contracts, stubs, tsconfig, dependency resolution, and the analysis engine version among the invalidation conditions.
+- Do not ignore a change to contract comments alone, even when the compiler's type information is unchanged.
+- Do not carry snapshot-specific types and symbol IDs across an update. Maintain a correspondence to files, declaration paths, and the like.
+- Measure initial analysis, type-information retrieval, contract analysis, transfer, and diagnostic output separately, to make clear where the latency comes from.
+
+## 7. The Agent Loop
+
+```text
+[generate] → ambit check → [diagnostics JSON] → [fix] → ambit check → ... → ambit run → [test] → [deploy]
+```
+
+- `ambit agent` does not embed an agent implementation. It defines a protocol and connects an arbitrary agent.
+- Tasks, diagnostics, and patches are exchanged as NDJSON over stdio or HTTP. Initially stdio is preferred.
+- Each iteration is able to use the resident check path. The approach in which an external agent invokes the one-shot CLI is retained as well.
+- If fixes for the same diagnostic `id` at the same position fail N times (default 3), stop and escalate to a human.
+- Fixes that loosen a contract (`consistentWithContract: false`) require human approval (relaxable in config).
+- Record the `unknown` rate on each cycle and warn if it increases. Distinguish engine changes and analysis failures from an ordinary improvement cycle.
+
+The limits of enforcing approval solely inside the agent loop, and how to detect direct changes to contracts, settings, and stubs in CI, are treated in chapter 12.
+
+## 8. Supply Chain
+
+Use the existing `package-lock.json` / `pnpm-lock.yaml` and npm provenance (Sigstore), and layer the contract layer's information on top.
+
+- `ambit sbom` attaches the effects and capabilities obtained from stubs to each dependency package in the SBOM.
+- If effects widen through a dependency update, `ambit check` reports the difference.
+- Stub trust levels: bundled with Ambit > provided by the package author > community > automatically inferred. Include the trust level in diagnostics.
+- Pin and record the versions of the analysis client and the native engine as well. Distinguish analysis differences caused by an engine update from contract differences in the user's dependency packages.
+
+## 9. Governance
+
+- The specification, diagnostic codes, checker, runtime, and stubs are all open source.
+- Proposal into `rfcs/` → review → adoption. Changes to the meaning of diagnostic codes, the standard effects, or the propagation rules require an RFC.
+- Changing the default backend, or making a breaking change to the range of TypeScript supported, also requires an RFC.
+- Publish a conformance test suite (`conformance/`) and keep alternative implementations possible. Keep the connection trials against a type engine separate from trials of the contract model itself.
+- Put the stewardship of the trademark and the specification in writing at an early stage. Securing the npm scope `@ambit` is M0 work and is not described as already done.
+- `rfcs/` and `conformance/` are put in place from the first public release onward. Until then this file is edited directly, and the conformance tests are substituted by Vitest under `test/`.
+
+## 10. Success Metrics
+
+Measured in Phase 1.
+
+| Metric | Target |
+|---|---|
+| `unknown` rate (median across adopting teams, three months after adoption) | 30% or below. The denominator, the trust categories for boundaries, and the analysis engine version are published too |
+| Proportion of agent-generated PRs whose contract violations were stopped before production | Being able to measure it at all is the first goal |
+| Lead time from generation to production | Improved against the pre-adoption baseline |
+| Number of serious incidents | Reduced against the pre-adoption baseline |
+| Cost of backing out | The removal procedure for whatever was adopted — JSDoc, settings, adapters — is tested automatically. Opt-in wrappers are handled separately |
+| Latency of the initial check and of a re-check after a change | Measured separately on a representative project. Compared against the allowances set before adoption |
+| Memory and communication volume during analysis | The conditions including child processes, and the measurement scope, are published |
+
+Producing one team that can show "2× faster to production for AI-generated code, half the serious incidents" is the Phase 1 exit criterion. Support for other languages is considered only after that. Speeding up analysis alone does not count as meeting the exit criterion.
+
+## 11. Milestones
+
+| M | Content | Exit criterion |
 |---|---|---|
-| M0 | 本仕様、診断コード一覧、RFC 手続き、スコープ確保 | レビュー完了 |
-| M0.5 | ネイティブ API / 旧 API の適合性、TS 5.x 互換性、起動・配布、初回・更新性能を比較 | 3.5 の根拠を公開し、既定バックエンドと対応範囲を採択。未検証の高速化を根拠にしない。初回公開前のため §9 に従い RFC ではなく本ファイルへ直接記録した（§3.5「既定バックエンド（決定）」、実測は `docs/status.md`） |
-| M1 | JSDoc、effects 伝播、unknown、coverage、JSON 診断、init、共通チェッカー、常駐・更新経路 | Ambit 本体で dogfooding。契約コメントのみ変更した場合も診断を更新。スキーマと性能計測条件を確定 |
-| M2 | エントリポイント capabilities / budget、fetch / fs / child_process / DB・LLM フック、Express / Hono / Next.js アダプタ | 計画対象の適合試験、契約とハンドラの対応付け、標準スタブ50パッケージ。実対応と未対応を公開 |
-| M3 | 具体的な修正パッチ、ambit agent プロトコル | 外部エージェント1種類と接続。反復中の解析失敗・契約緩和を区別 |
-| M4 | エディタ統合、ambit sbom、npm 配布 | 選択したコンパイラとのエディタ互換性を確認。パイロット1チーム |
-| M5 | Phase 1 出口条件の達成 | 成功指標と検査性能を公開 |
+| M0 | This specification, the diagnostic code list, the RFC procedure, securing the scope | Review complete |
+| M0.5 | Compare native API and legacy API on conformance, TS 5.x compatibility, startup and distribution, and initial and update performance | Publish the evidence for 3.5, and adopt a default backend and a support range. Do not rest on unverified speedups. Being before the first public release, it was recorded directly in this file rather than in an RFC, per §9 (§3.5 "Default backend (decided)"; measurements in `docs/status.md`) |
+| M1 | JSDoc, effect propagation, unknown, coverage, JSON diagnostics, init, the shared checker, the resident and update paths | Dogfooding on Ambit itself. Diagnostics updated even when only contract comments changed. The schema and the performance measurement conditions settled |
+| M2 | Entry-point capabilities / budget, fetch / fs / child_process / DB and LLM hooks, Express / Hono / Next.js adapters | Conformance trials for the planned targets, mapping contracts to handlers, 50 standard stub packages. Publish what is and is not actually supported |
+| M3 | Concrete fix patches, the ambit agent protocol | Connected to one external agent. Analysis failures and contract loosening during iteration distinguished |
+| M4 | Editor integration, ambit sbom, npm distribution | Editor compatibility with the chosen compiler confirmed. One pilot team |
+| M5 | Phase 1 exit criteria met | Success metrics and check performance published |
 
-付録 A の予備検証は M0.5 の一部であり、完了ではない。M0.5 本体は §3.5「既定バックエンド（決定）」で決着し、実測は `docs/status.md` にある。付録 A.2 の数値は**上書きされた**: そこで測れなかったネイティブ側を含む比較が `docs/status.md` にあり、A.2 は当時の記録として残す。
+The preliminary evaluation in appendix A is part of M0.5, not its completion. M0.5 proper was settled in §3.5 "Default backend (decided)", and the measurements are in `docs/status.md`. The numbers in appendix A.2 have been **superseded**: a comparison including the native side, which could not be measured there, is in `docs/status.md`, and A.2 remains as the record of the time.
 
-実際の着手順はこの表と異なり、M1（最初の垂直スライス: §4.2 の伝播規則・§5.1 の NDJSON 診断が動くところまで）を M0.5（バックエンド比較）より先行させている。理由は §3.4 の接続層による隔離設計により契約解析はバックエンド非依存に進められ、個人開発では二トラック並走が最も効率を落とすため。マイルストーンの定義自体は変更していない。
+The actual order of work differs from this table: M1 (the first vertical slice, as far as §4.2's propagation rules and §5.1's NDJSON diagnostics working) has been put ahead of M0.5 (the backend comparison). The reason is that the connection-layer isolation of §3.4 lets contract analysis proceed independently of the backend, and that in solo development running two tracks in parallel is what costs the most efficiency. The definitions of the milestones themselves are unchanged.
 
-## 12. 未解決の問題
+## 12. Open Questions
 
-- **ネイティブ API の安定性**: §3.5「既定バックエンド（決定）」で当面は解決した — 採択しないので追従義務はない。残るのは見直し条件の監視である。配布版 7.0.2 の入口は 12 サブパスすべてが `unstable/*` で公開されており（`unstable/sync`、`unstable/ast`、…）、`latest` の裏で `next` に日次の dev 版が出ている。クライアントとエンジンは `optionalDependencies` の完全一致指定で結び付いているため、両者の版ずれはパッケージマネージャが防ぐ。§3.5 の見直し条件（`unstable` が外れる）が満たされたら再評価する。
-- **ネイティブ版の起動と性能**: 解決。付録 A.2 の停止は環境固有であり、macOS (darwin/arm64) では起動する。同条件の速度・メモリ比較を実施し、結果は `docs/status.md` の M0.5 節にある。残る作業は §3.5 の見直し条件のうち 2 番目 — §6.2 の常駐経路を実装したうえでゲート 3・4 を再実行することであり、それは M1 の作業である。
-- **TypeScript 版間の互換性**: §3.5 が決めたのは**既定をどちらにするか**であり、支えるバックエンドを 1 つに限ると決めたわけではない。未決なのは 2 つ。(1) 6.0.3 が TS 7 側の tsconfig をどこまで読めるか — §3.5 の表のとおり、7.0.2 だけが受理する `deduplicatePackages` を含む tsconfig を 6.0.3 は TS5023 で拒むので、その構成では `ambit check` が起動すらしない。検知して診断にするかは決めていない。(2) 2 つ目のバックエンドを製品として持つかどうか。§3.5 の見直し条件が満たされたときに初めて意味を持つ問いであり、今は問う理由がない。
-- **解析エンジンの版の追従規則**: §3.5 の決定に付随して、版は「JS 実装系列の最新安定版で、`pnpm test` / `tsc --noEmit` / `biome ci` / `check src`・`check realistic-api` のカウントを変えないもの」と定めた（6.0.3 で実測、全カウント不変）。この規則をいつ再評価するかは決めていない。Node.js の「基準ランタイムの LTS 追従期限」と同じ形の期限を置くべきかは未決である。
-- **フレームワークの間接呼び出し**: Express、NestJS の DI、Next.js、Hono 等の呼び出し経路。専用スタブとエントリポイント宣言で吸収できる範囲を M1 で検証する。
-- **型アサーションと非 null アサーション**: `as any` と `!` を同一扱いにしない。型が残っても契約上の呼び出し先が決まらない場合の規則を確定する。
-- **pure とアクセサ**: 外部状態・引数の変更は §4.2「ローカル変異と `pure`」で `state_write` として決着した。残るのはアクセサで、プロパティ参照 `o.x` が getter を起動して任意のコードを走らせうる経路を、どこまで呼び出しとして扱うかが未決定である。型 API の取得成功を純粋性の証明としない。
-- **ランタイムフックの網羅性と壊れやすさ**: 方式の適用範囲（`diagnostics_channel` は監査のみで遮断できない、ローダーフックは monkeypatch の範囲を超えない、`pg` はクライアントラップ）、ESM と初期化順序による覆う範囲の差、`node:fs` / `node:child_process` / `pg` の target 形式は §4.4「ランタイムフックの方式（決定）」で決着した。残るのは (1) `mysql2`、`@prisma/client`、`drizzle-orm`、`mongodb`、LLM SDK の未フック分をどの方式で足すか — Prisma は `$extends` が restore を書けないため、方式そのものが未決である。(2) ライブラリ更新への追従: 差し替え点（`Pool.prototype.query` 等）が上流で変わったことを検知する仕組みがなく、現在は対応バージョンを `docs/limitations.md` に書くだけである。(3) `worker_threads` の各ワーカーと子プロセスへの導入手順。
-- **契約とハンドラの対応付け**: 方式（明示登録）、コメントが消えるビルドとバンドル後の届き方、契約が見つからないハンドラの扱い（`runtime.unscoped`）は §4.4「契約とハンドラの対応付け（決定）」で決着し、`method + path` を鍵にする案の再検討も同節「再検討: HTTP の鍵」で決着した（明示登録のまま）。(1) 二重宣言（JSDoc と `spec`）は §4.4「二重宣言を消す（決定: 2026-09-10）」で決着した。リテラルな `spec` を宣言として読む方向であり、JSDoc からラッパーを注入する変換は採らない。残るのは (2) アダプタを持たない実行経路（BullMQ、`worker_threads`、CLI エントリ）の登録手順。Next.js は `ambit/runtime/next` の `ambitRoute` で閉じた（App Router の Route Handler、Node.js ランタイムのみ。Server Actions・`middleware.ts`・Pages Router・エッジランタイムは対象外で、これらは引き続きアダプタを持たない）。(3) `spec` とハンドラが別ファイル・別モジュールに分かれた登録（現在は `AMB-W004` で比較対象外）を、一致検査でどう扱うか。
-- **エッジランタイム**: Phase 1 は Node.js のみを保証。その他はランタイム強制の有無を明示する。
-- **予算の遮断精度**: 料金表更新、上限予約、並列呼び出し、実績精算、キャンセル非対応処理、推定上限を得られない呼び出しの保証範囲を確定する。
-- **unknown 疲れ**: ディレクトリ単位 strict に加え、警告総量と測定母数を運用で確認する。
-- **boundary と契約緩和の悪用**: reason とcoverageだけで十分か。エージェント外で行った JSDoc / config / stubs の変更を、保護された CI の承認へつなぐ方式を検討する。`ambit diff`（§6）で緩和の**検出**は済んだが、**承認**が無い。権限を正当に増やす PR がゲートを通れないため、diff は CI では非ゲートのままである（`docs/status.md`）。allowlist・ベースライン固定・「この増加は承認済み」のいずれを採るかが未決。
-- **JSDoc の限界・シンボル識別**: get/set アクセサ（`Class.get name` / `Class.set name`）と無名 default export（`default`）の宣言経路表記、および config がそれらを名指しできることは §4.1「コード外宣言」(a) で決着した。残るのは 2 つ。(1) 識別子名を持たないオブジェクトリテラルのメンバ（computed / 文字列 / 数値キー）と、宣言経路の連結子 `"."` と衝突しうる名前の表記。これらは config でも名指しできないままであり、AMB-E003 と `--coverage` の skipped に残る。(2) §4.1(a) が残した非対称 — 宣言経路を持つ getter / 無名 default export に構文上は JSDoc を書けるのに採用しない — を解消するかどうか。解消する場合、JSDoc の帰属先をどう一意に決めるかが先に要る。
-- **エントリポイント粒度の抜け**: 同一リクエスト内の関数別権限は既定では静的検査のみ。この割り切りをパイロットで確認する。
-- **モノレポ**: 複数 tsconfig、プロジェクト参照、設定探索、プロジェクト境界の unknown、更新伝播を検証する。
-- **エディタ統合**: ネイティブ版で旧 Language Service Plugin の互換性を仮定しない。LSP との接続・診断統合・同じ解析結果の再利用を確認する。
-- **修正候補と診断スキーマ**: 具体的なパッチを安全に生成できない場合、型診断に契約情報がない場合、解析失敗の表現を確定する。
-- **ビルド用コンパイラと解析エンジンの分離**: §3.1 は対象言語の互換性・ビルド用コンパイラ・解析エンジンのバージョンを別管理と定めるが、実装（`package.json`）では `typescript` 1 本が `tsc --noEmit`（ビルド用）と `legacy-ts.ts`（比較用解析バックエンド、付録 A.1 参照）を兼任している。`legacy-ts.ts` は診断の `engine.version` に `ts.version` をそのまま流すため、ビルド用 tsc だけを更新しても診断の engine 表記が黙って変わりうる。M0.5 で、別 alias による分離は**実測の上で退けた**: `typescript@7` も `bin: { tsc }` を宣言するため、alias で入れても `node_modules/.bin/tsc` を奪い、`pnpm exec tsc` が黙って別コンパイラになる（`docs/status.md` の M0.5 ゲート 5）。分離が必要になった時点で、alias ではなく別経路（`.m05-native/` 方式、あるいはパッケージ分割）を採る。
-- **基準ランタイムの LTS 追従期限**: §3.1 の基準ランタイムは Active LTS 1 本（2026-09 時点で Node.js 24）とし、保守中・未検証の系は `engines` に宣言しない。Node.js 24 は 2026-10-20 に Maintenance LTS へ移行し、2026-10-28 に Node.js 26 が Active LTS になる（[Node.js Release Schedule](https://github.com/nodejs/Release)）。この日付までに Node.js 26 での検証（§3.5 相当の適合確認は不要でも、テスト・CI の通過確認は必要）と `engines` / `@types/node` / CI の乗り換えを完了するか、24 を Maintenance LTS のまま基準に据え続けると明示的に決め直す。放置すると「基準ランタイムは Active LTS」という方針が自動的に成立しなくなる。
+- **Stability of the native API**: resolved for now by §3.5 "Default backend (decided)" — since it is not adopted, there is no obligation to track it. What remains is watching the conditions for revisiting. All 12 subpaths of distributed version 7.0.2's entry points are published under `unstable/*` (`unstable/sync`, `unstable/ast`, …), and daily dev builds go out on `next` behind `latest`. The client and the engine are tied together by an exact-match `optionalDependencies` specification, so the package manager prevents version skew between them. Re-evaluate once §3.5's condition for revisiting (the `unstable` name coming off) is met.
+- **Startup and performance of the native version**: resolved. The halt in appendix A.2 was environment-specific; it starts on macOS (darwin/arm64). A speed and memory comparison under identical conditions was carried out, and the results are in the M0.5 section of `docs/status.md`. What remains is the second of §3.5's conditions for revisiting — re-running gates 3 and 4 after implementing §6.2's resident path — which is M1 work.
+- **TypeScript version compatibility**: what §3.5 decided is **which one is the default**, not that only one backend will ever be supported. Two things are undecided. (1) How far 6.0.3 can read a TS 7-side tsconfig — as the table in §3.5 shows, 6.0.3 rejects with TS5023 a tsconfig containing `deduplicatePackages`, which only 7.0.2 accepts, so under that configuration `ambit check` does not even start. Whether to detect this and turn it into a diagnostic is undecided. (2) Whether to carry a second backend as a product. This question only acquires meaning once §3.5's conditions for revisiting are met, and there is no reason to ask it now.
+- **The rule for tracking the analysis engine's version**: alongside §3.5's decision, the version was defined as "the latest stable release of the JS-implementation line that leaves the counts of `pnpm test` / `tsc --noEmit` / `biome ci` / `check src` and `check realistic-api` unchanged" (measured at 6.0.3; every count unchanged). When to re-evaluate this rule is undecided. Whether a deadline of the same shape as Node.js's "deadline for tracking the baseline runtime's LTS" should be set is undecided.
+- **Indirect calls in frameworks**: the call paths of Express, NestJS's DI, Next.js, Hono and the like. How far dedicated stubs and entry-point declarations can absorb them is verified in M1.
+- **Type assertions and non-null assertions**: `as any` and `!` are not treated identically. Settle the rule for when the type survives but the contract-level callee is not determined.
+- **`pure` and accessors**: modification of external state and arguments was settled as `state_write` in §4.2 "Local mutation and `pure`". What remains is accessors: how far a property reference `o.x` — which can trigger a getter and run arbitrary code — should be treated as a call is undecided. Success in obtaining type API information is not a proof of purity.
+- **Coverage and fragility of runtime hooks**: the applicable range of each approach (`diagnostics_channel` audits only and cannot block, loader hooks do not exceed monkeypatching's range, `pg` uses client wrapping), the difference in coverage caused by ESM and initialization order, and the target formats for `node:fs` / `node:child_process` / `pg` were settled in §4.4 "The approach to runtime hooks (decided)". What remains is (1) by what approach to add the unhooked `mysql2`, `@prisma/client`, `drizzle-orm`, `mongodb`, and LLM SDKs — for Prisma, because `$extends` cannot express a restore, the approach itself is undecided. (2) Tracking library updates: there is no mechanism for detecting that a replacement point (`Pool.prototype.query` and the like) changed upstream, and at present the supported versions are merely written in `docs/limitations.md`. (3) The installation procedure for each `worker_threads` worker and for child processes.
+- **Mapping contracts to handlers**: the approach (explicit registration), how contracts arrive through builds that drop comments and after bundling, and the treatment of handlers whose contract cannot be found (`runtime.unscoped`) were settled in §4.4 "Mapping contracts to handlers (decided)", and the reconsideration of keying on `method + path` was settled in the same section's "Reconsidered: an HTTP key" (explicit registration unchanged). (1) The double declaration (JSDoc and `spec`) was settled in §4.4 "Removing the double declaration (decided: 2026-09-10)", in the direction of reading a literal `spec` as the declaration; a transform injecting wrappers from JSDoc is not taken. What remains is (2) the registration procedure for execution paths with no adapter (BullMQ, `worker_threads`, CLI entry points). Next.js was closed by `ambit/runtime/next`'s `ambitRoute` (App Router Route Handlers on the Node.js runtime only; Server Actions, `middleware.ts`, the Pages Router, and the edge runtime are out of scope and continue to have no adapter). (3) How the agreement check should handle a registration whose `spec` and handler are in different files or modules (currently excluded from comparison via `AMB-W004`).
+- **Edge runtimes**: Phase 1 guarantees Node.js only. For anything else, state explicitly whether runtime enforcement exists.
+- **Precision of budget blocking**: settle the guaranteed range for price-table updates, reserving limits, parallel calls, reconciling actuals, work that does not support cancellation, and calls for which no estimated upper bound can be obtained.
+- **`unknown` fatigue**: in addition to per-directory strict, confirm the total volume of warnings and the measurement denominator in practice.
+- **Abuse of boundary and contract loosening**: are `reason` and coverage enough? Consider how to connect JSDoc / config / stubs changes made outside the agent to an approval in protected CI. `ambit diff` (§6) has taken care of **detecting** loosening, but there is no **approval**. Because a PR that legitimately increases authority cannot pass the gate, diff remains non-gating in CI (`docs/status.md`). Which of an allowlist, a pinned baseline, or "this increase is approved" to take is undecided.
+- **JSDoc limits and symbol identification**: the declaration-path notation for get/set accessors (`Class.get name` / `Class.set name`) and anonymous default exports (`default`), and config's ability to name them, were settled in §4.1 "Out-of-code declarations" (a). Two things remain. (1) Notation for object-literal members with no identifier name (computed, string, or numeric keys), and for names that can collide with the declaration path's joiner `"."`. These still cannot be named even in config, and remain in AMB-E003 and in `--coverage`'s skipped. (2) Whether to resolve the asymmetry §4.1(a) left — that JSDoc can syntactically be written on getters and anonymous default exports with a declaration path, yet is not adopted. Resolving it requires first deciding how to fix JSDoc's attribution uniquely.
+- **Gaps in entry-point granularity**: per-function capabilities within a single request are statically checked only, by default. Confirm this trade-off in the pilot.
+- **Monorepos**: verify multiple tsconfigs, project references, config discovery, unknown at project boundaries, and update propagation.
+- **Editor integration**: do not assume the legacy Language Service Plugin is compatible on the native version. Confirm the LSP connection, diagnostic integration, and reuse of the same analysis results.
+- **Fix candidates and the diagnostic schema**: settle the representation for when a concrete patch cannot be generated safely, when a type diagnostic carries no contract information, and for analysis failures.
+- **Separating the build compiler from the analysis engine**: §3.1 states that the target language's compatibility, the build compiler, and the analysis engine's version are managed separately, but in the implementation (`package.json`) a single `typescript` serves both `tsc --noEmit` (the build) and `legacy-ts.ts` (the comparison analysis backend; see appendix A.1). Because `legacy-ts.ts` passes `ts.version` straight into a diagnostic's `engine.version`, updating only the build tsc can silently change the engine string in diagnostics. In M0.5, separation by a second alias was **rejected on measurement**: `typescript@7` also declares `bin: { tsc }`, so installing it under an alias still takes `node_modules/.bin/tsc` and `pnpm exec tsc` silently becomes a different compiler (`docs/status.md`, M0.5 gate 5). If separation becomes necessary, take a different route than an alias (the `.m05-native/` approach, or splitting packages).
+- **The deadline for tracking the baseline runtime's LTS**: §3.1's baseline runtime is a single Active LTS (Node.js 24 as of 2026-09), and lines that are in maintenance or unverified are not declared in `engines`. Node.js 24 moves to Maintenance LTS on 2026-10-20, and Node.js 26 becomes Active LTS on 2026-10-28 ([Node.js Release Schedule](https://github.com/nodejs/Release)). By that date, either complete verification on Node.js 26 (a §3.5-level conformance check is not required, but confirming that the tests and CI pass is) together with the move of `engines` / `@types/node` / CI, or explicitly decide anew to keep 24 as the baseline while it is in Maintenance LTS. Left alone, the policy that "the baseline runtime is the Active LTS" simply stops holding.
 
-## 付録 A. M0.5 予備検証の記録
+## Appendix A. Record of the M0.5 Preliminary Evaluation
 
-### A.1 調査した環境・配布物
+### A.1 Environment and artifacts examined
 
-| 項目 | 値 |
+| Item | Value |
 |---|---|
 | Node.js | v24.19.0 |
-| ネイティブ TypeScript | npm `typescript` 7.0.2 |
-| 旧 TypeScript | 5.9.3（比較用 alias で導入） |
+| Native TypeScript | npm `typescript` 7.0.2 |
+| Legacy TypeScript | 5.9.3 (installed under a comparison alias) |
 | Oxc | `oxc-parser` 0.148.0 |
-| 対象 | 合成コード。実プロジェクトは未提供 |
+| Target | Synthetic code. No real project was provided |
 
-配布版の型定義・実装には、型、シンボル、呼び出しシグネチャ、JSDoc、変更後スナップショット、通信計測への入口がある。**API の存在確認であり、ネイティブ版での動作確認完了ではない。**
+The distributed version's type definitions and implementation have entry points for types, symbols, call signatures, JSDoc, post-change snapshots, and communication measurement. **This is confirmation that the API exists, not completed confirmation that it works on the native version.**
 
-### A.2 実測と限界
+### A.2 Measurements and limits
 
-旧 API 版では102ファイル・2,009呼び出しを、独立した Node プロセスで5回、順次測定した。
+On the legacy API, 102 files and 2,009 calls were measured 5 times sequentially, each in an independent Node process.
 
-| 範囲 | 中央値 |
+| Scope | Median |
 |---|---:|
-| コンパイラ import・Program 構築 | 708.9 ms |
-| 型診断取得 | 125.8 ms |
-| 全呼び出しの型・シグネチャ・契約等の抽出 | 92.6 ms |
-| 上記の全体 | 953.5 ms |
-| 契約コメント変更後の Program 更新と9呼び出しの再照会 | 21.5 ms |
-| Node プロセス最大 RSS | 247.7 MiB |
+| Compiler import and Program construction | 708.9 ms |
+| Type diagnostic retrieval | 125.8 ms |
+| Extracting types, signatures, contracts and so on for all calls | 92.6 ms |
+| All of the above | 953.5 ms |
+| Program update after a contract-comment change and re-query of 9 calls | 21.5 ms |
+| Peak RSS of the Node process | 247.7 MiB |
 
-- fixture 生成と Node 自身の起動は上記の初回計測に含まない。OS ファイルキャッシュは冷却していない。
-- 各段階の中央値を独立に算出しているため、その和と全体中央値は一致しない。
-- コメント変更後の測定は、一部の再照会である。Ambit の副作用伝播・全診断更新を含む増分検査速度ではない。
-- 9ケースには別名 import、generic、overload、callback、any、非 null アサーション、union、Unicode の位置、再帰を含む。スクリプト内の assertion は全5回成功した。全言語機能への適合性や unknown 率を示すものではない。
-- Go 製エンジンは `/proc/self/exe` を取得できず初期化前に停止した。Node の readlink でも同じパスの ENOENT を確認。**ネイティブ版の速度・メモリ・API 動作の比較は未完了。** 一般の Linux で動作しない証拠ではない。— **2026-09-09 追記**: この停止は環境固有だった。同じ配布版 7.0.2 が macOS (darwin/arm64) では起動し、API 適合性・更新の正しさ・速度・メモリの比較を完了した（`docs/status.md` の M0.5 節）。Linux での再確認は行っていない。
-- Oxc は小さな TS 関数とコメントの解析に成功。型解析・契約検査・速度比較は未実施。
+- Fixture generation and Node's own startup are not included in the initial measurement above. The OS file cache was not cooled.
+- Since each stage's median is computed independently, their sum does not match the median of the total.
+- The measurement after the comment change is a partial re-query. It is not an incremental check speed including Ambit's effect propagation and a full diagnostic update.
+- The 9 cases include aliased imports, generics, overloads, callbacks, any, non-null assertions, unions, Unicode positions, and recursion. The assertions in the script succeeded on all 5 runs. This does not demonstrate conformance across all language features, nor an `unknown` rate.
+- The Go engine could not obtain `/proc/self/exe` and halted before initialization. The same path's ENOENT was confirmed with Node's readlink too. **The comparison of the native version's speed, memory, and API behavior is incomplete.** This is not evidence that it does not work on Linux generally. — **Added 2026-09-09**: this halt was environment-specific. The same distributed version 7.0.2 starts on macOS (darwin/arm64), and the comparison of API conformance, correctness of updates, speed, and memory was completed (the M0.5 section of `docs/status.md`). It has not been re-confirmed on Linux.
+- Oxc succeeded in parsing small TS functions and comments. Type analysis, contract checking, and speed comparison were not carried out.
 
-### A.3 参照
+### A.3 References
 
-- [TypeScript API ソース](https://github.com/microsoft/TypeScript/tree/main/packages/typescript/src/api)
-- [同期 API の実装](https://github.com/microsoft/TypeScript/blob/main/packages/typescript/src/api/sync/api.ts)
-- [TypeScript ネイティブ移植の旧開発リポジトリ](https://github.com/microsoft/typescript-go)
-- [Oxlint の型情報を使う検査](https://oxc.rs/docs/guide/usage/linter/type-aware.html)
-- [tsgolint の shim 生成](https://github.com/oxc-project/tsgolint/blob/main/tools/gen_shims/main.go)
-- [Oxc パーサー](https://oxc.rs/docs/guide/usage/parser.html)
-- [Node.js リリース一覧](https://nodejs.org/en/about/previous-releases)
-- [Node.js Permission Model の制約](https://nodejs.org/download/release/v25.6.1/docs/api/permissions.html)
+- [TypeScript API source](https://github.com/microsoft/TypeScript/tree/main/packages/typescript/src/api)
+- [Implementation of the synchronous API](https://github.com/microsoft/TypeScript/blob/main/packages/typescript/src/api/sync/api.ts)
+- [The former development repository for the native TypeScript port](https://github.com/microsoft/typescript-go)
+- [Oxlint's type-aware checks](https://oxc.rs/docs/guide/usage/linter/type-aware.html)
+- [tsgolint's shim generation](https://github.com/oxc-project/tsgolint/blob/main/tools/gen_shims/main.go)
+- [The Oxc parser](https://oxc.rs/docs/guide/usage/parser.html)
+- [Node.js release list](https://nodejs.org/en/about/previous-releases)
+- [Constraints of the Node.js Permission Model](https://nodejs.org/download/release/v25.6.1/docs/api/permissions.html)
 
-Web の main ブランチと固定した配布版の API を同一視しない。この予備検証での直接の API 確認は配布版 7.0.2 に対して行った。
+Do not equate the web's main branch with the pinned distributed version's API. The direct API confirmation in this preliminary evaluation was done against distributed version 7.0.2.

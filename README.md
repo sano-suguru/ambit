@@ -186,7 +186,7 @@ strips the comments and a bundler that renames everything.
 `@effects` and `@entrypoint` stay in the JSDoc. The dividing line is whether
 the runtime needs the value: the hooks match against `capabilities` and the
 budget's `timeMs` is measured against the wall clock, while `@effects` is only
-ever read statically (DESIGN.md §4.1「宣言の出所」).
+ever read statically (DESIGN.md §4.1 "Where declarations live").
 
 Where a `spec` cannot supply the declaration — a capability list or budget
 built at runtime, or a handler declared in another module — the JSDoc tag is
@@ -271,7 +271,7 @@ above deliberately installs nothing when `NEXT_RUNTIME` is not `nodejs`, so
 **no capability is checked** on such a route: nothing is intercepting the
 operations. Nothing else about `ambitRoute` on Edge is claimed either — no test
 runs there, so whether the context is established at all is unverified. Phase 1
-guarantees the Node.js runtime only (DESIGN.md §12「エッジランタイム」), and the
+guarantees the Node.js runtime only (DESIGN.md §12 "Edge runtimes"), and the
 honest form for an Edge route today is to leave it unwrapped, so that nothing
 about it reads as enforced.
 
