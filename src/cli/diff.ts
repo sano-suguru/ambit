@@ -11,6 +11,7 @@ import {
   unknownGained,
 } from "../core/index.ts";
 import { analyze } from "./analyze.ts";
+import { githubAnnotation, workspacePath } from "./github.ts";
 import { addWorktree, git, removeWorktree, repositoryRoot } from "./worktree.ts";
 
 /** What `ambit diff` compared, and what came out. */
@@ -21,6 +22,8 @@ export interface DiffResult {
   readonly baseCommit: string;
   /** The directory that was compared, relative to the repository root. */
   readonly subdir: string;
+  /** That same directory as the caller gave it — what a `location.file` is relative to. */
+  readonly dir: string;
 }
 
 /**
@@ -50,7 +53,13 @@ export async function runDiff(ref: string, dir: string): Promise<DiffResult> {
     // a whole repository would make every id look new.
     const base = await analyze(path.join(worktree.root, subdir));
     const head = await analyze(path.resolve(dir));
-    return { diff: diffAuthority(base.authority, head.authority), ref, baseCommit, subdir };
+    return {
+      diff: diffAuthority(base.authority, head.authority),
+      ref,
+      baseCommit,
+      subdir,
+      dir: path.resolve(dir),
+    };
   } finally {
     await removeWorktree(worktree);
   }
@@ -161,4 +170,49 @@ function refText(ref: AuthorityRef): string {
 
 function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
+/**
+ * One GitHub Actions annotation per authority gained — per symbol *and*
+ * authority, since that is what a reviewer acts on: `priceOrder` gaining
+ * `network` and `fs_write` are two decisions, not one.
+ *
+ * Annotated at the symbol's own declaration, with the call path folded into
+ * the body, so the annotation lands on the function whose contract changed
+ * and carries the reason without the reader opening the job log — the same
+ * shape `check --format github` uses (DESIGN.md §5.1 / §6).
+ *
+ * Only increases are annotated. A decrease and a deletion are reported by
+ * the text output and do not fail a build (§6), so an annotation on them
+ * would be noise on a diff.
+ */
+export function formatDiffGithub(result: DiffResult): string {
+  let out = "";
+  for (const entry of authorityIncreases(result.diff)) {
+    const head = entry.head;
+    if (!head) continue;
+    for (const ref of entry.added) {
+      const path = pathFor(head, ref);
+      const what = entry.status === "new" ? "new symbol" : "authority increased";
+      out += githubAnnotation({
+        severity: "error",
+        file: workspacePath(result.dir, head.location.file),
+        line: head.location.line,
+        col: head.location.col,
+        title: "ambit diff",
+        body: [
+          `${displayName(head.symbol)} gained ${refText(ref)} since ${result.ref} (${what})`,
+          ...(path?.via ?? []).map(
+            (hop) => `-> ${displayName(hop.symbol)} (${hop.file}:${hop.line})`,
+          ),
+          ...(path?.operation
+            ? [
+                `operation: ${path.operation.qualifiedName} (${path.operation.file}:${path.operation.line})`,
+              ]
+            : []),
+        ],
+      });
+    }
+  }
+  return out;
 }

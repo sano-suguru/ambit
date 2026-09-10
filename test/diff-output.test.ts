@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type DiffResult, formatDiffText } from "../src/cli/diff.ts";
+import { type DiffResult, formatDiffGithub, formatDiffText } from "../src/cli/diff.ts";
 import type { AuthorityRecord, SymbolId } from "../src/core/index.ts";
 import { diffAuthority } from "../src/core/index.ts";
 
@@ -20,18 +20,26 @@ function record(symbol: string, parts: Partial<AuthorityRecord> = {}): Authority
   };
 }
 
+function result(
+  base: readonly AuthorityRecord[],
+  head: readonly AuthorityRecord[],
+  over = "src",
+): DiffResult {
+  return {
+    diff: diffAuthority(base, head),
+    ref: "main",
+    baseCommit: "0123456789abcdef0123456789abcdef01234567",
+    subdir: over,
+    dir: process.cwd(),
+  };
+}
+
 function render(
   base: readonly AuthorityRecord[],
   head: readonly AuthorityRecord[],
   over = "src",
 ): string {
-  const result: DiffResult = {
-    diff: diffAuthority(base, head),
-    ref: "main",
-    baseCommit: "0123456789abcdef0123456789abcdef01234567",
-    subdir: over,
-  };
-  return formatDiffText(result);
+  return formatDiffText(result(base, head, over));
 }
 
 const WIDENED_HEAD = record("pricing.ts#priceOrder", {
@@ -151,5 +159,68 @@ describe("formatDiffText", () => {
   it("names the base ref, its commit and the directory compared", () => {
     const output = render([record("a.ts#f")], [record("a.ts#f")], "src");
     expect(output.split("\n")[0]).toBe("base main (0123456) vs the working tree, over src");
+  });
+});
+
+describe("formatDiffGithub", () => {
+  it("emits one annotation per authority gained, with the path folded in", () => {
+    const output = formatDiffGithub(result([WIDENED_BASE], [WIDENED_HEAD]));
+    const annotations = output.split("\n").filter((line) => line.startsWith("::"));
+    expect(annotations).toHaveLength(1);
+    expect(annotations[0]).toContain("::error file=pricing.ts,line=4,col=1,title=ambit diff::");
+    expect(annotations[0]).toContain("priceOrder gained network since main");
+    // `:` terminates a property value, not the body, so hops keep their colon.
+    expect(annotations[0]).toContain("%0A-> applyTax (tax.ts:3)");
+    expect(annotations[0]).toContain("%0Aoperation: fetch (rates.ts:4)");
+  });
+
+  it("emits one annotation per authority, not one per symbol", () => {
+    // Two authorities gained by one function are two decisions for a
+    // reviewer, so they are two annotations.
+    const output = formatDiffGithub(
+      result(
+        [record("a.ts#f")],
+        [
+          record("a.ts#f", {
+            effects: { declared: ["network", "fs_write"], observed: [], unknown: false },
+          }),
+        ],
+      ),
+    );
+    const annotations = output.split("\n").filter((line) => line.startsWith("::"));
+    expect(annotations).toHaveLength(2);
+    expect(annotations.some((a) => a.includes("gained network"))).toBe(true);
+    expect(annotations.some((a) => a.includes("gained fs_write"))).toBe(true);
+  });
+
+  it("annotates a new symbol that holds authority, and says it is new", () => {
+    const output = formatDiffGithub(
+      result(
+        [],
+        [record("n.ts#f", { effects: { declared: ["llm"], observed: [], unknown: false } })],
+      ),
+    );
+    const annotations = output.split("\n").filter((line) => line.startsWith("::"));
+    // `llm` implies `network` (DESIGN.md §4.2), so the declared set expands.
+    expect(annotations.length).toBeGreaterThanOrEqual(1);
+    expect(output).toContain("(new symbol)");
+  });
+
+  it("annotates nothing when nothing increased", () => {
+    const decrease = formatDiffGithub(
+      result(
+        [record("a.ts#f", { effects: { declared: ["network"], observed: [], unknown: false } })],
+        [record("a.ts#f", { effects: { declared: [], observed: [], unknown: false } })],
+      ),
+    );
+    expect(decrease).toBe("");
+
+    const deletion = formatDiffGithub(
+      result(
+        [record("a.ts#f", { effects: { declared: ["network"], observed: [], unknown: false } })],
+        [],
+      ),
+    );
+    expect(deletion).toBe("");
   });
 });

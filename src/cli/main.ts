@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
-import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { CoverageReport } from "../checker/coverage.ts";
 import type { Diagnostic } from "../core/index.ts";
 import { displayName, isEffectsContract } from "../core/index.ts";
 import { type Analysis, analyze } from "./analyze.ts";
-import { formatDiffText, runDiff } from "./diff.ts";
+import { formatDiffGithub, formatDiffText, runDiff } from "./diff.ts";
+import { githubAnnotation, workspacePath } from "./github.ts";
 
 /**
  * Exit codes (plan step 9): distinguish "checked, no error-level violation"
@@ -103,7 +103,9 @@ async function diffCommand(args: Args): Promise<number> {
     process.stderr.write(`ambit: diff failed: ${errorMessage(error)}\n`);
     return EXIT_ANALYSIS_FAILED;
   }
-  process.stdout.write(formatDiffText(result));
+  process.stdout.write(
+    args.format === "github" ? formatDiffGithub(result) : formatDiffText(result),
+  );
   return EXIT_OK;
 }
 
@@ -236,28 +238,14 @@ const GITHUB_COMMAND: Readonly<Record<Diagnostic["severity"], string>> = {
  */
 function formatGithub(diagnostic: Diagnostic, rootDir: string): string {
   const { location } = diagnostic;
-  const properties = [
-    `file=${githubProperty(workspacePath(rootDir, location.file))}`,
-    `line=${location.line}`,
-    `col=${location.col}`,
-    `title=${githubProperty(diagnostic.id)}`,
-  ].join(",");
-  const body = [diagnostic.message, ...viaPath(diagnostic)].join("\n");
-  return `::${GITHUB_COMMAND[diagnostic.severity]} ${properties}::${githubData(body)}\n`;
-}
-
-function workspacePath(rootDir: string, file: string): string {
-  return path.relative(process.cwd(), path.resolve(rootDir, file)).split(path.sep).join("/");
-}
-
-/** Workflow-command escaping for the message body. */
-function githubData(value: string): string {
-  return value.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
-}
-
-/** Workflow-command escaping for a property value, where `:` and `,` also terminate. */
-function githubProperty(value: string): string {
-  return githubData(value).replaceAll(":", "%3A").replaceAll(",", "%2C");
+  return githubAnnotation({
+    severity: GITHUB_COMMAND[diagnostic.severity],
+    file: workspacePath(rootDir, location.file),
+    line: location.line,
+    col: location.col,
+    title: diagnostic.id,
+    body: [diagnostic.message, ...viaPath(diagnostic)],
+  });
 }
 
 function formatJson(diagnostic: Diagnostic): string {
