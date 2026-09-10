@@ -36,10 +36,13 @@ procedure:
 - **A record with a `Superseded by:` line is history**, not the specification.
   `docs/DESIGN.md` points at the record that is current.
 
-Until the first npm publish, a decision is made by editing `docs/DESIGN.md`
-directly and writing the record here (`docs/DESIGN.md` §9). From the first
-publish onward, the proposal goes through `rfcs/` first, and the accepted RFC
-becomes the record.
+Until `docs/DESIGN.md` §9.1's trigger — 1.0, or the first external adopter,
+whichever comes first — a decision is made by editing `docs/DESIGN.md` directly
+and writing the record here. From the trigger onward, the proposal goes through
+`rfcs/` first, and the accepted RFC becomes the record. A record written before
+the trigger stays valid as a record; where it describes the *procedure* as
+starting at the first npm publish, it is describing §9 as it read at the time,
+and [ADR-0010](0010-when-governance-takes-effect.md) is what changed it.
 
 ## Template
 
@@ -74,3 +77,4 @@ is left out rather than padded.
 | [0007](0007-http-route-keys.md) | An HTTP `method + path` key does not replace explicit registration | Accepted — confirms 0005 |
 | [0008](0008-approving-an-authority-increase.md) | An authority increase is approved by a ledger line valid only in the comparison that adds it | Accepted (2026-09-10) |
 | [0009](0009-package-name-and-single-package.md) | The npm package is `ambit-ts`, and it stays a single package | Accepted (2026-09-10) |
+| [0010](0010-when-governance-takes-effect.md) | The RFC procedure starts at 1.0 or the first external adopter; a guaranteed surface holds until then | Accepted (2026-09-10) — confirms 0001, 0009 |

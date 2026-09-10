@@ -20,7 +20,7 @@ a fact.
 
 When code and `docs/DESIGN.md` disagree, do not silently pick one. The
 disagreement is a finding: surface it, and record the resolution in
-`docs/DESIGN.md` (before the first publish, edit it directly — see
+`docs/DESIGN.md` (before §9.1's trigger, edit it directly — see
 Documents below) — but only if the resolution is a design decision. Test
 it against: would this sentence still be true if all the code were
 discarded? If yes, it belongs in `docs/DESIGN.md`. If no, it's
@@ -216,6 +216,7 @@ directly — fixtures alone cannot catch a shape only the real codebase has.
 - Product specification → `docs/DESIGN.md`
 - **Why** a design is the one in the specification → `docs/adr/`
 - Diagnostic codes → `docs/diagnostics/`
+- Breaking changes to §9.2's guaranteed surface → `CHANGELOG.md`
 - Agent working rules → this file
 - External-facing explanation → `README.md`
 - Framework integration guides → `docs/integrations/`
@@ -237,9 +238,18 @@ belongs in `docs/DESIGN.md`; a sentence that only explains how the project
 arrived there belongs in the ADR. Never renumber a `docs/DESIGN.md` chapter —
 `src/` and `test/` cite them by number in the hundreds.
 
-RFC procedure (`docs/DESIGN.md` §9) applies from the first npm publish
-onward. Before that, edit `docs/DESIGN.md` directly and write the record in
+RFC procedure (`docs/DESIGN.md` §9) applies from 1.0, or from the first
+external adopter, whichever comes first (§9.1) — **not** from the first npm
+publish. Until then, edit `docs/DESIGN.md` directly and write the record in
 `docs/adr/`.
+
+What does not wait for that trigger is §9.2. A change to the guaranteed
+surface — tag meanings, diagnostic ids, the NDJSON field shape,
+`ambit.approvals.md`'s format, the CLI's flags and exit codes, the subpath
+exports — needs a `CHANGELOG.md` entry in the same change, at every version.
+A change to what §9.2's second list covers needs none: added stubs, added
+hooks, `unknown`-rate movement, and caching are not the guaranteed surface,
+and must not be written up as though they were.
 
 ## Language
 

@@ -315,8 +315,12 @@ claim:
 
 ## Status
 
-Ambit is experimental and not production-ready; diagnostic ids and the NDJSON
-field shape can still change. `check src` over Ambit's own source — 39 files,
+Ambit is experimental and not production-ready. It is versioned `0.x`, and
+semver's 0.x rule is in force: **a minor release may make a breaking change** —
+diagnostic ids, the NDJSON field shape, and everything else on the guaranteed
+surface can still move. What that surface is, and what is explicitly not on it,
+is [DESIGN.md §9.2](docs/DESIGN.md#92-the-guaranteed-surface); every change to
+it is announced in [CHANGELOG.md](CHANGELOG.md). `check src` over Ambit's own source — 39 files,
 302 functions — takes 1.07–1.11 s across five runs; `diff HEAD src`, which
 analyzes two trees, takes 1.86–1.98 s across five runs. Nothing is cached, so a
 re-check costs the same. The analysis backend has been measured on a
@@ -338,6 +342,7 @@ would reopen it.
 - [docs/DESIGN.md](docs/DESIGN.md) — the product specification.
 - [docs/adr/](docs/adr/README.md) — why each design is the one in the spec.
 - [docs/diagnostics/](docs/diagnostics/README.md) — the diagnostic code ledger.
+- [CHANGELOG.md](CHANGELOG.md) — every breaking change to the guaranteed surface.
 - [docs/limitations.md](docs/limitations.md) — where the analysis is narrower
   than the model suggests.
 - [docs/status.md](docs/status.md) — what is implemented, with measured numbers.

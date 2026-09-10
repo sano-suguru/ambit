@@ -1,9 +1,9 @@
 # Ambit Design Specification
 
 - Status: Draft
-- Revision: 3 (Draft) — the decision records moved out to `docs/adr/`, and the roadmap to `ROADMAP.md`
+- Revision: 4 (Draft) — chapter 9 gained the trigger that puts the RFC procedure in force (§9.1), the guaranteed surface (§9.2), and the versioning rule (§9.3)
 - Intended readers: developers of Ambit itself, contributors, design reviewers
-- Change procedure: RFC (under `rfcs/`, chapter 9)
+- Change procedure: direct edit plus a record in `docs/adr/` until chapter 9's trigger; RFC (under `rfcs/`) from there on — see §9.1
 - What this file is: the current design, and the limits of what it guarantees. **Why** a design is the one written here is in [`docs/adr/`](adr/README.md); what is implemented today is in `docs/status.md`; where the project is going is in `ROADMAP.md`
 
 ---
@@ -17,6 +17,8 @@ Ambit provides three things.
 1. **A contract layer** — attach side effects (effects), permissions (capabilities), and budget (budget) to existing code as declarations, and enforce them with static and runtime checks.
 2. **Structured diagnostics** — return check results not only for humans but in a machine-readable form that AI agents can consume.
 3. **An agent-integrated toolchain** — make generate → check → fix → run → deploy a single loop.
+
+Which of these Ambit promises not to change without announcing it, and which it explicitly does not promise, is §9.2.
 
 ## 2. Design Principles
 
@@ -665,7 +667,7 @@ Reducing authority is not what this command watches for. Failing on a decrease w
 
 The compiler connection layer is implemented separately from the checker, but whether it becomes an independently published npm package is undecided. Do not add public API that is not needed.
 
-The table above is a separation of responsibilities, not a package list. It is expressed as directories inside the single `ambit-ts` package, and the subpath exports (`ambit-ts`, `ambit-ts/config`, `ambit-ts/runtime`, `ambit-ts/runtime/hono`, `ambit-ts/runtime/next`) are what a consumer sees of it. A later split of the runtime into a package of its own keeps those specifiers working by re-export, because from the first publish onward changing a specifier is an RFC change (§9).
+The table above is a separation of responsibilities, not a package list. It is expressed as directories inside the single `ambit-ts` package, and the subpath exports (`ambit-ts`, `ambit-ts/config`, `ambit-ts/runtime`, `ambit-ts/runtime/hono`, `ambit-ts/runtime/next`) are what a consumer sees of it. A later split of the runtime into a package of its own keeps those specifiers working by re-export, because a specifier is part of the guaranteed surface: changing one is a breaking change and is announced as such (§9.2).
 
 ### 6.2 Iterative checking and caching
 
@@ -805,10 +807,43 @@ The versions of the analysis engine are pinned and recorded alongside (§3.4), s
 - The specification, diagnostic codes, checker, runtime, and stubs are all open source.
 - Proposal into `rfcs/` → review → adoption. Changes to the meaning of diagnostic codes, the standard effects, or the propagation rules require an RFC.
 - Changing the default backend, or making a breaking change to the range of TypeScript supported, also requires an RFC.
-- Decision rationale lives in [`docs/adr/`](adr/README.md), not in this file. Before the first public release a decision is made by editing this file and writing the record there; from the first release onward the accepted RFC is the record.
+- Decision rationale lives in [`docs/adr/`](adr/README.md), not in this file.
 - Publish a conformance test suite (`conformance/`) and keep alternative implementations possible. Keep the connection trials against a type engine separate from trials of the contract model itself.
 - Put the stewardship of the trademark and the specification in writing at an early stage. The npm name `ambit` and the scope `@ambit` were both already taken by unrelated owners, so the published name is `ambit-ts` ([ADR-0009](adr/0009-package-name-and-single-package.md)); the name is not described as reserved beyond that.
-- `rfcs/` and `conformance/` are put in place from the first public release onward. Until then this file is edited directly, and the conformance tests are substituted by Vitest under `test/`.
+
+### 9.1 When the RFC procedure takes effect
+
+The four changes listed above require an RFC **from 1.0, or from the first external adopter — the pilot team of [`ROADMAP.md`](../ROADMAP.md) M4 — whichever comes first.** `rfcs/` and `conformance/` are put in place on that same trigger.
+
+Until then, a decision is made by editing this file directly and writing the record in [`docs/adr/`](adr/README.md), and the conformance tests are substituted by Vitest under `test/`. From the trigger onward, the accepted RFC is the record.
+
+Publishing a tarball to npm is not the trigger. What a written approval procedure buys is a second party being told before their work breaks; a registry entry with no dependent gives an author nothing to approve but their own note to themselves ([ADR-0010](adr/0010-when-governance-takes-effect.md)). Which changes require an RFC is not narrowed by this — only when the procedure around them starts.
+
+What holds in the meantime is §9.2 and §9.3, and they hold at every version: a change to the guaranteed surface is announced whether or not an RFC is required, and each diagnostic code's meaning is carried by the ledger in [`docs/diagnostics/`](diagnostics/README.md).
+
+### 9.2 The guaranteed surface
+
+A breaking change is announced in `CHANGELOG.md`, at the release that makes it, for exactly this list:
+
+- the meaning of the JSDoc tags — `@effects`, `@capabilities`, `@budget`, `@entrypoint`, `@boundary` (§4.1) — and of the standard effects (§4.2)
+- diagnostic `id`s and what each one means ([`docs/diagnostics/`](diagnostics/README.md), §5.2)
+- the NDJSON diagnostic field shape (§5.1, §5.2)
+- the format of `ambit.approvals.md` (§6.3)
+- the CLI's commands, flags, and exit codes (§6)
+- the package's subpath exports — `ambit-ts`, `ambit-ts/config`, `ambit-ts/runtime`, `ambit-ts/runtime/hono`, `ambit-ts/runtime/next` — and the names exported from them (§6.1)
+
+Not on the list, and free to change in any release:
+
+- anything not reachable through those subpath exports, including every module path under `dist/` the export map does not name
+- the measured `unknown` rate, and the resolution of the analysis behind it: which calls resolve, which fall to `unknown`, and the reasons `--coverage` breaks them down by
+- added stubs (§4.2, §8) and added runtime hooks (§4.4). These are authority Ambit could not see before and now can, so a check that passed may begin to fail — because the code always did what the check now reports. Making that visible is P3 and P4, not a broken promise
+- whether anything is cached, and any resident or incremental path (§6.2)
+
+The second list is what keeps P4 honest in both directions. Ambit does not promise that the set of things it can see stays fixed, and it does not describe growing that set as a breaking change; what it promises is that the meaning of a declaration, and of a verdict about one, does not move without being announced.
+
+### 9.3 Versioning
+
+Semantic versioning, with 0.x read as semver defines it: **while the major version is 0, a minor release may make a breaking change to anything in §9.2's first list.** A patch release does not. The obligation of §9.2 is unaffected by the version number — a break is announced at the release that makes it, at 0.x as at 1.x.
 
 ## 10. Success Metrics
 

@@ -780,9 +780,9 @@ version's API: the direct API confirmation was done against 7.0.2.
 |---|---|
 | Spec section | `ROADMAP.md` M0 |
 | Acceptance | review complete |
-| Implemented | `docs/DESIGN.md`, `docs/diagnostics/README.md` (15 codes), `AGENTS.md` |
+| Implemented | `docs/DESIGN.md`, `docs/diagnostics/README.md` (18 codes), `AGENTS.md` |
 | Evidence | files in tree |
-| Outstanding | `rfcs/` and `conformance/` are deferred to first publish by §9. The npm name `ambit` and the scope `@ambit` are both taken by unrelated owners (ADR-0009); the package is named `ambit-ts` and is `private: true`. |
+| Outstanding | `rfcs/` and `conformance/` are deferred by §9.1 to 1.0 or the first external adopter, whichever comes first ([ADR-0010](adr/0010-when-governance-takes-effect.md)); `CHANGELOG.md` and §9.2's guaranteed surface hold in the meantime. The npm name `ambit` and the scope `@ambit` are both taken by unrelated owners (ADR-0009); the package is named `ambit-ts` and is `private: true`. |
 
 ### M0.5 — backend comparison and adoption gate
 
@@ -790,9 +790,9 @@ version's API: the direct API confirmation was done against 7.0.2.
 |---|---|
 | Spec section | §3.5, ADR-0001 |
 | Acceptance | publish §3.5 evidence, adopt a default backend |
-| Implemented | **All five gates ran.** Allowances fixed in DESIGN.md §3.5 *before* measuring. Gate 1: `test/backend.conformance.test.ts` (28 tests) against the `TsBackend` interface, plus a native primitive probe. Gate 2: both compilers on the same tsconfigs and the same tree. Gate 3: `scripts/m05-update-correctness.ts`. Gate 4: `scripts/m05-backend-compare.ts` + `scripts/m05-corpus.ts`, 5 interleaved runs per corpus, equal counts enforced. Gate 5: install size, platform coverage, failure modes, `bin` collision. **Default backend decided**: the legacy Compiler API (DESIGN.md §3.5, recorded in `docs/adr/0001-analysis-backend.md`). Pre-publish, so §9 sends it to `docs/DESIGN.md` and an ADR directly rather than to an RFC |
+| Implemented | **All five gates ran.** Allowances fixed in DESIGN.md §3.5 *before* measuring. Gate 1: `test/backend.conformance.test.ts` (28 tests) against the `TsBackend` interface, plus a native primitive probe. Gate 2: both compilers on the same tsconfigs and the same tree. Gate 3: `scripts/m05-update-correctness.ts`. Gate 4: `scripts/m05-backend-compare.ts` + `scripts/m05-corpus.ts`, 5 interleaved runs per corpus, equal counts enforced. Gate 5: install size, platform coverage, failure modes, `bin` collision. **Default backend decided**: the legacy Compiler API (DESIGN.md §3.5, recorded in `docs/adr/0001-analysis-backend.md`). Before §9.1's trigger, so §9 sends it to `docs/DESIGN.md` and an ADR directly rather than to an RFC |
 | Evidence | The "M0.5 — the backend comparison, measured" section above, including "The version within the adopted line" (why `typescript` is 6.0.3 and not the scaffolding default 5.9.3). Every figure was run; the one corpus where the two backends did not do equal work is labelled not comparable rather than turned into a ratio |
-| Outstanding | **Linux is not re-verified.** ADR-0001's `/proc/self/exe` failure was environment-specific and the engine runs on darwin/arm64; no Linux run was made in this comparison, so nothing is claimed about it either way. Gate 1's native column checked `getFullyQualifiedName` reconstruction on **one** symbol shape, not on the external-package or project-`.d.ts` shapes. Gates 3 and 4 are worth re-running once §6.2's resident path exists, which is the second of §3.5's three reopening conditions — until then native's 1 ms re-query has nowhere in the product to appear. `conformance/` as a published, external suite (§9) still waits for the first publish; `test/backend.conformance.test.ts` is its stand-in |
+| Outstanding | **Linux is not re-verified.** ADR-0001's `/proc/self/exe` failure was environment-specific and the engine runs on darwin/arm64; no Linux run was made in this comparison, so nothing is claimed about it either way. Gate 1's native column checked `getFullyQualifiedName` reconstruction on **one** symbol shape, not on the external-package or project-`.d.ts` shapes. Gates 3 and 4 are worth re-running once §6.2's resident path exists, which is the second of §3.5's three reopening conditions — until then native's 1 ms re-query has nowhere in the product to appear. `conformance/` as a published, external suite (§9.1) still waits for 1.0 or the first external adopter; `test/backend.conformance.test.ts` is its stand-in |
 
 ### M1 — effects, unknown, coverage, JSON diagnostics, init, resident path
 

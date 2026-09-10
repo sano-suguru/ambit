@@ -2,10 +2,12 @@
 
 Living ledger of Ambit's diagnostic codes, appended as they are implemented.
 
-Before the first npm publish (1.0), IDs are **not** guaranteed stable and may
-still be renumbered or reworded. From the first publish onward, DESIGN.md
-§5.2 applies: an `id` is never deleted or reused, and a meaning change
-requires an RFC (§9).
+An `id` and its meaning are part of the guaranteed surface (DESIGN.md §9.2):
+a change to either is announced in `CHANGELOG.md` at the release that makes it.
+While the major version is 0, such a change may land in a minor release
+(§9.3) — ids may still be renumbered or reworded, but not silently. From 1.0,
+DESIGN.md §5.2's stronger rule applies: an `id` is never deleted or reused, and
+a meaning change requires an RFC (§9.1).
 
 Message text is written in English; this file is written in English as well,
 independent of the project's Japanese-language documentation policy — see
