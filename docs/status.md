@@ -7,22 +7,52 @@ records *implementation status*, not design — the specification itself is
 Measured on 2026-09-09, Node.js v24.20.0, macOS (darwin arm64), Apple M1,
 8 cores, 16 GiB. Every number below was run, not estimated.
 
-**Verdict: not a release candidate.** M0.5 is now complete — all five gates
-ran, and the default backend is decided (DESIGN.md §3.5, ADR-0001: the legacy
-TypeScript Compiler API). M1 still has no incremental path, and M2–M4 are
-partial. The details are per row.
+**Verdict: publishable as 0.1.0; not a 1.0.** M0.5 is complete — all five
+gates ran, and the default backend is decided (DESIGN.md §3.5, ADR-0001: the
+legacy TypeScript Compiler API). M1 still has no incremental path, and M2–M4
+are partial. The details are per row.
+
+What 0.1.0 asserts is DESIGN.md §9.2's guaranteed surface under semver's 0.x
+rule: a breaking change to it may land in a minor release (§9.3) and is
+announced in `CHANGELOG.md`. It is not the stability a 1.0 would claim, and
+nothing here is measured against a real adopter — the Phase 1 exit criterion
+(M5) is untouched.
+
+As of this measurement the package is **not on the registry**. The manifest is
+`0.1.0` and no longer `private`, `npm pack --dry-run` produces the intended
+tarball, and the release workflow exists; the publish itself is a manual step
+a human runs, for the reason `.github/workflows/release.yml` records.
 
 ## Baseline commands
 
+Re-run on 2026-09-10 against the `0.1.0` manifest. The counts and exit codes
+below are from that run; the wall-clock figures elsewhere in this file are from
+the 2026-09-09 measurement and were not re-taken.
+
 ```sh
-pnpm test                     # 454 tests, 29 files — pass
+pnpm test                     # 455 tests, 29 files — pass
 pnpm exec tsc --noEmit        # pass
 ./node_modules/.bin/biome ci .  # pass
 node src/cli/main.ts check src --coverage   # exit 0
 node src/cli/main.ts check test/fixtures/realistic-api --coverage   # exit 0
 node src/cli/main.ts check test/fixtures/next-app --coverage         # exit 0
 node src/cli/main.ts diff HEAD src           # exit 0 with the ledger's five approvals in place
+npm pack --dry-run            # ambit-ts-0.1.0.tgz, 96 files, 161.8 kB packed / 536.4 kB unpacked
 ```
+
+`check src --coverage` breaks its unresolved calls down as
+`builtin-method=138, external-module=337, dynamic-import=1,
+unresolved-symbol=17, callback-parameter=6` — unchanged by the release
+metadata, which is the point of quoting it here.
+
+The tarball is `dist/` (90 files) plus six: `README.md`, `LICENSE`,
+`CHANGELOG.md`, `docs/diagnostics/README.md`, `docs/limitations.md`, and
+`package.json`. `docs/DESIGN.md`, `scripts/`, `test/` and `.m05-native/` are
+outside it — `test/architecture.test.ts` asserts the last two. `dist/` carries
+no `.js.map` or `.d.ts.map`: a map is only useful beside the sources it points
+at, and `.ts` cannot ship (Node refuses to strip types under `node_modules`),
+so every map would have resolved to a file the tarball does not contain.
+Dropping them took the tarball from 186 files / 208.3 kB to the figures above.
 
 The M0.5 comparison is a separate, manual procedure — it spawns a Go engine and
 takes wall-clock measurements, neither of which belongs in CI:
@@ -782,7 +812,7 @@ version's API: the direct API confirmation was done against 7.0.2.
 | Acceptance | review complete |
 | Implemented | `docs/DESIGN.md`, `docs/diagnostics/README.md` (18 codes), `AGENTS.md` |
 | Evidence | files in tree |
-| Outstanding | `rfcs/` and `conformance/` are deferred by §9.1 to 1.0 or the first external adopter, whichever comes first ([ADR-0010](adr/0010-when-governance-takes-effect.md)); `CHANGELOG.md` and §9.2's guaranteed surface hold in the meantime. The npm name `ambit` and the scope `@ambit` are both taken by unrelated owners (ADR-0009); the package is named `ambit-ts` and is `private: true`. |
+| Outstanding | `rfcs/` and `conformance/` are deferred by §9.1 to 1.0 or the first external adopter, whichever comes first ([ADR-0010](adr/0010-when-governance-takes-effect.md)); `CHANGELOG.md` and §9.2's guaranteed surface hold in the meantime. The npm name `ambit` and the scope `@ambit` are both taken by unrelated owners (ADR-0009); the package is named `ambit-ts` (M4 has the release-readiness of the manifest). |
 
 ### M0.5 — backend comparison and adoption gate
 
@@ -832,7 +862,7 @@ version's API: the direct API confirmation was done against 7.0.2.
 | Acceptance | editor compatibility with the chosen compiler; one pilot team |
 | Implemented | tarball distribution: `pnpm pack` → install into a clean project → `npx ambit check` → `npm remove`, with a distribution-only build (`tsconfig.build.json` → `dist/`) |
 | Evidence | `test/e2e.install.test.ts` (9) — installs into a scratch project, drives the installed bin, type-checks README's own examples against the installed package, uninstalls, and confirms the consumer's own code still type-checks and runs |
-| Outstanding | **Not published to npm** (requires approval; the package is named `ambit-ts` per ADR-0009 and is `private: true`). **No editor integration** — no LSP, no Language Service Plugin, no extension. **`ambit sbom` does not exist**, nor does dependency-effect-diff reporting (§8) or stub trust levels in diagnostics. **No pilot team** — that is an external condition, not a technical one, and cannot be substituted with self-testing. **The runtime ships in the same package as the CLI**, so installing Ambit pulls `typescript` in as a production dependency; §6's runtime split has not been done — §6 defers it until a production adopter exists (ADR-0009). |
+| Outstanding | **Not published to npm.** The manifest is release-ready — `0.1.0`, `private` removed, `license` / `repository` / `bugs` / `homepage` / `keywords` / `author` present, and `npm pack --dry-run` verified (see "Baseline commands") — and `.github/workflows/release.yml` publishes via npm trusted publishing (OIDC, no token). The first publish is deliberately manual: a trusted publisher is configured on the package's npm settings page, which does not exist until a first version has been published, so 0.1.0 goes out by hand and 0.2.0 onward through the workflow. Nothing is on the registry yet. **No editor integration** — no LSP, no Language Service Plugin, no extension. **`ambit sbom` does not exist**, nor does dependency-effect-diff reporting (§8) or stub trust levels in diagnostics. **No pilot team** — that is an external condition, not a technical one, and cannot be substituted with self-testing. **The runtime ships in the same package as the CLI**, so installing Ambit pulls `typescript` in as a production dependency; §6's runtime split has not been done — §6 defers it until a production adopter exists (ADR-0009). |
 
 ### M5 — Phase 1 exit criteria
 

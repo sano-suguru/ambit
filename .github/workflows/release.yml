@@ -1,0 +1,114 @@
+# Publishes `ambit-ts` to npm with no token, using npm trusted publishing
+# (OIDC). The workflow proves its identity to the registry with a short-lived
+# GitHub OIDC token, which is why `id-token: write` below is not optional and
+# why no `NODE_AUTH_TOKEN` appears anywhere in this file.
+#
+# ---------------------------------------------------------------------------
+# The first publish of 0.1.0 is NOT done by this workflow. A human runs
+# `npm publish` locally for it, once.
+#
+# The reason is a bootstrap gap in npm's own setup path, not a preference. A
+# trusted publisher is configured on the package's settings page
+# (npmjs.com -> Packages -> ambit-ts -> Settings -> Trusted publishing, per
+# npm's "Trusted publishing for npm packages"), and that page does not exist
+# for a name that has never been published. npm's documentation describes no
+# way to register a publisher in advance, so there is nothing this workflow
+# could authenticate against before version 0.1.0 exists on the registry.
+#
+# So the order is:
+#
+#   1. a human publishes 0.1.0 from a laptop (`npm publish`, with the account's
+#      2FA one-time password), which creates the package;
+#   2. a human configures the trusted publisher on that settings page —
+#      organization or user `sano-suguru`, repository `ambit`, workflow file
+#      name `release.yml`, no environment;
+#   3. every release from 0.2.0 onward goes through this workflow.
+#
+# Provenance is not passed as a flag on purpose. Under trusted publishing npm
+# generates and publishes the provenance attestation itself; its docs state
+# this happens by default and that `--provenance` is not needed. The 0.1.0
+# tarball published by hand in step 1 therefore carries no provenance, and the
+# first one that does is 0.2.0.
+# ---------------------------------------------------------------------------
+
+name: Release
+
+on:
+  # `release: published` and not `push: tags`. The human publishing 0.1.0 by
+  # hand will also tag it, and a tag trigger would fire this workflow into a
+  # registry that has no trusted publisher configured yet and a version that
+  # already exists — two failures for an action that succeeded. A GitHub
+  # release is an explicit act, so it is the safer switch.
+  release:
+    types: [published]
+  # Kept for a re-run of a release whose publish step failed after the release
+  # object already existed.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The same reason as ci.yml: `test/e2e.diff.test.ts` resolves a
+          # pinned SHA out of this repository's own history, and a shallow
+          # clone fails it.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          # Points npm at the public registry so the OIDC exchange has a
+          # registry to perform it against.
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm 11.5.1 or newer. Whatever npm ships with
+      # the Node 24 line at the time of a release may be older than that, so
+      # the version is raised explicitly rather than assumed.
+      - name: Ensure an npm that can publish via OIDC
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - run: pnpm install --frozen-lockfile
+
+      # The published tarball goes through the same gate as a commit. A release
+      # is the one moment where skipping it is least recoverable: an npm
+      # version cannot be replaced, only deprecated and superseded.
+      - name: Lint & format check
+        run: pnpm exec biome ci .
+
+      - name: Type check
+        run: pnpm exec tsc --noEmit
+
+      - name: Test
+        run: pnpm test
+
+      - name: Contract check on Ambit's own source
+        run: node src/cli/main.ts check src --coverage --format github
+
+      # A release tag naming a version the manifest does not carry would
+      # publish something other than what the tag says. `v` prefix stripped;
+      # `workflow_dispatch` has no tag to compare, so it is skipped there.
+      - name: Tag and manifest agree
+        if: github.event_name == 'release'
+        run: |
+          manifest="$(node -p 'require("./package.json").version')"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$manifest" != "$tag" ]; then
+            echo "package.json is $manifest but the release tag is $tag" >&2
+            exit 1
+          fi
+
+      # `prepack` builds dist/ (tsconfig.build.json) — Node refuses to strip
+      # types under node_modules, so an installed Ambit ships JavaScript.
+      - name: Publish
+        run: npm publish

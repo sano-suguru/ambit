@@ -1,8 +1,28 @@
 {
   "name": "ambit-ts",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "A contract layer on top of TypeScript for AI-generated code",
+  "keywords": [
+    "typescript",
+    "jsdoc",
+    "static-analysis",
+    "effects",
+    "capabilities",
+    "contracts",
+    "ai-generated-code",
+    "supply-chain",
+    "cli"
+  ],
+  "license": "MIT",
+  "author": "sanosuguru",
+  "homepage": "https://github.com/sano-suguru/ambit#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sano-suguru/ambit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sano-suguru/ambit/issues"
+  },
   "type": "module",
   "packageManager": "pnpm@12.3.4",
   "engines": {
@@ -35,6 +55,7 @@
   },
   "files": [
     "dist",
+    "CHANGELOG.md",
     "docs/diagnostics",
     "docs/limitations.md",
     "README.md",

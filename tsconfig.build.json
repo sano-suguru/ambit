@@ -11,8 +11,11 @@
   "compilerOptions": {
     "noEmit": false,
     "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
+    // No `sourceMap` / `declarationMap`. A map is only useful next to the
+    // sources it points at, and `.ts` cannot ship (see above) — every map
+    // would resolve to a file the tarball does not contain. `dist/` internals
+    // are not the guaranteed surface (DESIGN.md §9.2), so dropping them is
+    // not an announced change.
     "outDir": "dist",
     "rootDir": "src",
     "allowImportingTsExtensions": false,

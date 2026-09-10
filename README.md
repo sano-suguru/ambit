@@ -61,25 +61,18 @@ contract.
 Requires Node.js 24.
 
 ```sh
-git clone https://github.com/sano-suguru/ambit.git && cd ambit && pnpm install
-node src/cli/main.ts check src
+npm i -D ambit-ts
+npx ambit init src     # propose `@effects` for the functions that have none
+npx ambit check src    # check what they now declare
 ```
 
-That last command needs nothing prepared — it checks Ambit's own source:
+`init` writes nothing on its own — it reports the declarations it would add, as
+fix candidates. `check` exits 0 when it reported nothing, 1 on an error, and 2
+when the analysis itself could not run; it never returns 0 for "could not
+tell".
 
-```console
-warning: extractProject declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:55)
-warning: loadProjectConfig declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:164)
-...
-files=37 functions=286 declared=11
-```
-
-Point `check` at your own directory next, and run `ambit init` to have it
-propose `@effects` for the functions that have none.
-
-> **Not on npm yet.** To use Ambit in another project, build a tarball:
-> `pnpm pack`, then `npm install -D /path/to/ambit-ts-0.0.0.tgz`. `npm remove ambit-ts`
-> undoes it, and the `@effects` comments left behind still type-check and run.
+Backing out is `npm remove ambit-ts`. The `@effects` comments left behind are
+JSDoc, so the code still type-checks and runs with Ambit gone.
 
 See **[CLI and CI](#cli-and-ci)** below for the flags, the exit codes, and the
 GitHub Actions output.
@@ -238,6 +231,40 @@ files=3 functions=3 declared=1
 exit=1
 ```
 
+The second gate is `ambit diff`. It compares the authority of the working tree
+against a base ref, and an increase that no line in `ambit.approvals.md`
+approves fails the build — with the line to add, so approving it is a copy and
+a reason:
+
+```console
+$ node src/cli/main.ts diff HEAD src; echo "exit=$?"
+base HEAD (fa633b1) vs the working tree, over src
+
+2 authorities increased without approval:
+
+  core/authority-diff.ts#leakedHelper (core/authority-diff.ts:342)  [new symbol]
+    + network
+      operation: fetch (core/authority-diff.ts:343)
+    - `core/authority-diff.ts#leakedHelper` `effect:network` — <why this increase is correct>
+
+  core/authority-diff.ts#leakedHelper (core/authority-diff.ts:342)  [new symbol]
+    + capability http:get:exfil.example.com
+    - `core/authority-diff.ts#leakedHelper` `capability:http:get:exfil.example.com` — <why this increase is correct>
+
+Add each line above to ambit.approvals.md, with the reason, and
+commit it in the same change (DESIGN.md §6.3). An approval already in the base
+grants nothing.
+
+302 symbols unchanged, out of 303 symbols compared.
+exit=1
+```
+
+That is a real run against this repository, with one function added to
+`src/core/authority-diff.ts` that fetches from `exfil.example.com` — the shape
+an agent's edit takes when it reaches for the network in a helper nobody
+reviews line by line. Reducing authority is not what the command watches for:
+only increases fail, so tightening a contract is never taxed.
+
 ## For coding agents
 
 `check --format json` emits NDJSON — one diagnostic per line, then a summary
@@ -336,6 +363,32 @@ unless it is told which files changed, it answers from a stale snapshot without
 saying so.
 [ADR-0001](docs/adr/0001-analysis-backend.md) records the decision and what
 would reopen it.
+
+## Working on Ambit itself
+
+There is no build step during development: `.ts` runs directly under Node's
+type stripping.
+
+```sh
+git clone https://github.com/sano-suguru/ambit.git && cd ambit && pnpm install
+node src/cli/main.ts check src --coverage
+```
+
+That last command needs nothing prepared — it checks Ambit's own source, and
+exit 0 is the fastest evidence a change did what it claimed:
+
+```console
+warning: extractProject declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:55)
+warning: loadProjectConfig declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:165)
+...
+files=39 functions=302 declared=14
+declared-by: jsdoc=14 config=0
+unknown-rate=62.9% (190/302 functions) boundary-rate=0.0% (0/302 functions)
+```
+
+`pnpm test`, `pnpm exec tsc --noEmit` and `biome ci .` are the rest of the
+gate; [AGENTS.md](AGENTS.md) is the working agreement, including what belongs
+in which document.
 
 ## Docs / License
 
