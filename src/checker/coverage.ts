@@ -45,8 +45,8 @@ export interface CoverageReport {
   readonly functionsSkipped: number;
   readonly skippedByKind: ReadonlyMap<SkippedFunctionKind, number>;
   /**
-   * The primary KPI (DESIGN.md §10, "the plan's note on measuring extraction
-   * coverage before trusting it"): the fraction of *all* extracted functions
+   * The primary KPI (DESIGN.md §4.3 and `ROADMAP.md`, "the plan's note on
+   * measuring extraction coverage before trusting it"): the fraction of *all* extracted functions
    * — declared or not — whose propagated effect set carries `unknown`. This
    * is what a user actually cares about ("can Ambit say anything definite
    * about this function?"), not the raw call-site resolution rate below,

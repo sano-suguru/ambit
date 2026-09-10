@@ -74,8 +74,29 @@ apply.
 ### What `ambit diff` can and cannot see
 
 `ambit diff <ref>` compares the working tree's authority against a base ref
-and fails on an increase. Four things it does not see, or sees differently
-from how a reader might expect:
+and fails on an increase.
+
+It exists because `check` alone cannot catch a widened declaration. `check`
+validates the code against whatever contract is currently written, so editing
+the tag along with the code — including by applying the `widen` fix Ambit itself
+offers — makes it green again. Measured on `test/fixtures/accident`, changing
+`priceOrder` from `@effects pure` to `@effects network` takes
+`check test/fixtures/accident` from exit 1 to exit 0, while
+`diff HEAD test/fixtures/accident` exits 1 and names the hop that carried the
+authority:
+
+```text
+Authority increased in 1 symbol:
+
+  pricing.ts#priceOrder (pricing.ts:4)
+    + network
+      -> applyTax (tax.ts:3)
+      -> currentRate (rates.ts:3)
+      operation: fetch (rates.ts:4)
+```
+
+Four things `diff` does not see, or sees differently from how a reader might
+expect:
 
 - **A function that is moved or renamed reads as a deletion plus a new
   symbol.** A symbol id is `<path relative to the checked directory>#<declaration
@@ -488,7 +509,7 @@ signature, `abstract` member, or `.ts`-file `declare`.
 
 This number is not a target that has been met, and it is dominated by
 `external-module` — almost entirely calls into the TypeScript compiler API from
-the one file meant to be replaceable. DESIGN.md §10's goal of 30% is for an
+the one file meant to be replaceable. `ROADMAP.md`'s goal of 30% is for an
 *adopting team*. `docs/status.md` records that figure separately, measured
 against `test/fixtures/realistic-api`, and the two must not be mixed.
 
@@ -655,7 +676,8 @@ Limits of what the adapters guarantee:
 
 ## Backend
 
-The current analysis backend (`src/checker/backend/legacy-ts.ts`) is a
-connection layer over the TypeScript compiler API, treated as replaceable
-until the validation gate in DESIGN.md §3.5 passes. No performance numbers
-are claimed for it.
+The analysis backend (`src/checker/backend/legacy-ts.ts`) is a connection layer
+over the TypeScript compiler API. It is the adopted default (DESIGN.md §3.5,
+ADR-0001), and it stays replaceable: the conditions that would reopen the choice
+are written down in §3.5, and no performance number is claimed for a backend
+that has not been run.

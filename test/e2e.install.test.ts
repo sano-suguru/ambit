@@ -321,14 +321,28 @@ export default defineConfig({
     await fs.rm(path.join(consumer, "ambit.config.ts"));
   }, 120_000);
 
-  it("type-checks the README's own examples against the installed package", async () => {
-    // The claim is README's, so README is the input: copying the examples into
-    // this file would let the copy drift from the document silently, which is
-    // the failure this test exists to remove.
-    const readme = await fs.readFile(new URL("../README.md", import.meta.url), "utf8");
-    const examples = [...readme.matchAll(/```ts\n([\s\S]*?)```/g)]
-      .map((match) => match[1] ?? "")
-      .filter((source) => source.includes('from "ambit/'));
+  it("type-checks the documented examples against the installed package", async () => {
+    // The claim is the documents', so the documents are the input: copying the
+    // examples into this file would let the copy drift from them silently,
+    // which is the failure this test exists to remove. Every markdown file that
+    // imports from `ambit/` is read, not only README — an example moved into
+    // `docs/integrations/` is still a claim about the installed package.
+    const root = new URL("../", import.meta.url);
+    const docs = [
+      "README.md",
+      ...(await fs.readdir(new URL("docs/integrations/", root))).map(
+        (name) => `docs/integrations/${name}`,
+      ),
+    ].filter((file) => file.endsWith(".md"));
+
+    const examples: string[] = [];
+    for (const file of docs.sort()) {
+      const text = await fs.readFile(new URL(file, root), "utf8");
+      for (const match of text.matchAll(/```ts\n([\s\S]*?)```/g)) {
+        const source = match[1] ?? "";
+        if (source.includes('from "ambit/')) examples.push(source);
+      }
+    }
 
     // A block whose first line names a file (`// app/rates/route.ts`) is that
     // file: Next.js decides what a module means by where it sits, so a
@@ -347,7 +361,7 @@ export default defineConfig({
 
     // A run that extracted nothing must never look like a clean run
     // (DESIGN.md §3.4): an empty program type-checks. Every registration path
-    // README documents has to be in what was extracted.
+    // the documents describe has to be in what was extracted.
     expect(examples.length).toBeGreaterThan(0);
     expect(program).toContain("withAmbit(");
     expect(program).toContain("ambitHandler(");
