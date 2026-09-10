@@ -465,6 +465,40 @@ The same changes take `check src --coverage` from 62.9% to **37.3%**
 added) and `check test/fixtures/realistic-api --coverage` from 20.8% to
 **18.9%** (10/53).
 
+### Why the corpus does not install its dependencies
+
+The manifest's "dependencies are deliberately not installed" is a measured
+decision, not a convenience. Four targets were checked out a second time
+outside `.corpus/`, installed with the package manager and lockfile each
+repository pins, and measured again:
+
+| Target | no install | installed | external-module calls that can be named |
+|---|---|---|---|
+| `got` | 54.6% | **54.6%** | 145 / 190 |
+| `hono` | 52.6% | **52.6%** | — (no runtime dependencies) |
+| `elysia` | 51.7% | **51.1%** | 16 / 203 |
+| `trpc-server` | 59.7% | **57.7%** | 6 / 54 |
+| `drizzle-orm` | 39.0% | — | — |
+
+Installing moves the unresolved *reason* and leaves the rate where it was: on
+`got`, `unresolved-symbol` 308 → 103, `import-binding` 35 → 20 and `any-typed`
+287 → 237, while `external-module` goes 0 → 190. The calls do not become
+analyzable; they become third-party calls, which need a stub.
+
+Whether a stub can be written for them is decided by whether the connector
+layer can name the call at all, and that varies by API shape rather than by
+package. A named import called directly (`is.string(value)`) is named;
+a fluent chain (`t.Object({}).Encode()`) has a call result as its receiver, and
+`qualifiedNameOf` produces nothing for it. Hence 76% nameable on `got` against
+8% on `elysia`.
+
+`drizzle-orm` could not be installed at all: its lockfile pins
+`drizzle-kit-0.25.0-b1faa33.tgz`, which the registry now answers 404 for. A
+lockfile is not by itself a reproducible input — a tarball can be unpublished
+after the fact — so making the benchmark depend on one would trade a
+measurement that reproduces today for one that stops reproducing on someone
+else's schedule.
+
 ### Why 30% is not reachable on this corpus
 
 Counting unresolved *call sites* stops being useful once a function reaches
