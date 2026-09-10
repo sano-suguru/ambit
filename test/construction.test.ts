@@ -1,10 +1,10 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { legacyTsBackend } from "../src/checker/backend/legacy-ts.ts";
 import { diagnose } from "../src/checker/diagnose.ts";
 import { propagate } from "../src/checker/propagate.ts";
 import { summarizeExtractedFiles } from "../src/checker/summarize.ts";
 import type { Diagnostic } from "../src/core/index.ts";
+import { extractFixture } from "./support/extract.ts";
 import { observedEffects } from "./support/summary.ts";
 
 const FIXTURE_ROOT = path.join(import.meta.dirname, "fixtures", "construction");
@@ -19,7 +19,7 @@ async function check(root: string): Promise<{
 }
 
 async function analyze(root: string) {
-  const project = await legacyTsBackend.extractProject(root);
+  const project = await extractFixture(root);
   const summaries = summarizeExtractedFiles(project.files);
   return { project, summaries, state: propagate(summaries) };
 }

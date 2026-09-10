@@ -1,15 +1,26 @@
+import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
     exclude: ["test/fixtures/**", "node_modules/**"],
-    // The two distribution e2e files both build and pack the repo. Running
-    // them in parallel workers means two `tsc` processes writing the same
-    // `dist/` while the other tars it — a race that passes on a fast machine
-    // and fails elsewhere. `test/support/pack.ts` memoizes the pack, which
-    // only helps if the files share a process.
-    fileParallelism: false,
+    env: {
+      // Every `execFile("node", [CLI_PATH, ...])` in this suite pays for
+      // stripping the whole `src/` tree again — measured at ~450ms per
+      // `check` invocation, run close to 100 times. Node's own module
+      // compile cache removes that, measured serially at 133s -> 107s.
+      // Must be absolute: several tests spawn the CLI with a scratch `cwd`
+      // (e2e.config.test.ts, e2e.runtime.test.ts, e2e.install.test.ts), and
+      // a relative path would resolve against that cwd instead — missing
+      // the cache and littering the scratch project under test with a
+      // `node_modules/.cache/` of its own.
+      NODE_COMPILE_CACHE: path.join(import.meta.dirname, "node_modules", ".cache", "ambit-ncc"),
+    },
+    // Coordinates the one `pnpm pack` the distribution e2e files need
+    // (`test/support/pack.ts`) across worker processes, so parallel files
+    // can share a scratch directory instead of racing on `dist/`.
+    globalSetup: ["test/support/global-setup.ts"],
     // Most of this suite drives the CLI as a subprocess, and one `node
     // src/cli/main.ts` costs seconds: Node strips types for the whole source
     // tree on every start, and nothing is cached (DESIGN.md §6.2 is not

@@ -6,6 +6,7 @@ import { diagnose } from "../src/checker/diagnose.ts";
 import { propagate } from "../src/checker/propagate.ts";
 import { summarizeExtractedFiles } from "../src/checker/summarize.ts";
 import type { Diagnostic } from "../src/core/index.ts";
+import { extractFixture } from "./support/extract.ts";
 import { observedEffects } from "./support/summary.ts";
 
 const FIXTURE_ROOT = path.join(import.meta.dirname, "fixtures", "propagation");
@@ -13,7 +14,7 @@ const PROJECT_ROOT = path.resolve(import.meta.dirname, "..");
 const DIAGNOSTICS_DOC_PATH = "docs/diagnostics/README.md";
 
 async function diagnoseFixtures(): Promise<readonly Diagnostic[]> {
-  const { files } = await legacyTsBackend.extractProject(FIXTURE_ROOT);
+  const { files } = await extractFixture(FIXTURE_ROOT);
   const summaries = summarizeExtractedFiles(files);
   const state = propagate(summaries);
   return diagnose(state, { name: legacyTsBackend.name, version: legacyTsBackend.version });
@@ -173,7 +174,7 @@ describe("diagnose (invalid @effects declaration)", () => {
   const INVALID_EFFECTS_ROOT = path.join(import.meta.dirname, "fixtures", "invalid-effects");
 
   async function diagnoseInvalidEffects(): Promise<readonly Diagnostic[]> {
-    const { files } = await legacyTsBackend.extractProject(INVALID_EFFECTS_ROOT);
+    const { files } = await extractFixture(INVALID_EFFECTS_ROOT);
     const summaries = summarizeExtractedFiles(files);
     const state = propagate(summaries);
     return diagnose(state, { name: legacyTsBackend.name, version: legacyTsBackend.version });
@@ -212,7 +213,7 @@ describe("diagnose (cross-module alias resolution)", () => {
   const CROSS_MODULE_ROOT = path.join(import.meta.dirname, "fixtures", "cross-module");
 
   async function diagnoseCrossModule(): Promise<readonly Diagnostic[]> {
-    const { files } = await legacyTsBackend.extractProject(CROSS_MODULE_ROOT);
+    const { files } = await extractFixture(CROSS_MODULE_ROOT);
     const summaries = summarizeExtractedFiles(files);
     const state = propagate(summaries);
     return diagnose(state, { name: legacyTsBackend.name, version: legacyTsBackend.version });

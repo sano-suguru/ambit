@@ -309,6 +309,46 @@ That is machine load, not a change in the analysis, and neither range is
 recorded as a figure for this build. A comparable measurement needs a quiescent
 machine, and §3.5's performance gate has not run either way.
 
+### Test suite wall time
+
+CI's `Test` step (`pnpm test`, GitHub Actions `ubuntu-latest`, run
+34429851250) took 173 s of a 194 s job — the whole test suite ran serially
+(`vitest.config.ts` set `fileParallelism: false`) and spawned the CLI as a
+subprocess close to 100 times with no compile cache.
+
+Three changes removed those costs: memoizing `legacyTsBackend.extractProject`
+per fixture root within a test file (`test/support/extract.ts`), setting
+`NODE_COMPILE_CACHE` for every spawned `node` process (`vitest.config.ts`
+`test.env`), and restoring `fileParallelism` behind a cross-process lock
+around `pnpm pack` (`test/support/global-setup.ts`, `test/support/pack.ts`).
+None of them touch analysis — `check src --coverage`'s `unresolved-by-reason`
+breakdown is unchanged before and after.
+
+Measured on the same machine as the M0.5 section below (`vitest run`, 412
+tests, 27 files, all passing at every step):
+
+| Configuration | Wall clock |
+|---|---|
+| Before (serial, no compile cache, no fixture memo) | 133 s |
+| + fixture-extraction memo, serial | *(see per-file note below)* |
+| + `NODE_COMPILE_CACHE`, still serial | 107 s |
+| + `fileParallelism` restored (all three changes) | 37 / 43 s |
+
+The fixture memo's own effect is clearest per-file rather than suite-wide: the
+five files it touches (`backend.legacy-ts.test.ts`, `contracts.test.ts`,
+`diagnose.test.ts`, `construction.test.ts`, `mutation.test.ts`) went from
+26.9 s combined to 5.95 s combined, run in isolation before the other two
+changes landed.
+
+CI itself confirms the direction, at a smaller margin than the 8-core local
+numbers above: on PR #17's own run (`ubuntu-latest`, 4 vCPU, run
+34432888258), the `Test` step went from 173 s to **86 s**, and the whole job
+from 194 s to **113 s**. `ubuntu-latest`'s 4 vCPU makes the CLI-spawn-heavy
+part of this suite more CPU-bound than the 8-core machine above, which is
+exactly why the ratio is smaller here (2.0x) than locally (3.2–3.6x) — both
+numbers are real, they are just answering different questions about
+available parallelism.
+
 ## M0.5 — the backend comparison, measured
 
 Every number here was run on 2026-09-09, Node.js v24.20.0, macOS (darwin
