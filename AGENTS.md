@@ -244,6 +244,16 @@ onward. Before that, edit `docs/DESIGN.md` directly and write the record in
 
 Write in English: `README.md`, `docs/DESIGN.md`, `docs/adr/`,
 `docs/integrations/`, `docs/limitations.md`, `ROADMAP.md`, diagnostic message
-text, `docs/diagnostics/`, this file. Write in Japanese: `docs/goals/`, RFCs,
+text, `docs/diagnostics/`, source comments and test names in `src/`, `test/`
+and `scripts/`, this file. Write in Japanese: `docs/goals/`, RFCs,
 commit messages, issues. Keep `effects`, `capabilities`,
 `budget`, `boundary`, and `unknown` in English in both.
+
+A fixture whose subject *is* non-ASCII text
+(`test/fixtures/backend-conformance/unicode.ts`) keeps its non-ASCII
+identifiers and string data — that content is the assertion, not prose. Its
+comments are still English.
+
+Quote `docs/DESIGN.md` from the current English text, not from a translation of
+it. A citation is only worth its section number if the words are actually
+there.

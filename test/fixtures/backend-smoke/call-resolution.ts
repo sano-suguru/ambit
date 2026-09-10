@@ -59,7 +59,7 @@ export const literalSatisfies = {
 } satisfies Dispatcher;
 
 // A member whose body lives in the literal carries its own contract
-// (DESIGN.md §4.1: `@effects` の付与先 = 任意の関数・メソッド).
+// (DESIGN.md §4.1: `@effects` goes on any function or method).
 export const literalWithDeclaredMethod = {
   /** @effects fs_read */
   read(): number {

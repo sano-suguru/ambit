@@ -387,8 +387,8 @@ export function parseEffectsTag(text: string, aliases?: EffectAliases): EffectSe
       continue;
     }
     // A user-defined name is usable from `@effects` too, not only from
-    // config (DESIGN.md §4.2: 「ユーザー定義エフェクトは `ambit.config.ts` で
-    // 標準エフェクトの組み合わせとして宣言できる」). It expands here, so
+    // config (DESIGN.md §4.2: "User-defined effects can be declared in
+    // `ambit.config.ts` as combinations of standard effects"). It expands here, so
     // nothing downstream ever sees a name that is not a standard effect
     // (§4.1 (d)).
     const expansion = aliases?.get(token);

@@ -16,8 +16,9 @@ export interface BudgetInput {
 }
 
 /**
- * A per-invocation budget (DESIGN.md §4.5). Budgets are 宣言・計測・遮断,
- * never a static guarantee: the checker's job here is to make sure the
+ * A per-invocation budget (DESIGN.md §4.5). A budget is "a declaration, a
+ * measurement, and a block", never a static guarantee: the checker's job here
+ * is to make sure the
  * declaration itself is well-formed and to carry it to the runtime, not to
  * prove the limit holds.
  */

@@ -10,8 +10,8 @@ import {
 } from "../src/runtime/index.ts";
 
 /**
- * In-process tests for the Hono adapter (DESIGN.md §4.4「契約とハンドラの対応
- * 付け（決定）」). `app.fetch(new Request(...))` drives Hono without a socket;
+ * In-process tests for the Hono adapter (DESIGN.md §4.4, "Mapping contracts
+ * to handlers"). `app.fetch(new Request(...))` drives Hono without a socket;
  * `test/e2e.runtime.test.ts` does the same through a real server and the
  * installed package.
  */

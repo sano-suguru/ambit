@@ -1,6 +1,6 @@
 /**
  * Finding, loading, validating and resolving `ambit.config.ts`
- * (DESIGN.md §4.1「コード外宣言」).
+ * (DESIGN.md §4.1, "Out-of-code declarations").
  *
  * Imports no compiler. A config file is plain data about symbols the backend
  * already produced ids for, so nothing here needs to know what a

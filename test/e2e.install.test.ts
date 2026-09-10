@@ -9,7 +9,8 @@ import { packedTarball } from "./support/pack.ts";
 const execFileAsync = promisify(execFile);
 
 /**
- * DESIGN.md §6 (`npm install -D`) and P5 (「撤退手順を自動テストする」).
+ * DESIGN.md §6 (`npm install -D`) and P5 ("Test the removal procedure
+ * automatically").
  *
  * Runs the whole distribution path against a project that has nothing to do
  * with this repository: pack a tarball, install it into a scratch directory,
@@ -422,7 +423,7 @@ export default defineConfig({
 
     // … and the contract declarations left in the source are inert: they are
     // JSDoc comments, so the project still type-checks and still runs
-    // (DESIGN.md P5 — 撤退コストは小さい差分であること).
+    // (DESIGN.md P5 — backing out costs a small diff).
     const source = await fs.readFile(path.join(consumer, "src", "app.ts"), "utf8");
     expect(source).toBe(CONSUMER_SOURCE);
     const typecheck = await run(

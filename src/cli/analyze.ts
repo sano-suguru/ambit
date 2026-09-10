@@ -108,8 +108,8 @@ export async function analyze(dir: string, options: AnalyzeOptions = {}): Promis
 
 /**
  * The diagnostics `--strict` promotes to errors: the two that say "analysis
- * reached something it could not resolve" (DESIGN.md §4.2 rule 3 — 「Ambit の
- * `strict: true` でエラーに昇格できる」). Deliberately not every warning:
+ * reached something it could not resolve" (DESIGN.md §4.2 rule 3 — "Ambit's
+ * `strict: true` can promote it to an error"). Deliberately not every warning:
  * `--strict` means "an unverified path is not acceptable here", which is a
  * different claim from promoting, say, an entrypoint's missing capability set.
  */
@@ -117,9 +117,9 @@ const STRICT_PROMOTED_IDS: ReadonlySet<string> = new Set(["AMB-W001", "AMB-W003"
 
 /**
  * `--strict` promotes everywhere; `strict` in `ambit.config.ts` promotes only
- * inside the globs it lists (DESIGN.md §4.3: 「`ambit.config.ts` でディレクトリ
- * 単位に `strict` を設定できる。新規コードから締め、レガシーは警告のまま
- * にする」). The two are a union, so `--strict` on the command line is never
+ * inside the globs it lists (DESIGN.md §4.3: "`strict` can be set per
+ * directory in `ambit.config.ts`. Tighten new code while leaving legacy code
+ * at warnings"). The two are a union, so `--strict` on the command line is never
  * narrowed by a config that lists fewer directories.
  *
  * Matched on the diagnostic's own file, which is why the config-level

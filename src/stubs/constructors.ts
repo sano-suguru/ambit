@@ -13,8 +13,7 @@ import type { KnownEffect } from "../core/index.ts";
  * database client reported no call at all, not even `unknown`. DESIGN.md §3.4
  * forbids turning an unanalyzed path into "no violation".
  *
- * Trust level: bundled with Ambit ("Ambit 同梱", the highest level in
- * DESIGN.md §8).
+ * Trust level: bundled with Ambit — the highest level in DESIGN.md §8.
  */
 export const CONSTRUCTOR_KEY_PREFIX = "new ";
 
@@ -33,8 +32,8 @@ const CONSTRUCTOR_EFFECTS: ReadonlyMap<string, KnownEffect> = new Map([
 
 /**
  * Constructors that read non-deterministic input only when called with no
- * arguments. `new Date()` reads the clock (DESIGN.md §4.2 lists 時刻 under
- * `env`); `new Date(2020, 0, 1)` is a pure conversion of its arguments.
+ * arguments. `new Date()` reads the clock (DESIGN.md §4.2 lists the clock
+ * under `env`); `new Date(2020, 0, 1)` is a pure conversion of its arguments.
  */
 const NULLARY_ONLY_EFFECTS: ReadonlyMap<string, KnownEffect> = new Map([["new Date", "env"]]);
 

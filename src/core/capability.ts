@@ -4,7 +4,7 @@
  * `db:read:users`, `http:get:api.example.com`.
  *
  * Only `target` may be a glob (`http:get:*.example.com`); `resource` and
- * `action` match literally. §4.4 says exactly that ("`target` はグロブ可")
+ * `action` match literally. §4.4 says exactly that ("`target` may be globbed")
  * and nothing more, and widening the glob to the other segments would let
  * `*:*:*` be written as a contract that reads like a restriction.
  */

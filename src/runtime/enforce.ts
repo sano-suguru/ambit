@@ -40,9 +40,9 @@ export function setUnscopedPolicy(policy: UnscopedPolicy): void {
 
 /**
  * Decide one capability without throwing, so a callback-style API can deliver
- * the denial the way its caller expects (DESIGN.md §4.4: 同期 API は `throw`、
- * コールバック API は `process.nextTick(callback, error)`、Promise API は
- * reject).
+ * the denial the way its caller expects (DESIGN.md §4.4: "synchronous APIs
+ * `throw`, callback APIs use `process.nextTick(callback, error)`, and Promise
+ * APIs reject").
  *
  * Returns the error to deliver, or `undefined` when the operation is allowed.
  * Every decision inside a context — allowed or denied — is appended to the

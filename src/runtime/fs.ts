@@ -159,7 +159,7 @@ type AnyFunction = (...args: unknown[]) => unknown;
  *
  * Same shape as `installFetchHook`: install returns restore, and restore only
  * undoes what is still ours, so a hook installed on top of this one is not
- * clobbered (P5: 撤退できること).
+ * clobbered (P5: backing out at any time).
  */
 export function installFsHook(): () => void {
   const restores: (() => void)[] = [];

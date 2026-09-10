@@ -5,7 +5,7 @@
  * kept in a separate table from it because the two answer different
  * questions: that one says "no `KnownEffect` at all", this one says "a
  * `state_write` if the receiver is reachable from outside the function"
- * (DESIGN.md §4.2, 「ローカル変異と `pure`」).
+ * (DESIGN.md §4.2, "Local mutation and `pure`").
  *
  * Whether a listed call actually produces `state_write` is decided per call
  * site by the receiver's locality, not by this table: mutating a value the

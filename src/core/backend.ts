@@ -74,8 +74,8 @@ export type UnresolvedReason =
  * `bodyless-declaration` is a function-like node that declares a signature and
  * no code: an overload signature, an `abstract` member, or an ambient
  * `declare` written in a `.ts` file. It is skipped because it is not a
- * function — the implementation is (DESIGN.md §4.1「オーバーロードと本体の
- * ない宣言」). Indexing one would give two declarations the same declaration
+ * function — the implementation is (DESIGN.md §4.1, "Overloads and bodyless
+ * declarations"). Indexing one would give two declarations the same declaration
  * path, and the first of them has no body to infer effects from, so every
  * caller would read as `pure` whatever the implementation does.
  */
@@ -154,8 +154,8 @@ export interface CallSite {
   readonly pureBuiltinName?: string;
   readonly callbackByReference?: true;
   /**
-   * Set when this site mutates a value in place (DESIGN.md §4.2, 「ローカル
-   * 変異と `pure`」) — a mutating builtin method, or an assignment / `++` /
+   * Set when this site mutates a value in place (DESIGN.md §4.2, "Local
+   * mutation and `pure`") — a mutating builtin method, or an assignment / `++` /
    * `delete` on a property. An assignment is not a call, but it propagates
    * exactly like one, so it rides in the same array rather than in a parallel
    * channel every consumer would have to remember to read. `escaping` is
@@ -244,13 +244,13 @@ export interface ExtractedFunction {
  * A call that establishes an entrypoint's context, as the source shows it: a
  * hand-written `withAmbit(spec, handler)` from `ambit/runtime`, or a framework
  * adapter's registration (`ambitHandler(spec, handler, decode)` from
- * `ambit/runtime/hono`) — DESIGN.md §4.4「契約とハンドラの対応付け（決定）」.
+ * `ambit/runtime/hono`) — DESIGN.md §4.4, "Mapping contracts to handlers".
  *
  * Ambit reads it to check one thing only: that the capability list the runtime
  * would establish is the one the handler's JSDoc declares. Written twice, the
  * two drift, and nothing noticed before this existed.
  *
- * The check is **on the source alone**. §12's 「契約とハンドラの対応付け」 —
+ * The check is **on the source alone**. §12's "Mapping contracts to handlers" —
  * a build that strips comments, a bundle that moves the handler — is not
  * solved here, and `unmatchedReason` exists so a wrapper this comparison
  * cannot reach is reported rather than passed over.
@@ -327,7 +327,8 @@ export interface ExtractedFile {
  * A contract written on a function-like node the backend did not extract, and
  * which therefore cannot carry one. Reported as `AMB-E003` rather than
  * dropped: a declaration that silently does nothing is the opposite of what
- * Ambit is for (DESIGN.md §3.4 — 解析失敗を「違反なし」に変換しない).
+ * Ambit is for (DESIGN.md §3.4 — do not convert an analysis failure into "no
+ * violations").
  *
  * `kind` is the same classification `skippedFunctions` counts, so the message
  * can say *why* the node cannot carry the contract.

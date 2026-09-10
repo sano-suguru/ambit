@@ -117,8 +117,9 @@ export interface DiagnosticFix {
 }
 
 /**
- * The analysis backend that produced a diagnostic (DESIGN.md §3.4: "診断・
- * coverage・性能記録に解析エンジンとそのバージョンを識別できる情報を持たせる").
+ * The analysis backend that produced a diagnostic (DESIGN.md §3.4: "Give
+ * diagnostics, coverage, and performance records information that identifies
+ * the analysis engine and its version").
  * Only the engine identity is captured here; the schema version and Ambit's
  * own version that §5.2 groups alongside it are not yet defined.
  */

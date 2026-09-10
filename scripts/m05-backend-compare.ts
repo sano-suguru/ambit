@@ -12,7 +12,8 @@
  * What is compared
  * ----------------
  * The same *semantic* work on both backends, which §3.5 gate 4 requires
- * (「構文解析のみと型解析を含む検査を速度比較しない」). Both probes walk every
+ * ("Do not compare parse-only speed against a check that includes type
+ * analysis"). Both probes walk every
  * project-local source file and, for each one:
  *
  *   - read the JSDoc tags of every function-like declaration (contract

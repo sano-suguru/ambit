@@ -38,7 +38,8 @@ async function runCli(
 
 describe("ambit check --strict", () => {
   it("promotes the unknown warning to an error and exits 1", async () => {
-    // DESIGN.md §4.2 rule 3: 「Ambit の `strict: true` でエラーに昇格できる」.
+    // DESIGN.md §4.2 rule 3: "Ambit's `strict: true` can promote it to an
+    // error".
     const plain = await runCli(["check", WARNINGS_ONLY_FIXTURES]);
     expect(plain.exitCode).toBe(0);
     expect(plain.stdout).toContain("warning:");

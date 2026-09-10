@@ -6,7 +6,7 @@ import type { FixEdit } from "../../src/core/index.ts";
  * applying them in reverse document order keeps earlier offsets valid.
  *
  * Deliberately dumb: if `fixes[].edits` needed anything cleverer than this to
- * apply, they would not be the "適用可能な具体的パッチ" §5.3 requires.
+ * apply, they would not be the "applicable, concrete patches" §5.3 requires.
  */
 export function applyEdits(source: string, edits: readonly FixEdit[]): string {
   const lines = source.split("\n");

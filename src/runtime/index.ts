@@ -58,8 +58,8 @@ export class AmbitBudgetError extends Error {
 
 /**
  * Run `handler` with the entrypoint's capability set and budget established
- * (DESIGN.md §4.4: 「アダプタがない場合は `withAmbit(spec, handler)` を手動で
- * 挟む」).
+ * (DESIGN.md §4.4: "Where there is no adapter, insert
+ * `withAmbit(spec, handler)` by hand").
  *
  * A malformed capability string throws at wrap time rather than being
  * dropped: a grant that does not parse would silently become "grants nothing",

@@ -1,6 +1,6 @@
 /**
  * `ambit/config` — the entry point a consumer's `ambit.config.ts` imports
- * (DESIGN.md §4.1「コード外宣言」).
+ * (DESIGN.md §4.1, "Out-of-code declarations").
  *
  * Deliberately separate from `ambit` (the diagnostic types) and from
  * `ambit/runtime`: a config file is loaded by the CLI at check time, and

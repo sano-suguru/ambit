@@ -81,7 +81,8 @@ describe("local mutation and `pure` (DESIGN.md §4.2)", () => {
   });
 
   it("over-approximates a `let`-bound local to `state_write`", async () => {
-    // §4.2「ローカル判定の規則」: only a `const` bound to a fresh allocation is
+    // §4.2, "The rule for deciding locality": only a `const` bound to a fresh
+    // allocation is
     // local. A `let` can be reassigned to something the caller holds, and the
     // undecidable side is deliberately the effect, not silence.
     const { diagnostics } = await analyze();

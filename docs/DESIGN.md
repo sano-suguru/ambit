@@ -576,7 +576,7 @@ The primary consumer of diagnostics is the AI agent. Human-facing display is imp
 - Records are in symbol ID order, and the arrays within a record are sorted. Analyzing the same tree twice produces identical output. This is so that ordering jitter does not show up as a diff.
 - The position is between the existing diagnostic lines and the `kind: "summary"` line. Existing consumers that read the last record as `summary` are not broken (§5.2). `init` does not emit these: its proposals are output about "contracts that do not exist yet", not about the current state of authority.
 
-This is an artifact of the checker side and is never read at run time. What §4.4's option 2 rejected was contract data **distributed to the runtime**, which this output is not. `ambit diff` (§6) computes the authority difference from these records alone.
+This is an artifact of the checker side and is never read at run time. What [ADR-0005](adr/0005-mapping-contracts-to-handlers.md)'s alternative 2 rejected was contract data **distributed to the runtime**, which this output is not. `ambit diff` (§6) computes the authority difference from these records alone.
 
 `via` is a sequence of functions, and each element's position is that function's declaration position. The position of the operation that causes the effect (the line of `fetch(...)`) is held by `contract.operation`. This exists so that a reader can reach the operation's line from the diagnostic alone; the meaning of `via` is unchanged.
 

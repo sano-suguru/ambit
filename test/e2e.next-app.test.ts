@@ -21,7 +21,7 @@ import type { Diagnostic } from "../src/core/index.ts";
  * `app/status/route.ts` is the boundary this fixture also records: it sets
  * `export const runtime = "edge"` and is deliberately **not** wrapped, because
  * none of the hooks `ambitRoute` depends on are installed on the Edge runtime
- * (DESIGN.md §12「エッジランタイム」: Phase 1 guarantees Node.js only).
+ * (DESIGN.md §12, "Edge runtimes": Phase 1 guarantees Node.js only).
  */
 
 const execFileAsync = promisify(execFile);
@@ -87,7 +87,8 @@ describe("the Next.js App Router fixture (DESIGN.md §4.4)", () => {
 
   it("reads each ambitRoute spec as the handler's own @capabilities", async () => {
     // None of the four handlers writes `@capabilities` or `@budget`; the
-    // literal spec is the declaration (§4.4「二重宣言を消す」). If the checker
+    // literal spec is the declaration (§4.4, "Removing the double
+    // declaration"). If the checker
     // did not read `ambitRoute`, every one of them would be an @entrypoint
     // with no capability set — AMB-W002 — and this would fail.
     const result = await check(FIXTURE_ROOT);
@@ -95,7 +96,8 @@ describe("the Next.js App Router fixture (DESIGN.md §4.4)", () => {
   }, 60_000);
 
   it("catches a route whose spec does not cover the host its handler reaches", async () => {
-    // The static half of §4.4's 二重強制, reached entirely through the spec:
+    // The static half of §4.4's dual enforcement, reached entirely through the
+    // spec:
     // `currentRate` writes no `@capabilities`, so the grant this narrowing
     // check compares against is the literal `ambitRoute` spec. It is AMB-E005
     // rather than AMB-E009 because the `fetch` is not in the entrypoint's own

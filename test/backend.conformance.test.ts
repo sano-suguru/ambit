@@ -8,8 +8,9 @@ import type { ExtractedProject } from "../src/core/index.ts";
 /**
  * DESIGN.md §3.5 gate 1 — the backend adoption gate's API-conformance suite.
  *
- * §3.5 names the shapes: 別名 import / re-export、generic、overload、callback、
- * union、`any`、再帰、JSDoc、Unicode の位置. The first two and `callback` are
+ * §3.5 names the shapes: "aliased imports / re-exports, generics, overloads,
+ * callbacks, unions, `any`, recursion, JSDoc, and Unicode positions". The
+ * first two and `callback` are
  * covered against `backend-smoke` / `cross-module` in
  * `test/backend.legacy-ts.test.ts`; the rest live here, in
  * `test/fixtures/backend-conformance`.
@@ -17,8 +18,9 @@ import type { ExtractedProject } from "../src/core/index.ts";
  * Two things separate this file from that one. It asserts against the
  * `TsBackend` *interface* — nothing here reaches for a `ts.Node`, so a second
  * implementation is judged by the same assertions. And it states the
- * requirement §3.2 makes explicit: 型が付いていることや `getResolvedSignature`
- * が成功することは、実行時の呼び出し先の実装が一意に確定することを意味しない.
+ * requirement §3.2 makes explicit: "That a value has a type, or that
+ * `getResolvedSignature` succeeds, does not mean the implementation reached at
+ * runtime is uniquely determined."
  * Every case below is a shape where the compiler has the type and the *call
  * target* is still the open question.
  */

@@ -1,5 +1,5 @@
 /**
- * The shape of `ambit.config.ts` (DESIGN.md §4.1「コード外宣言」).
+ * The shape of `ambit.config.ts` (DESIGN.md §4.1, "Out-of-code declarations").
  *
  * Types only — no loader, no filesystem, no compiler. This module is what
  * `ambit/config` exports, so a consumer's config file gets the same type
@@ -32,9 +32,9 @@ export interface ConfigContract {
 export interface AmbitConfig {
   /**
    * User-defined effect names, each a combination of standard effects
-   * (DESIGN.md §4.2: 「ユーザー定義エフェクトは `ambit.config.ts` で標準
-   * エフェクトの組み合わせとして宣言できる」). Usable from both `@effects`
-   * and {@link ConfigContract.effects}. Values are standard effect names
+   * (DESIGN.md §4.2: "User-defined effects can be declared in
+   * `ambit.config.ts` as combinations of standard effects"). Usable from both
+   * `@effects` and {@link ConfigContract.effects}. Values are standard effect names
    * only: a definition never expands into another definition.
    */
   readonly effects?: Readonly<Record<string, readonly string[]>>;
@@ -46,8 +46,8 @@ export interface AmbitConfig {
   readonly contracts?: Readonly<Record<string, ConfigContract>>;
   /**
    * File globs — same syntax as a key's `<file>` half — whose diagnostics get
-   * the promotion `--strict` applies, and only theirs (§4.3: 「ディレクトリ
-   * 単位に `strict` を設定できる」).
+   * the promotion `--strict` applies, and only theirs (§4.3: "`strict` can be
+   * set per directory in `ambit.config.ts`").
    */
   readonly strict?: readonly string[];
 }

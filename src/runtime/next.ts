@@ -9,8 +9,8 @@ import type { AmbitSpec } from "./index.ts";
 import { withAmbit } from "./index.ts";
 
 /**
- * The Next.js App Router adapter (DESIGN.md §4.4「契約とハンドラの対応付け
- * （決定）」).
+ * The Next.js App Router adapter (DESIGN.md §4.4, "Mapping contracts to
+ * handlers").
  *
  * `next` is imported for **types only** and is a devDependency here, never a
  * dependency of the published package — the same treatment `hono` gets in
@@ -27,7 +27,7 @@ import { withAmbit } from "./index.ts";
  *   (`installFetchHook` and friends) are Node.js hooks and are not installed
  *   there, so no capability is checked on such a route. Nothing else about
  *   `ambitRoute` on Edge is claimed either: no test runs there. DESIGN.md §12
- *   「エッジランタイム」: Phase 1 guarantees Node.js only.
+ *   "Edge runtimes": Phase 1 guarantees Node.js only.
  * - Server Actions (`"use server"`), which are not route modules and have no
  *   registration call to attach a spec to.
  * - `middleware.ts`, which runs on the Edge runtime and outside any route
@@ -88,7 +88,7 @@ export type RouteHandler<
  * registered wrapper, so one extraction serves all of them. Changing the order
  * here would cost the check without saying so.
  *
- * Per §4.4「二重宣言を消す（決定: 2026-09-10）」a literal `spec` beside a
+ * Per §4.4, "Removing the double declaration", a literal `spec` beside a
  * handler declared in the same file *is* that handler's `@capabilities` and
  * `@budget`: the JSDoc tags need not repeat it. Writing both stays legal, and
  * a disagreement is still an error — the capability list against
@@ -108,7 +108,7 @@ export type RouteHandler<
  * client (§4.4).
  *
  * The hooks this enforcement depends on are installed once per process, in
- * `instrumentation.ts`'s `register()` — see README's「Next.js」section.
+ * `instrumentation.ts`'s `register()` — see `docs/integrations/nextjs.md`.
  * Without them, `ambitRoute` still establishes the context and applies
  * `timeMs`, but no capability is checked, because nothing is intercepting the
  * operations.
