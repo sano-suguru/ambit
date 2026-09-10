@@ -356,7 +356,7 @@ The capability set need be written in one place only. A literal array in a `with
 
 **Mapping contracts to handlers**
 
-A contract reaches the runtime as a **value inside the module**: `withAmbit(spec, handler)`, or an adapter's `ambitHandler(spec, handler, decode)` / `ambitRoute(spec, handler, decode)`. Nothing is generated, nothing is read from JSDoc at run time, and the runtime refers to neither symbol IDs, file paths, nor function names — so a contract survives a build that drops comments, and bundling and minification ([ADR-0005](adr/0005-mapping-contracts-to-handlers.md)).
+A contract reaches the runtime as a **value inside the module**: `withAmbit(spec, handler)`, or an adapter's `ambitHandler(spec, handler, decode)` / `ambitRoute(spec, handler, decode)`. Nothing is generated, nothing is read from JSDoc at run time, and the runtime refers to neither symbol IDs, file paths, nor function names — so a contract survives a build that drops comments, and bundling and minification ([ADR-0005](adr/0005-mapping-contracts-to-handlers.md); keying on an HTTP route path instead was reconsidered and rejected in [ADR-0007](adr/0007-http-route-keys.md)).
 
 The third parameter `decode` builds the handler's arguments from the framework's `Context`. It is separate so that framework-dependent calls stay inside the registration expression and the handler that declared the contract stays statically analyzable. `decode` runs **inside** the context: reading the request body counts toward `timeMs` as well.
 

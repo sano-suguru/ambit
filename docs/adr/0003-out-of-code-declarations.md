@@ -3,12 +3,19 @@
 - Status: Accepted (2026-09-09)
 - Decides: `docs/DESIGN.md` §4.1 "Out-of-code declarations", "Overloads and
   bodyless declarations"
+- Evidence: none measured
+
+## Context
+
+P3 (incremental adoption) requires that a contract can be declared for code the
+writer cannot edit: third-party code, generated code, and code not yet theirs.
+JSDoc cannot reach any of it, and cannot be attached unambiguously to some
+declaration sites even in code the writer owns.
 
 ## Decision
 
-Where the code cannot be touched — third-party code, generated code, early
-adoption — the same five contracts can be declared in `ambit.config.ts` by
-naming the symbol. Four sub-decisions follow.
+The same five contracts can be declared in `ambit.config.ts` by naming the
+symbol. Four sub-decisions follow, each with its own alternatives.
 
 ## (a) config's namespace ⊃ JSDoc's namespace
 
@@ -32,13 +39,9 @@ limits and symbol identification" has left undecided is the latter notation, not
 the former. Opening up only the config side first lets the side that cannot touch
 the code — this section's actual purpose — move forward.
 
-What would happen if 2 were chosen: in exchange for being able to write JSDoc on
-a getter, the set of "functions where JSDoc cannot be placed" that
-`ambit init --config` should propose shrinks to implicit constructors and
-third-party code only, and the early-adoption gap becomes a JSDoc question again
-rather than a config one. What would happen if 1 were chosen: the effects of
-getters/setters and anonymous default exports ride on propagation, yet there is
-nowhere at all to declare them, and they stay in `--coverage`'s `unknown`.
+Under 1 the effects of getters, setters and anonymous default exports would ride
+on propagation with nowhere at all to declare them, leaving them in
+`--coverage`'s `unknown`.
 
 **The honest limit of this decision**: 3 leaves the asymmetry that "JSDoc can
 syntactically be written at this position, yet is not adopted". This is not a
@@ -109,11 +112,6 @@ a name that was never written appear in a diagnostic. Using defined names only i
 `declared` would leave `declared` and `observed` in different vocabularies, and
 their difference unreadable. 3 writes the same set two ways and makes it
 ambiguous which one the check used.
-
-What would happen if 1 were chosen: in exchange for diagnostic text becoming
-readable in the user's vocabulary, the names appearing in `observed` would depend
-on the contents of config, and the same code would produce different diagnostics
-merely because config changed.
 
 ## Overloads: one declaration site, and it is the implementation
 

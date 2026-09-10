@@ -355,7 +355,10 @@ Every number here was run on 2026-09-09, Node.js v24.20.0, macOS (darwin
 arm64), Apple M1, 8 cores, 16 GiB, from this repository. The procedure is
 `scripts/m05-backend-compare.ts`, `scripts/m05-update-correctness.ts`,
 `scripts/m05-corpus.ts` and `scripts/m05-probe/native-primitives.ts`; the
-decision they led to is DESIGN.md §3.5, recorded in ADR-0001.
+decision they led to is DESIGN.md §3.5, recorded in ADR-0001. An earlier,
+partial evaluation preceded all of this and its numbers are superseded by
+everything below; it is kept at the end of this section, under "The preliminary
+evaluation (superseded)".
 
 Two things in this section were corrected after first being written, and both
 corrections are kept in place rather than edited out: gate 2's cause (it is
@@ -368,12 +371,13 @@ recorded where it belongs below.
 which is what the repository was pinned to, and 6.0.3 was measured afterwards
 (see "The version within the adopted line" below) and adopted. And `typescript`
 7.0.2 — npm's `latest` — through `typescript/unstable/sync`, a JavaScript
-client talking to a Go engine in a child process. Oxc was not carried forward from
-ADR-0001's appendix: it is a parser, and §3.5 gate 4 forbids comparing parsing against
-type-aware analysis. Nothing was measured for a backend that did not run.
+client talking to a Go engine in a child process. Oxc was not carried forward
+from the preliminary evaluation: it is a parser, and §3.5 gate 4 forbids
+comparing parsing against type-aware analysis. Nothing was measured for a
+backend that did not run.
 
-**The preliminary evaluation's blocker is gone.** ADR-0001's appendix recorded the Go engine failing at
-`/proc/self/exe` before initializing. That was environment-specific: the same
+**The preliminary evaluation's blocker is gone.** It recorded the Go engine
+failing at `/proc/self/exe` before initializing. That was environment-specific: the same
 distributed 7.0.2 starts on this machine, opens a project, and answers symbol,
 type and JSDoc queries. Everything below is therefore a first measurement, not
 a repetition — and Linux was **not** re-verified here.
@@ -686,6 +690,56 @@ mean unmaintained; diagnostics now report `version: "6.0.3"`. Its file comment, 
 `TsBackend` doc, and `AGENTS.md`'s Architecture section were updated to say so
 in this change — a file that calls itself disposable after the decision to keep
 it is a claim the tree no longer supports.
+
+### The preliminary evaluation (superseded)
+
+This ran before the comparison above, on synthetic code, with no real project
+provided. **Every number in it is superseded by the gates above**; it is kept
+because it is what the decision rested on until the gates could run, and because
+the caveats it records are still the right ones.
+
+| Item | Value |
+|---|---|
+| Node.js | v24.19.0 |
+| Native TypeScript | npm `typescript` 7.0.2 |
+| Legacy TypeScript | 5.9.3 (installed under a comparison alias) |
+| Oxc | `oxc-parser` 0.148.0 |
+
+On the legacy API, 102 files and 2,009 calls were measured 5 times
+sequentially, each in an independent Node process.
+
+| Scope | Median |
+|---|---:|
+| Compiler import and Program construction | 708.9 ms |
+| Type diagnostic retrieval | 125.8 ms |
+| Extracting types, signatures, contracts and so on for all calls | 92.6 ms |
+| All of the above | 953.5 ms |
+| Program update after a contract-comment change and re-query of 9 calls | 21.5 ms |
+| Peak RSS of the Node process | 247.7 MiB |
+
+- Fixture generation and Node's own startup are not included in the initial
+  measurement. The OS file cache was not cooled.
+- Each stage's median is computed independently, so their sum does not match the
+  median of the total.
+- The measurement after the comment change is a partial re-query, not an
+  incremental check including effect propagation and a full diagnostic update.
+- The 9 cases cover aliased imports, generics, overloads, callbacks, `any`,
+  non-null assertions, unions, Unicode positions, and recursion, and the script's
+  assertions succeeded on all 5 runs. That demonstrates neither conformance
+  across all language features nor an `unknown` rate.
+- The native distribution's type definitions and implementation have entry
+  points for types, symbols, call signatures, JSDoc, post-change snapshots, and
+  communication measurement. **That is confirmation the API exists, not
+  confirmation it works.**
+- The Go engine could not obtain `/proc/self/exe` and halted before
+  initialization, so the native side was not measured at all here. That was
+  environment-specific, as the top of this section records.
+- Oxc parsed small TS functions and comments. No type analysis, contract check,
+  or speed comparison was carried out with it.
+
+External references consulted for the evaluation are listed in ADR-0001. Do not
+equate the TypeScript repository's main branch with the pinned distributed
+version's API: the direct API confirmation was done against 7.0.2.
 
 ## Milestones
 

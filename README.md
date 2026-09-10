@@ -261,21 +261,21 @@ the one that keeps the contract and rewrites the code.
 
 ## Why not ESLint / Effect-TS / dependency-cruiser
 
-| Tool | What it constrains |
+| Tool | Unit of analysis |
 |---|---|
-| ESLint | the AST node in front of the rule |
+| ESLint | syntax, scope, and type-aware rules within a file |
 | dependency-cruiser | the import edges between modules |
 | Effect-TS | effects encoded in the values you construct |
-| **Ambit** | **what one function may do, and which resource it may touch** |
+| **Ambit** | **function authority, propagated across the call graph** |
 
-A lint rule fires on one node; Ambit's unit is the call graph, so a `pure`
-function that calls an undeclared helper that calls `fetch` is an error on the
-pure function, with the path reported. A module graph that is entirely legal
-can still contain a `pure` helper that opens a socket. And where Effect-TS puts
-effects in the types of the values you construct — so the code is written in
-that style throughout — Ambit's static contracts are JSDoc comments on ordinary
-TypeScript: adding them changes no runtime behavior, and removing Ambit is a
-small diff.
+Ambit's abstraction is the authority a function holds after propagation, which
+is why a `pure` function calling an undeclared helper that calls `fetch` is an
+error on the pure function, with the path reported — no single file contains the
+violation. A module graph that is entirely legal can still contain a `pure`
+helper that opens a socket. And where Effect-TS puts effects in the types of the
+values you construct — so the code is written in that style throughout — Ambit's
+static contracts are JSDoc comments on ordinary TypeScript: adding them changes
+no runtime behavior, and removing Ambit is a small diff.
 
 ## What Ambit does not guarantee
 
@@ -295,25 +295,12 @@ claim:
   so calling them is neither blocked nor recorded. Native addons, child
   processes, and other `worker_threads` workers are outside every hook.
 - **That the declaration cannot simply be widened.** An agent that edits the
-  `@effects` tag along with the code — including by applying the `widen` fix
-  Ambit itself offers — gets a green check again: measured on the example above,
-  `pure` → `network` on `priceOrder` takes `check` from exit 1 to exit 0.
-  `ambit diff <ref>` is the answer, and it exits 1 on the same edit, naming the
-  hop that carried the authority:
-
-  ```text
-  Authority increased in 1 symbol:
-
-    pricing.ts#priceOrder (pricing.ts:4)
-      + network
-        -> applyTax (tax.ts:3)
-        -> currentRate (rates.ts:3)
-        operation: fetch (rates.ts:4)
-  ```
-
-  `diff` has its own blind spots: a moved or renamed function reads as a
-  deletion plus a new symbol, a gained `unknown` is reported but is not an
-  increase, and a symbol with no declaration path never appears.
+  `@effects` tag along with the code gets a green check again — measured on the
+  example above, widening `priceOrder` to `network` takes `check` from exit 1 to
+  exit 0. `ambit diff <ref>` is the answer: it compares authority against a base
+  ref and exits 1 on an increase, naming the hop that carried it. `diff` has
+  documented blind spots of its own
+  ([limitations](docs/limitations.md#what-ambit-diff-can-and-cannot-see)).
 - **Targets finer than the resource.** A database target names the database, not
   the table — Ambit does not read table names out of SQL — and a shell spawn
   names the shell, not the program inside the command string.

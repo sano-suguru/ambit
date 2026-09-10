@@ -2,8 +2,16 @@
 
 - Status: Accepted
 - Decides: `docs/DESIGN.md` §4.4 "The approach to runtime hooks"
-- Measurements: Node.js v24.19.0 / macOS (darwin arm64). Anything not measured is
-  marked **unmeasured**.
+- Evidence: measured on Node.js v24.19.0 / macOS (darwin arm64), recorded inline
+  below where no other document holds it. Anything not measured is marked
+  **unmeasured**.
+
+## Context
+
+`@capabilities` is enforced at run time by intercepting the operations a grant
+names. Which interception mechanism is used decides whether an ungranted
+operation can be **blocked** or only **noticed**, and §4.4's coverage table may
+not claim the first where only the second is true.
 
 ## (a) The hooking approach
 
@@ -43,16 +51,9 @@ Reasons:
 - The performance impact — the overhead of going through the replaced function —
   is **unmeasured**.
 
-What would happen otherwise:
-
-- Adopting only `diagnostics_channel` would let us say "there is a hook" while
-  calls pass straight through. The documentation would be putting a blocking mark
-  on something that does not block.
-- Adopting loader hooks would take on the fragility of rewriting resolution of
-  `node:` builtins — reentrancy control, worker threads, `--import` ordering —
-  without widening what is covered.
-- Importing `pg` from Ambit's side would put `pg` into the dependency graph of
-  users who do not use `pg`.
+Loader hooks were also weighed on cost, not only coverage: rewriting resolution
+of `node:` builtins brings reentrancy control, worker threads and `--import`
+ordering with it, and none of that buys a call the monkeypatch misses.
 
 ## (b) The target format for `node:fs` and `node:child_process`
 
@@ -64,17 +65,10 @@ Options considered:
 3. Ignore paths and permit per operation only (`fs:read:*`).
 
 Reason: what is visible at call time is the resolved path, and that is the only
-form that can be matched against a grant. The cost of normalization (one
-`path.resolve`) is **unmeasured**.
-
-What would happen otherwise:
-
-- Choosing 2 would make `./data/x` and `/srv/app/data/x` different targets, so
-  the same file could be written two ways. If cwd changes, the same string points
-  at a different file, so the meaning of a grant would depend on where the process
-  was started.
-- Choosing 3 would make it impossible to declare which files may be read, and
-  `fs:read` would mean nothing beyond "reads files".
+form that can be matched against a grant. Under 2, `./data/x` and
+`/srv/app/data/x` would be different targets for the same file, and a grant's
+meaning would depend on where the process was started. The cost of normalization
+(one `path.resolve`) is **unmeasured**.
 
 For the shell forms of the process API (`exec`, `execSync`, `shell: true`), the
 program actually launched is inside the shell string and is not determined without
@@ -96,12 +90,10 @@ Reason: `pg` has stable replacement points in `Pool.prototype.query` /
 `Client.prototype.query`, and can be written in the same symmetric install /
 restore shape as `installFetchHook`. Prisma's official extension point `$extends`
 **returns a new client**, so a restore putting the original client back cannot be
-written. Also, the client does not exist without running `prisma generate`, and
-testing against a real connection is heavy. A performance comparison of the two
-is **unmeasured**.
-
-What would happen otherwise: choosing Prisma would give a hook with no restore,
-which does not satisfy P5 (being able to back out).
+written — a hook with no restore does not satisfy P5 (being able to back out).
+Also, the client does not exist without running `prisma generate`, and testing
+against a real connection is heavy. A performance comparison of the two is
+**unmeasured**.
 
 The direction of a `pg` query is decided by the **same rules** as the static side
 (the SQL keyword table in `src/stubs/data-clients.ts`). Putting the rules in two

@@ -2,7 +2,14 @@
 
 - Status: Accepted (2026-09-09)
 - Decides: `docs/DESIGN.md` §4.2 "Local mutation and `pure`"
-- Measurements: `docs/status.md`
+- Evidence: `docs/status.md` — the before/after `unknown` measurement
+
+## Context
+
+`Array.push` onto a locally created array is the ordinary way to write a pure
+function in TypeScript. Whether that counts as an effect decides what `pure` can
+mean, and — because a mutation whose effect is undetermined falls to `unknown` —
+what the primary KPI measures.
 
 ## Decision
 
@@ -10,7 +17,7 @@
 value reachable from outside the function is `state_write`, and if it exceeds the
 declaration it becomes a violation under propagation rule 1.
 
-## Options considered
+## Alternatives considered
 
 1. **Permit local mutation, and count only externally reachable mutation as an
    effect** (adopted).
@@ -37,20 +44,13 @@ shows the guaranteed range as narrower than it is — and it distorts §4.3's
 practice of treating the `unknown` rate as a primary KPI. The before/after
 measurements are recorded in `docs/status.md`.
 
-## What would happen otherwise
+Under 3, `state_write` would not exist at all, and a function doing
+`param.push(x)` could declare `@effects pure` while that remained only an
+`unknown` **warning** — leaving `ambit check`'s exit code at 0 (§4.3). A function
+that rewrites its arguments calling itself `pure` runs against §3.4's "do not
+pass off an analysis failure as no violation".
 
-Under 2, the ordinary way to write a pure function in TypeScript (`push` onto a
-local array and return it) could no longer declare `pure`, and `pure` would
-become a tag almost nobody can actually declare. Adding a new name to the effect
-table does not make P3's incremental adoption work if users cannot use it.
-
-Under 3, `state_write` would not exist, and a function doing `param.push(x)`
-could declare `@effects pure` while that remained only an `unknown` **warning**,
-leaving `ambit check`'s exit code at 0 (§4.3). A state in which a function that
-rewrites its arguments can call itself `pure` runs against §3.4's "do not pass off
-an analysis failure as no violation".
-
-## The limit this leaves
+## Consequences
 
 This is **not a soundness claim**, and `docs/DESIGN.md` §4.2 says so where the
 rule is stated. If a locally created value is handed elsewhere and then mutated

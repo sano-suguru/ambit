@@ -3,7 +3,15 @@
 - Status: Accepted (2026-09-10)
 - Decides: `docs/DESIGN.md` §4.1 "Where declarations live", §4.4 "Removing the
   double declaration"
+- Evidence: none measured
 - Depends on: [ADR-0005](0005-mapping-contracts-to-handlers.md)
+
+## Context
+
+Three places can declare a contract — JSDoc, `ambit.config.ts`, and the `spec` of
+a runtime registration — and before this decision, a handler with runtime
+enforcement had `capabilities` and `budget` written twice: once in the tag the
+checker reads, once in the `spec` the runtime reads.
 
 ## Decision
 
@@ -18,16 +26,7 @@ as literals and `handler` names a declaration in the same file, that value **is*
 that handler's `@capabilities` / `@budget` declaration; writing the same content
 again in JSDoc is not required.
 
-## Reasons
-
-JSDoc disappears at build time. Putting data that must reach runtime there
-requires inventing a delivery mechanism every time — which is exactly what
-[ADR-0005](0005-mapping-contracts-to-handlers.md) rejected. Conversely `effects`
-is not needed at runtime, so JSDoc is the right place for it. The split lines up
-with the granularity trade-off in §4.1: static checking is per function, runtime
-enforcement is per entry point.
-
-## Rejected alternatives
+## Alternatives considered
 
 - **Make JSDoc authoritative and deliver it to the runtime** (option 2 of
   ADR-0005 / `--emit-contracts` / the middleware approach). ADR-0005's three
@@ -47,7 +46,16 @@ enforcement is per entry point.
   line and was never duplicated in the first place. Inferring it would make
   "forgot to wrap" indistinguishable from "not an entry point".
 
-## Why the agreement check keeps its severity
+## Consequences
+
+JSDoc disappears at build time. Putting data that must reach runtime there
+requires inventing a delivery mechanism every time — which is exactly what
+[ADR-0005](0005-mapping-contracts-to-handlers.md) rejected. Conversely `effects`
+is not needed at runtime, so JSDoc is the right place for it. The split lines up
+with the granularity trade-off in §4.1: static checking is per function, runtime
+enforcement is per entry point.
+
+### Why the agreement check keeps its severity
 
 `AMB-E010` / `AMB-E011` **stay. Neither their meaning nor their severity
 changes.** If both a `spec` and a JSDoc tag are written and they disagree, it is
@@ -61,7 +69,7 @@ A separate id (`AMB-E011`) was used for budgets rather than extending
 (`declared` / `required` / `excess`), and a budget disagreement has nothing that
 fits there.
 
-## The check this decision gives up
+### The check this decision gives up
 
 In the era of writing it twice, an edit that widened only `spec` was caught by
 `AMB-E010` as "the pair disagrees". Once the declaration is in one place there is
