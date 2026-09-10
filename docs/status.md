@@ -8,8 +8,8 @@ Measured on 2026-09-09, Node.js v24.20.0, macOS (darwin arm64), Apple M1,
 8 cores, 16 GiB. Every number below was run, not estimated.
 
 **Verdict: not a release candidate.** M0.5 is now complete — all five gates
-ran, and the default backend is decided (DESIGN.md §3.5「既定バックエンド
-（決定）」: the legacy TypeScript Compiler API). M1 still has no incremental
+ran, and the default backend is decided (DESIGN.md §3.5 "Default backend
+(decided)": the legacy TypeScript Compiler API). M1 still has no incremental
 path, and M2–M4 are partial. The details are per row.
 
 ## Baseline commands
@@ -154,7 +154,7 @@ is the same accounting the paragraph below describes, not a regression in
 resolution.
 
 The two columns dropped from the table above are DESIGN.md §4.2's
-local-mutation rule (「ローカル変異と `pure`」) before and after. `builtin-method` unresolved dropped 131 → 62: 81 sites
+local-mutation rule ("Local mutation and `pure`") before and after. `builtin-method` unresolved dropped 131 → 62: 81 sites
 became mutation sites, and `Array.push`, `Map.set` and `Set.add` left
 `top-unresolved-names` entirely — every one of them is now either a local
 mutation with no effect or a `state_write`. The two columns' denominators
@@ -284,10 +284,10 @@ tree. The rest is Ambit's own summarizing, propagation and diagnostics, plus
 Node's type stripping of the whole source tree on every start.
 
 The re-check costs the same as the first check because **nothing is cached**.
-DESIGN.md §6.2's resident/incremental path is not implemented, so "初回検査"
-and "変更後の再検査" are the same operation. That is the honest reading of
-these numbers, and the reason no threshold has been set: there is nothing yet
-to compare against.
+DESIGN.md §6.2's resident/incremental path is not implemented, so "the
+initial check" and "the re-check after a change" are the same operation.
+That is the honest reading of these numbers, and the reason no threshold
+has been set: there is nothing yet to compare against.
 
 Every row is labelled with the tree it was measured on. The last two rows are
 the current tree; the rows above them are smaller trees and are kept as
@@ -355,7 +355,7 @@ Every number here was run on 2026-09-09, Node.js v24.20.0, macOS (darwin
 arm64), Apple M1, 8 cores, 16 GiB, from this repository. The procedure is
 `scripts/m05-backend-compare.ts`, `scripts/m05-update-correctness.ts`,
 `scripts/m05-corpus.ts` and `scripts/m05-probe/native-primitives.ts`; the
-decision they led to is DESIGN.md §3.5「既定バックエンド（決定）」.
+decision they led to is DESIGN.md §3.5 "Default backend (decided)".
 
 Two things in this section were corrected after first being written, and both
 corrections are kept in place rather than edited out: gate 2's cause (it is
@@ -410,7 +410,7 @@ Fixed: only the implementation is extracted (`bodyless-declaration` is a new
 `SkippedFunctionKind`), calls resolve to the implementation, an overload set
 with no implementation is `overload-without-body`, and a contract written on a
 bodyless signature is AMB-E003 instead of being silently dropped. The rule is
-DESIGN.md §4.1「オーバーロードと本体のない宣言（決定）」;
+DESIGN.md §4.1 "Overloads and bodyless declarations (decided)";
 `ExtractedFile.functions` now states id-uniqueness as a backend requirement,
 because `propagate`'s termination argument rests on it.
 
@@ -490,7 +490,7 @@ the same file):
 
 The last two rows are a cost of the decision, not a point in its favour: a
 tsconfig naming `deduplicatePackages` is one that Ambit's analyzer refuses to
-start on. DESIGN.md §12「TypeScript 版間の互換性」holds it.
+start on. DESIGN.md §12 "TypeScript version compatibility" holds it.
 
 ### Gate 3 — update correctness
 
@@ -604,7 +604,8 @@ Ambit's own analysis and diagnostics.
 The last row was observed, not predicted. Installing 7.0.2 as a devDependency —
 even under the alias `typescript-native` — made `pnpm exec tsc --version` report
 7.0.2, and the repository's own type check produced the 198 errors in gate 2.
-That is DESIGN.md §12「ビルド用コンパイラと解析エンジンの分離」happening in
+That is DESIGN.md §12 "Separating the build compiler from the analysis
+engine" happening in
 practice: one `bin` name, two compilers, and the verification command silently
 changes meaning. The alias was removed. The comparison compiler now lives in
 `.m05-native/` (gitignored), installed by `node scripts/m05-native-install.ts`,
@@ -616,7 +617,8 @@ outside this package's dependency tree; `test/architecture.test.ts` asserts that
 The comparison above was framed as "legacy vs native" and took 5.9.3 as given.
 It was not given: `git log` shows it entering at the first commit
 (`2d98301 chore: project scaffolding`) and never revisited, and Appendix A
-records it as 「比較用 alias で導入」 — the *representative of the old API*,
+records it as "installed under a comparison alias" — the *representative
+of the old API*,
 never a considered product choice. One side of a decision about which analyzer
 to ship had no recorded reason behind its version number.
 
@@ -670,7 +672,7 @@ releases.
 ### Decision
 
 **The JavaScript-implementation TypeScript Compiler API is the default for the
-initial release, at version 6.0.3.** DESIGN.md §3.5「既定バックエンド（決定）」
+initial release, at version 6.0.3.** DESIGN.md §3.5 "Default backend (decided)"
 records it, with the reasoning and the conditions that would reopen it. In one
 line: adopting the native engine means a second backend on an API published
 entirely under `unstable/`, plus owning snapshot invalidation on pain of silent
@@ -703,7 +705,7 @@ it is a claim the tree no longer supports.
 |---|---|
 | Spec section | §3.5, Appendix A |
 | Acceptance | publish §3.5 evidence, adopt a default backend |
-| Implemented | **All five gates ran.** Allowances fixed in DESIGN.md §3.5 *before* measuring. Gate 1: `test/backend.conformance.test.ts` (28 tests) against the `TsBackend` interface, plus a native primitive probe. Gate 2: both compilers on the same tsconfigs and the same tree. Gate 3: `scripts/m05-update-correctness.ts`. Gate 4: `scripts/m05-backend-compare.ts` + `scripts/m05-corpus.ts`, 5 interleaved runs per corpus, equal counts enforced. Gate 5: install size, platform coverage, failure modes, `bin` collision. **Default backend decided**: the legacy Compiler API (DESIGN.md §3.5「既定バックエンド（決定）」). Pre-publish, so §9 sends it to `docs/DESIGN.md` directly rather than to an RFC |
+| Implemented | **All five gates ran.** Allowances fixed in DESIGN.md §3.5 *before* measuring. Gate 1: `test/backend.conformance.test.ts` (28 tests) against the `TsBackend` interface, plus a native primitive probe. Gate 2: both compilers on the same tsconfigs and the same tree. Gate 3: `scripts/m05-update-correctness.ts`. Gate 4: `scripts/m05-backend-compare.ts` + `scripts/m05-corpus.ts`, 5 interleaved runs per corpus, equal counts enforced. Gate 5: install size, platform coverage, failure modes, `bin` collision. **Default backend decided**: the legacy Compiler API (DESIGN.md §3.5 "Default backend (decided)"). Pre-publish, so §9 sends it to `docs/DESIGN.md` directly rather than to an RFC |
 | Evidence | The "M0.5 — the backend comparison, measured" section above, including "The version within the adopted line" (why `typescript` is 6.0.3 and not the scaffolding default 5.9.3). Every figure was run; the one corpus where the two backends did not do equal work is labelled not comparable rather than turned into a ratio |
 | Outstanding | **Linux is not re-verified.** Appendix A's `/proc/self/exe` failure was environment-specific and the engine runs on darwin/arm64; no Linux run was made in this comparison, so nothing is claimed about it either way. Gate 1's native column checked `getFullyQualifiedName` reconstruction on **one** symbol shape, not on the external-package or project-`.d.ts` shapes. Gates 3 and 4 are worth re-running once §6.2's resident path exists, which is the second of §3.5's three reopening conditions — until then native's 1 ms re-query has nowhere in the product to appear. `conformance/` as a published, external suite (§9) still waits for the first publish; `test/backend.conformance.test.ts` is its stand-in |
 
@@ -723,9 +725,9 @@ it is a claim the tree no longer supports.
 |---|---|
 | Spec section | §4.4, §4.5, §4.6 |
 | Acceptance | conformance tests for the planned hook targets; contract-to-handler mapping; 50 bundled stub packages |
-| Implemented | `@capabilities` narrowing (static, crosses undeclared functions, target globs), the static half of §4.4's 二重強制 for literal HTTP targets (`AMB-E009`), a literal `withAmbit` / `ambitHandler` `spec` read as the handler's own `@capabilities` / `@budget` declaration, with the source-level agreement check kept for a pair that is written twice — the capability set (`AMB-E010`) and the budget (`AMB-E011`), each half judged on its own (`AMB-W004` for a half the source does not fix), `@entrypoint` warning, `@boundary` with mandatory reason and separate coverage accounting, `@budget` parsing/validation, runtime `withAmbit` + `timeMs` enforcement + `runtime.unscoped`, four capability hooks with install/restore — `globalThis.fetch`, `node:fs`/`node:fs/promises`, `node:child_process`, and `pg` (`Pool`/`Client.query`) — every decision recorded on the context's audit trail, `db_read`/`db_write`/`llm` stubs for `pg`/`mysql2`/Prisma/OpenAI/Anthropic, two framework adapters — `ambit/runtime/hono`'s `ambitHandler` and `ambit/runtime/next`'s `ambitRoute`, each registering a route's contract explicitly and establishing the context for the handler and its request decoder |
+| Implemented | `@capabilities` narrowing (static, crosses undeclared functions, target globs), the static half of §4.4's dual enforcement for literal HTTP targets (`AMB-E009`), a literal `withAmbit` / `ambitHandler` `spec` read as the handler's own `@capabilities` / `@budget` declaration, with the source-level agreement check kept for a pair that is written twice — the capability set (`AMB-E010`) and the budget (`AMB-E011`), each half judged on its own (`AMB-W004` for a half the source does not fix), `@entrypoint` warning, `@boundary` with mandatory reason and separate coverage accounting, `@budget` parsing/validation, runtime `withAmbit` + `timeMs` enforcement + `runtime.unscoped`, four capability hooks with install/restore — `globalThis.fetch`, `node:fs`/`node:fs/promises`, `node:child_process`, and `pg` (`Pool`/`Client.query`) — every decision recorded on the context's audit trail, `db_read`/`db_write`/`llm` stubs for `pg`/`mysql2`/Prisma/OpenAI/Anthropic, two framework adapters — `ambit/runtime/hono`'s `ambitHandler` and `ambit/runtime/next`'s `ambitRoute`, each registering a route's contract explicitly and establishing the context for the handler and its request decoder |
 | Evidence | `test/contracts.test.ts` (41 — the wrapper block compares `withAmbit`, `ambitHandler` and `ambitRoute` registrations against the same handlers' JSDoc), `test/runtime.test.ts` (in-process, 27 — includes the fs, `child_process` and `pg` hooks and their restores), `test/runtime.hono.test.ts` (7 — the adapter driven through Hono itself), `test/runtime.next.test.ts` (10 — the Route Handler called the way Next.js calls it, with a real `NextRequest`; the fetch, `node:fs` and `node:child_process` denials each assert the operation was never reached), `test/e2e.next-app.test.ts` (5 — an `app/**/route.ts` fixture checked end to end and type-checked with nothing installed), `test/e2e.runtime.test.ts` (13 — real socket, real files, a real child process, a real `pg@8` client and a real Hono server, all through the installed package), `test/e2e.install.test.ts` (10 — includes the `ambit/runtime/hono` subpath resolving after `npm install`, and README's own `withAmbit`/`ambitHandler`/`ambitRoute` examples plus its `instrumentation.ts` snippet type-checking against the installed package, with `next@16` installed so `NextRequest` resolves for real), `test/e2e.realistic.test.ts` (19 — the six agent-accident scenarios, the `AMB-E009`/`AMB-E005` overlap, and the fixture type-checking with nothing installed), `test/stubs.data-clients.test.ts`, `test/stubs.http-capabilities.test.ts` |
-| Outstanding | **`fetch`, `node:fs`, `node:child_process` and `pg` are hooked; nothing else is.** `node:http`/`https`/`net`, `mysql2`/Prisma/Drizzle/MongoDB, OpenAI/Anthropic/Vercel AI — no runtime hook, so calling them is neither blocked nor recorded. The builtin hooks cover named ESM imports only when installed from a preload (`docs/limitations.md`), and the `pg` hook is verified against `pg@8` only. **`costUsd` and `llmCalls` are not enforced**; nothing increments them. **Two framework adapters** — `ambit/runtime/hono` (verified against `hono@4` and `@hono/node-server@1`) and `ambit/runtime/next` (verified against `next@16` on the Node.js runtime, as a Route Handler function: no test starts a `next` server process). Express, BullMQ and `worker_threads` have none, and neither do Next.js Server Actions, `middleware.ts`, the Pages Router, or any route on the Edge runtime — a handler on those establishes no context, so `setUnscopedPolicy` decides what its operations do. **Contract-to-handler mapping is explicit registration** (§4.4's decision): the `spec` passed to `withAmbit`, `ambitHandler` or `ambitRoute` is a value in the module, so it reaches the running handler after a build strips the comments and after a bundler renames everything — the runtime reads no JSDoc, no symbol ID and no file path. A literal `spec` naming a handler in the same file *is* that handler's `@capabilities` / `@budget` (§4.4's 「二重宣言を消す」), so the set and the budget are written once; writing the JSDoc tag as well stays legal and a disagreeing pair is still `AMB-E010` / `AMB-E011`. The two cases the `spec` cannot declare — a runtime-built list or budget, and a cross-module handler — still need the JSDoc, and are reported as uncompared (`AMB-W004`). The cross-module case is what §12's 「契約とハンドラの対応付け」 (3) still holds. An adapter covers only the route it wraps: Hono's `app.use` middleware and Next.js's `middleware.ts` both run outside the context (`docs/limitations.md`). **Only HTTP targets are read from source** — no `db:` capability is derived from SQL (§4.4's caveat). **No `@budget` loop-pattern warnings.** Bundled stubs: 52 call entries across 9 namespaces (`fetch`, `globalThis`, `undici`, `node:http`, `node:https`, `node:net`, `node:fs`, `node:fs/promises`, `node:child_process`), 43 constructor entries, 36 pure-builtin methods, 19 in-place-mutation methods, 35 database/LLM client rules across 5 packages (`pg`, `mysql2`, `@prisma/client`, `openai`, `@anthropic-ai/sdk`), and 7 HTTP capability rules — **not** 50 packages. All nine effects now have at least one bundled source. |
+| Outstanding | **`fetch`, `node:fs`, `node:child_process` and `pg` are hooked; nothing else is.** `node:http`/`https`/`net`, `mysql2`/Prisma/Drizzle/MongoDB, OpenAI/Anthropic/Vercel AI — no runtime hook, so calling them is neither blocked nor recorded. The builtin hooks cover named ESM imports only when installed from a preload (`docs/limitations.md`), and the `pg` hook is verified against `pg@8` only. **`costUsd` and `llmCalls` are not enforced**; nothing increments them. **Two framework adapters** — `ambit/runtime/hono` (verified against `hono@4` and `@hono/node-server@1`) and `ambit/runtime/next` (verified against `next@16` on the Node.js runtime, as a Route Handler function: no test starts a `next` server process). Express, BullMQ and `worker_threads` have none, and neither do Next.js Server Actions, `middleware.ts`, the Pages Router, or any route on the Edge runtime — a handler on those establishes no context, so `setUnscopedPolicy` decides what its operations do. **Contract-to-handler mapping is explicit registration** (§4.4's decision): the `spec` passed to `withAmbit`, `ambitHandler` or `ambitRoute` is a value in the module, so it reaches the running handler after a build strips the comments and after a bundler renames everything — the runtime reads no JSDoc, no symbol ID and no file path. A literal `spec` naming a handler in the same file *is* that handler's `@capabilities` / `@budget` (§4.4's "Removing the double declaration"), so the set and the budget are written once; writing the JSDoc tag as well stays legal and a disagreeing pair is still `AMB-E010` / `AMB-E011`. The two cases the `spec` cannot declare — a runtime-built list or budget, and a cross-module handler — still need the JSDoc, and are reported as uncompared (`AMB-W004`). The cross-module case is what §12's "Mapping contracts to handlers" (3) still holds. An adapter covers only the route it wraps: Hono's `app.use` middleware and Next.js's `middleware.ts` both run outside the context (`docs/limitations.md`). **Only HTTP targets are read from source** — no `db:` capability is derived from SQL (§4.4's caveat). **No `@budget` loop-pattern warnings.** Bundled stubs: 52 call entries across 9 namespaces (`fetch`, `globalThis`, `undici`, `node:http`, `node:https`, `node:net`, `node:fs`, `node:fs/promises`, `node:child_process`), 43 constructor entries, 36 pure-builtin methods, 19 in-place-mutation methods, 35 database/LLM client rules across 5 packages (`pg`, `mysql2`, `@prisma/client`, `openai`, `@anthropic-ai/sdk`), and 7 HTTP capability rules — **not** 50 packages. All nine effects now have at least one bundled source. |
 
 ### M3 — concrete fix patches, agent protocol
 

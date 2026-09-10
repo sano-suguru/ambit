@@ -114,8 +114,8 @@ runs. So the contract belongs on the implementation, and the message says so.
 This is not a limitation waiting to be lifted. Adopting a signature's contract
 would mean attributing it to a declaration Ambit does not model, and choosing
 between two signatures that disagree; both are guesses, and DESIGN.md
-§4.1「オーバーロードと本体のない宣言」settles it the other way. A call to an
-overload set with no implementation in the project is `unknown`
+§4.1 "Overloads and bodyless declarations" settles it the other way. A call
+to an overload set with no implementation in the project is `unknown`
 (`overload-without-body` in `--coverage`), not `pure`.
 
 For a `declare function` with no implementation anywhere in the project, there
@@ -190,8 +190,9 @@ Literal target outside the granted capabilities.
 A function declaring `@capabilities` performs an operation whose target the
 source fixes — a literal URL, or a template literal whose static head already
 ends the authority — and no grant covers it. This is the static half of
-DESIGN.md §4.4's 二重強制: 「リテラル URL や既知クライアントなど静的に判定
-できる違反はチェッカーが止める」.
+DESIGN.md §4.4's dual enforcement: "violations that can be decided
+statically, such as literal URLs and known clients, are stopped by the
+checker".
 
 Reported at the call site, not at the declaration: that is the line to change.
 Separate from AMB-E005 because the finding is different — nothing declared
@@ -360,7 +361,7 @@ declaration: a wrapper that produced no diagnostic at all would read as
 Not an error, and not promoted by `--strict`. The comparison is on the source
 only; matching a contract to the handler that actually runs — after a build
 strips the comments, or a bundler moves it — is DESIGN.md §12's
-「契約とハンドラの対応付け」 and is still open.
+"Mapping contracts to handlers" and is still open.
 
 ## AMB-W005
 
@@ -371,9 +372,9 @@ JSDoc and `ambit.config.ts` declare the same tag differently.
 
 One symbol has both a JSDoc contract and a `contracts` entry, and for at least
 one of the five tags the two do not say the same thing. DESIGN.md §4.1 settles
-which wins — 「同一シンボルに JSDoc と config の両方があれば JSDoc を優先し、
-差異を警告する」 — so the run proceeds with the JSDoc declaration and this
-diagnostic reports what was ignored.
+which wins — "if a symbol has both JSDoc and config, JSDoc wins and the
+difference is warned about" — so the run proceeds with the JSDoc
+declaration and this diagnostic reports what was ignored.
 
 Compared tag by tag, on the parsed values rather than on the text: `@effects
 db_read, network` and `effects: ["network", "db_read"]` are the same
@@ -428,7 +429,7 @@ Entrypoint with no capabilities.
 A function marked `@entrypoint` declares no `@capabilities`. An entrypoint is
 where `@ambit/runtime` would establish a capability context (DESIGN.md §4.4);
 one with no declared set establishes nothing to check against. §4.4:
-「未指定は unknown 相当として警告」.
+"leaving them unspecified is warned about as equivalent to unknown".
 
 ## AMB-E006
 
