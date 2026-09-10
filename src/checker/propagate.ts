@@ -1,5 +1,6 @@
 import type {
   CapabilitySet,
+  ContractViaEntry,
   EffectSet,
   FunctionSummary,
   KnownEffect,
@@ -339,4 +340,22 @@ export function unknownWitnessChain(
     visited.add(next);
     current = next;
   }
+}
+
+/**
+ * A witness chain rendered as `contract.via` entries: each hop named by its
+ * symbol id and located at its own declaration (DESIGN.md §5.1 — 「`via` は
+ * 関数の列であり、各要素の位置はその関数の宣言位置である」).
+ *
+ * Lives beside the chain walkers rather than beside either consumer, because
+ * a diagnostic's path and an authority record's path must be the same path.
+ */
+export function chainToVia(
+  chain: readonly SymbolId[],
+  state: ReadonlyMap<SymbolId, PropagatedFunction>,
+): readonly ContractViaEntry[] {
+  return chain.map((id) => {
+    const location = state.get(id)?.summary.location;
+    return { symbol: id, file: location?.file ?? "", line: location?.line ?? 0 };
+  });
 }

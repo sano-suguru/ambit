@@ -1,26 +1,12 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
-import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { CoverageReport } from "../checker/coverage.ts";
-import {
-  type ConfigTarget,
-  computeCoverage,
-  diagnose,
-  diagnoseContractDivergence,
-  diagnoseRuntimeWrappers,
-  diagnoseUncarriedContracts,
-  diagnoseUnmatchedConfigKeys,
-  legacyTsBackend,
-  loadConfig,
-  propagate,
-  proposeContracts,
-  type ResolvedConfig,
-  resolveConfig,
-  summarizeExtractedFiles,
-} from "../checker/index.ts";
 import type { Diagnostic } from "../core/index.ts";
-import { displayName, isEffectsContract } from "../core/index.ts";
+import { displayName, hasAuthorityIncrease, isEffectsContract } from "../core/index.ts";
+import { type Analysis, analyze } from "./analyze.ts";
+import { formatDiffGithub, formatDiffText, runDiff } from "./diff.ts";
+import { githubAnnotation, workspacePath } from "./github.ts";
 
 /**
  * Exit codes (plan step 9): distinguish "checked, no error-level violation"
@@ -29,83 +15,56 @@ import { displayName, isEffectsContract } from "../core/index.ts";
  */
 const USAGE = `Usage: ambit check <dir> [--format json|github] [--coverage] [--strict]
        ambit init  <dir> [--format json] [--config]   propose @effects for undeclared functions
+       ambit diff  <ref> [dir] [--format github]      report authority the working tree gained over <ref>
 `;
 
 const EXIT_OK = 0;
 const EXIT_VIOLATIONS = 1;
 const EXIT_ANALYSIS_FAILED = 2;
 
-/** @effects fs_read */
+/**
+ * `diff` shells out to git and writes a worktree, so the entry point's own
+ * contract is wider than `check`'s alone (DESIGN.md §6).
+ *
+ * @effects fs_read, fs_write, process
+ */
 export async function main(argv: readonly string[]): Promise<number> {
   const args = parseArgs(argv);
   if (args.error) {
     process.stderr.write(`ambit: ${args.error}\n${USAGE}`);
     return EXIT_ANALYSIS_FAILED;
   }
+  if (args.command === "diff") return await diffCommand(args);
   if (args.command !== "check" && args.command !== "init") {
     process.stderr.write(`Unknown command: ${args.command}\n${USAGE}`);
     return EXIT_ANALYSIS_FAILED;
   }
 
-  let diagnostics: readonly Diagnostic[];
-  let coverage: CoverageReport;
+  let analysis: Analysis;
   try {
-    // Loaded before extraction so a broken config stops the run before any
-    // work is reported (DESIGN.md §3.4): a config that could not be read must
-    // never come out as "checked, no violations".
-    const loaded = await loadConfig(args.dir);
-    const config: ResolvedConfig | undefined = loaded ? resolveConfig(loaded, args.dir) : undefined;
-    const project = await legacyTsBackend.extractProject(args.dir);
-    // No extracted function anywhere means "nothing analyzable was found"
-    // (zero .ts files, or every function-like node was skipped) — that must
-    // not read the same as "checked, no violations" (DESIGN.md §3.4). Counted
-    // over functions rather than over `files`, because a file can now be
-    // pushed for its `withAmbit` wrappers alone.
-    const functionsFound = project.files.reduce((total, file) => total + file.functions.length, 0);
-    if (functionsFound === 0) {
-      throw new Error(`no analyzable functions found under ${args.dir}`);
-    }
-    const summaries = summarizeExtractedFiles(project.files, config);
-    const state = propagate(summaries);
-    const engine = { name: legacyTsBackend.name, version: legacyTsBackend.version };
-    diagnostics =
-      args.command === "init"
-        ? proposeContracts(state, engine, args.config ? configTarget(config, args.dir) : undefined)
-        : applyStrict(
-            [
-              ...diagnose(state, engine),
-              ...diagnoseUncarriedContracts(project.uncarriedContracts, engine),
-              ...diagnoseRuntimeWrappers(
-                project.files.flatMap((file) => file.runtimeWrappers),
-                state,
-                engine,
-              ),
-              ...(config ? diagnoseContractDivergence(state, config.displayPath, engine) : []),
-              ...(config
-                ? diagnoseUnmatchedConfigKeys(
-                    config.unmatchedExactKeys(),
-                    config.displayPath,
-                    config.sourceText,
-                    engine,
-                  )
-                : []),
-            ],
-            args.strict,
-            config,
-          );
-    coverage = computeCoverage({
-      filesAnalyzed: project.files.length,
-      skippedFunctions: project.skippedFunctions,
-      summaries,
-      state,
+    analysis = await analyze(args.dir, {
+      propose: args.command === "init",
+      proposeConfig: args.config,
+      strict: args.strict,
     });
   } catch (error) {
     process.stderr.write(`ambit: analysis failed: ${errorMessage(error)}\n`);
     return EXIT_ANALYSIS_FAILED;
   }
+  const { diagnostics, authority, coverage } = analysis;
 
   for (const diagnostic of diagnostics) {
     process.stdout.write(formatDiagnostic(diagnostic, args));
+  }
+
+  // The per-function authority records (DESIGN.md §5.1). Emitted after the
+  // diagnostics and before the trailing `summary` line, so a consumer that
+  // reads the last record as the summary keeps working, and only for `check`:
+  // `init` reports proposals about contracts that do not exist yet.
+  if (args.format === "json" && args.command === "check") {
+    for (const record of authority) {
+      process.stdout.write(`${JSON.stringify(record)}\n`);
+    }
   }
 
   // Always report what was analyzed — a silent, empty result must never
@@ -128,9 +87,37 @@ export async function main(argv: readonly string[]): Promise<number> {
   return hasError ? EXIT_VIOLATIONS : EXIT_OK;
 }
 
+/**
+ * `ambit diff <ref>`: what authority the working tree gained over `ref`
+ * (DESIGN.md §6).
+ *
+ * @effects process, fs_read, fs_write
+ */
+async function diffCommand(args: Args): Promise<number> {
+  let result: Awaited<ReturnType<typeof runDiff>>;
+  try {
+    result = await runDiff(args.ref, args.dir);
+  } catch (error) {
+    // Either side failing to analyze is exit 2, never 0: a comparison that
+    // could not be made must not read as "nothing increased" (DESIGN.md §3.4).
+    process.stderr.write(`ambit: diff failed: ${errorMessage(error)}\n`);
+    return EXIT_ANALYSIS_FAILED;
+  }
+  process.stdout.write(
+    args.format === "github" ? formatDiffGithub(result) : formatDiffText(result),
+  );
+  // An increase, or a new symbol that holds authority, fails (DESIGN.md §6).
+  // A decrease and a deletion are reported and pass: taking authority away is
+  // not the thing this command is watching for, and failing on it would give
+  // an author a reason to leave a contract alone.
+  return hasAuthorityIncrease(result.diff) ? EXIT_VIOLATIONS : EXIT_OK;
+}
+
 interface Args {
   readonly command: string;
   readonly dir: string;
+  /** `diff <ref>`: the base revision. Empty for every other command. */
+  readonly ref: string;
   readonly format: OutputFormat;
   readonly coverage: boolean;
   /** `--strict`: promote the `unknown` warnings to errors (DESIGN.md §4.2 rule 3). */
@@ -143,60 +130,13 @@ interface Args {
 
 const KNOWN_FLAGS = new Set(["--format", "--coverage", "--strict", "--config"]);
 
-/**
- * The diagnostics `--strict` promotes to errors: the two that say "analysis
- * reached something it could not resolve" (DESIGN.md §4.2 rule 3 — 「Ambit の
- * `strict: true` でエラーに昇格できる」). Deliberately not every warning:
- * `--strict` means "an unverified path is not acceptable here", which is a
- * different claim from promoting, say, an entrypoint's missing capability set.
- */
-const STRICT_PROMOTED_IDS: ReadonlySet<string> = new Set(["AMB-W001", "AMB-W003"]);
-
-/**
- * `--strict` promotes everywhere; `strict` in `ambit.config.ts` promotes only
- * inside the globs it lists (DESIGN.md §4.3: 「`ambit.config.ts` でディレクトリ
- * 単位に `strict` を設定できる。新規コードから締め、レガシーは警告のまま
- * にする」). The two are a union, so `--strict` on the command line is never
- * narrowed by a config that lists fewer directories.
- *
- * Matched on the diagnostic's own file, which is why the config-level
- * diagnostics (AMB-W005/W006) are unaffected in practice: theirs is the
- * config file, which no `strict` glob names.
- */
-function applyStrict(
-  diagnostics: readonly Diagnostic[],
-  strict: boolean,
-  config: ResolvedConfig | undefined,
-): readonly Diagnostic[] {
-  if (!strict && config === undefined) return diagnostics;
-  return diagnostics.map((diagnostic) =>
-    STRICT_PROMOTED_IDS.has(diagnostic.id) &&
-    (strict || config?.isStrictFile(diagnostic.location.file) === true)
-      ? { ...diagnostic, severity: "error" as const }
-      : diagnostic,
-  );
-}
-
-/**
- * Where `ambit init --config` should write, and what is already there — the
- * config file's path and text.
- *
- * `undefined` when no config file was found: §4.1's patch is an *append* to a
- * `contracts` block, and inventing a whole file (with a `defineConfig` import
- * whose specifier depends on how the consumer installed Ambit) is not a patch
- * this command can generate safely (§5.3).
- */
-function configTarget(
-  config: ResolvedConfig | undefined,
-  rootDir: string,
-): ConfigTarget | undefined {
-  if (!config) return undefined;
-  return { path: config.displayPath, source: config.sourceText, rootDir };
-}
-
 function parseArgs(argv: readonly string[]): Args {
   const [command = "check", ...rest] = argv;
   let dir = ".";
+  // `diff` takes the base ref first and the directory second; every other
+  // command's first positional is the directory.
+  let ref = "";
+  const positionals: string[] = [];
   let format: OutputFormat = "text";
   let coverage = false;
   let strict = false;
@@ -210,6 +150,7 @@ function parseArgs(argv: readonly string[]): Args {
         return {
           command,
           dir,
+          ref,
           format,
           coverage,
           strict,
@@ -227,14 +168,57 @@ function parseArgs(argv: readonly string[]): Args {
       config = true;
     } else if (arg?.startsWith("--")) {
       if (!KNOWN_FLAGS.has(arg)) {
-        return { command, dir, format, coverage, strict, config, error: `unknown option: ${arg}` };
+        return {
+          command,
+          dir,
+          ref,
+          format,
+          coverage,
+          strict,
+          config,
+          error: `unknown option: ${arg}`,
+        };
       }
     } else if (arg) {
-      dir = arg;
+      positionals.push(arg);
     }
   }
 
-  return { command, dir, format, coverage, strict, config };
+  if (command === "diff") {
+    const [first, second] = positionals;
+    if (first === undefined) {
+      return { command, dir, ref, format, coverage, strict, config, error: "diff expects a ref" };
+    }
+    ref = first;
+    if (second !== undefined) dir = second;
+    // A flag `diff` does not act on is an error, not something to drop
+    // quietly: an author who wrote `--strict` and got a green diff would
+    // read it as "strict found nothing" (DESIGN.md §3.4, the same reason an
+    // unknown option exits 2 rather than running).
+    const inert = [
+      ...(coverage ? ["--coverage"] : []),
+      ...(strict ? ["--strict"] : []),
+      ...(config ? ["--config"] : []),
+      ...(format === "json" ? ['--format "json"'] : []),
+    ];
+    if (inert.length > 0) {
+      return {
+        command,
+        dir,
+        ref,
+        format,
+        coverage,
+        strict,
+        config,
+        error: `diff does not support ${inert.join(", ")} (diff takes --format text or github)`,
+      };
+    }
+  } else {
+    const [first] = positionals;
+    if (first !== undefined) dir = first;
+  }
+
+  return { command, dir, ref, format, coverage, strict, config };
 }
 
 /**
@@ -280,28 +264,14 @@ const GITHUB_COMMAND: Readonly<Record<Diagnostic["severity"], string>> = {
  */
 function formatGithub(diagnostic: Diagnostic, rootDir: string): string {
   const { location } = diagnostic;
-  const properties = [
-    `file=${githubProperty(workspacePath(rootDir, location.file))}`,
-    `line=${location.line}`,
-    `col=${location.col}`,
-    `title=${githubProperty(diagnostic.id)}`,
-  ].join(",");
-  const body = [diagnostic.message, ...viaPath(diagnostic)].join("\n");
-  return `::${GITHUB_COMMAND[diagnostic.severity]} ${properties}::${githubData(body)}\n`;
-}
-
-function workspacePath(rootDir: string, file: string): string {
-  return path.relative(process.cwd(), path.resolve(rootDir, file)).split(path.sep).join("/");
-}
-
-/** Workflow-command escaping for the message body. */
-function githubData(value: string): string {
-  return value.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
-}
-
-/** Workflow-command escaping for a property value, where `:` and `,` also terminate. */
-function githubProperty(value: string): string {
-  return githubData(value).replaceAll(":", "%3A").replaceAll(",", "%2C");
+  return githubAnnotation({
+    severity: GITHUB_COMMAND[diagnostic.severity],
+    file: workspacePath(rootDir, location.file),
+    line: location.line,
+    col: location.col,
+    title: diagnostic.id,
+    body: [diagnostic.message, ...viaPath(diagnostic)],
+  });
 }
 
 function formatJson(diagnostic: Diagnostic): string {

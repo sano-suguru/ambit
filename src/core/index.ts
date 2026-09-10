@@ -1,3 +1,5 @@
+export * from "./authority.ts";
+export * from "./authority-diff.ts";
 export * from "./backend.ts";
 export * from "./budget.ts";
 export * from "./capability.ts";

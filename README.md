@@ -357,12 +357,29 @@ the one that keeps the contract and rewrites the code.
 
 - **`unknown` is not `pure`.** A call Ambit cannot resolve is reported and
   counted, and `--strict` makes it an error.
-- **Widening the declaration silences the check.** An agent that edits the
-  `@effects` tag along with the code — including by applying the `widen` fix
-  Ambit itself offers — gets a green check again: measured on the example
-  above, `pure` → `network` on `priceOrder` takes it from exit 1 to exit 0.
-  Catching that needs a comparison against a base ref, which Ambit does not
-  have.
+- **Widening the declaration silences `check`, but not `diff`.** An agent that
+  edits the `@effects` tag along with the code — including by applying the
+  `widen` fix Ambit itself offers — gets a green check again: measured on the
+  example above, `pure` → `network` on `priceOrder` takes `check` from exit 1
+  to exit 0. `ambit diff <ref>` is the answer to that: it compares the working
+  tree's authority against a base ref and fails on an increase. Measured on
+  the same edit, `check test/fixtures/accident` exits 0 while `diff HEAD
+  test/fixtures/accident` exits 1 and names the hop that carried it:
+
+  ```text
+  Authority increased in 1 symbol:
+
+    pricing.ts#priceOrder (pricing.ts:4)
+      + network
+        -> applyTax (tax.ts:3)
+        -> currentRate (rates.ts:3)
+        operation: fetch (rates.ts:4)
+  ```
+
+  What `diff` does not see — a moved or renamed function reads as a deletion
+  plus a new symbol, a gained `unknown` is reported but is not an increase,
+  and a symbol with no declaration path never appears — is in
+  [docs/limitations.md](docs/limitations.md).
 - **Four runtime hooks, no more.** `fetch`, `node:fs`, `node:child_process` and
   `pg`. `mysql2`, Prisma and the LLM SDKs have static effects but no hook, so
   calling them is neither blocked nor recorded.
@@ -384,8 +401,9 @@ the one that keeps the contract and rewrites the code.
 ## Status
 
 Ambit is experimental and not production-ready; diagnostic ids and the NDJSON
-field shape can still change. `check src` over Ambit's own source — 29 files,
-238 functions — takes 0.88–1.24 s across five runs. Nothing is cached, so a
+field shape can still change. `check src` over Ambit's own source — 37 files,
+286 functions — takes 1.04–1.21 s across five runs; `diff HEAD src`, which
+analyzes two trees, takes 1.83–2.56 s across five runs. Nothing is cached, so a
 re-check costs the same. The analysis backend has been measured on a
 300-file project (458 ms, 348 MiB peak) as part of choosing it; the CLI on top
 of it has not. What is implemented and what is not, milestone by milestone with

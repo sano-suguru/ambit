@@ -2,7 +2,6 @@ import type {
   Budget,
   Capability,
   ContractOperation,
-  ContractViaEntry,
   Diagnostic,
   DiagnosticEngine,
   DiagnosticFix,
@@ -30,6 +29,7 @@ import type { PropagatedFunction } from "./propagate.ts";
 import {
   capabilityUnknownWitnessChain,
   capabilityWitnessChain,
+  chainToVia,
   unknownWitnessChain,
   witnessChain,
 } from "./propagate.ts";
@@ -897,16 +897,6 @@ function sameCapabilityText(a: readonly string[], b: readonly string[]): boolean
   return left.every((value, index) => value === right[index]);
 }
 
-function chainToVia(
-  chain: readonly SymbolId[],
-  state: ReadonlyMap<SymbolId, PropagatedFunction>,
-): readonly ContractViaEntry[] {
-  return chain.map((id) => {
-    const location = state.get(id)?.summary.location;
-    return { symbol: id, file: location?.file ?? "", line: location?.line ?? 0 };
-  });
-}
-
 /**
  * The call site inside `ownerId` that performs `effect` — the `fetch(...)` line
  * rather than the enclosing function's declaration line.
@@ -921,7 +911,7 @@ function chainToVia(
  * the same effect more than once: one site is enough to send the reader to the
  * right place, and picking the first is stable across re-analysis.
  */
-function operationSite(
+export function operationSite(
   effect: KnownEffect,
   ownerId: SymbolId,
   state: ReadonlyMap<SymbolId, PropagatedFunction>,

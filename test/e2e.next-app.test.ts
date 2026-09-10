@@ -43,11 +43,15 @@ async function check(dir: string): Promise<CheckResult> {
     stdout = e.stdout ?? "";
     exitCode = e.code ?? 1;
   }
+  // A real diagnostic carries no `kind`; the trailing `summary` record and
+  // the per-function `authority` records (DESIGN.md §5.1) do, and both have
+  // to be left out before anything reads these as diagnostics.
   const diagnostics = stdout
     .trim()
     .split("\n")
     .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as Diagnostic);
+    .map((line) => JSON.parse(line) as Diagnostic & { readonly kind?: string })
+    .filter((record) => record.kind === undefined);
   return { diagnostics, exitCode };
 }
 
