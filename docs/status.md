@@ -410,6 +410,84 @@ exactly why the ratio is smaller here (2.0x) than locally (3.2–3.6x) — both
 numbers are real, they are just answering different questions about
 available parallelism.
 
+## Real third-party code (`node scripts/bench-corpus.ts`)
+
+`test/fixtures/realistic-api` is code written for this repository, so it can
+only say that the analysis works on the shapes it was given. The fixed corpus
+in `test/corpus/corpus.json` is code nobody here wrote: five server-side
+TypeScript projects, pinned by commit SHA **and** by the git tree object of the
+measured subtree, so the benchmark fails loudly rather than quietly measuring a
+different checkout.
+
+```sh
+node scripts/bench-corpus.ts
+```
+
+One command checks the corpus out into `.corpus/` (gitignored) and reports
+`docs/DESIGN.md` §4.3's primary KPI per target and across targets. It runs the
+analysis through the library API rather than through `ambit check`, because
+picking the next thing to work on needs the whole unresolved-name histogram
+while `--coverage` prints the top ten — widening the CLI's output would be a
+change to §9.2's guaranteed surface for the sake of a measurement procedure.
+
+**Dependencies are deliberately not installed.** A call into a package whose
+types are absent stays unresolved, so the measurement can only be pessimistic
+about third-party code, never flattering — at the cost of an `any-typed` count
+(1067 sites) that an adopting team with a populated `node_modules` would not
+see. That is a property of this corpus, not of the analysis.
+
+| Target | Subtree | Functions | `unknown` rate, before | after |
+|---|---|---|---|---|
+| `hono` | `src` | 644 | 78.4% | **52.6%** |
+| `trpc-server` | `packages/server/src` | 196 | 82.1% | **68.9%** |
+| `elysia` | `src` | 352 | 76.7% | **54.5%** |
+| `got` | `source` | 357 | 67.2% | **55.7%** |
+| `drizzle-orm` | `drizzle-orm/src` | 2651 | 45.5% | **39.4%** |
+| **median** | | 4200 | **76.7%** | **54.5%** |
+
+"Before" is commit `fc1bcc9`, which fixed the corpus and recorded the baseline
+before any analyzer change. `ROADMAP.md`'s target is 30% for an adopting team
+after three months; **this corpus does not meet it**, and no target here is an
+adopting team.
+
+What moved the number, in the order the measurement said to take it:
+
+| Change | `builtin-method` unresolved | median |
+|---|---|---|
+| baseline | 2856 | 76.7% |
+| default-lib classification (`pure-builtins.ts`, `mutating-builtins.ts`, `builtin-effects.ts`, Fetch API constructors) | 796 | 55.7% |
+| by-reference callbacks resolved from the actual argument (§4.2 rule 4) | 640 | 54.5% |
+
+The same two changes take `check src --coverage` from 62.9% to **37.0%**
+(115/311 functions; the denominator grew from 302 with the helpers the changes
+added) and `check test/fixtures/realistic-api --coverage` from 20.8% to
+**18.9%** (10/53).
+
+What is left is mostly not addressable by a table. Of 4171 unresolved call
+sites: `unresolved-symbol` 1723 (of which roughly 500 are calls to nested
+function declarations — §12's "Nested function declarations and the locality
+rule"), `any-typed` 1067 (the uninstalled-dependency cost above),
+`builtin-method` 640, `callback-parameter` 432 (a higher-order function calling
+its own parameter, which §4.2 rule 4 leaves `unknown` without inter-procedural
+argument tracking), `overload-without-body` 175, `import-binding` 134.
+
+The 640 remaining `builtin-method` sites are the names the tables refuse on
+purpose, and they are worth naming because a reader will otherwise assume they
+were missed: `Object.assign` / `Object.freeze` / `Reflect.set` (51 + 20 + 4)
+mutate an *argument*, and §4.2's locality rule reads the receiver, so neither
+the pure table nor the mutating one can answer for them; the `ReadableStream`
+controllers and readers, `Body.json` / `Response.json` (about 120 together)
+depend on what the object is backed by; `console.*` (45) writes to a stream
+§4.2's effect table has no name for. Each is `unknown`, which is the honest
+answer, not an oversight.
+
+One behavioural consequence worth flagging: `Date.now()` and `Math.random()`
+now carry `env` rather than `unknown`, so a caller declaring `@effects pure`
+that reads the clock moves from `AMB-W001` to `AMB-E001` — an error, and a
+non-zero exit. That is what §4.2 says (the clock and randomness are `env`) and
+what `new Date()` already did. It is an added stub, so it is not a change to
+§9.2's guaranteed surface and carries no `CHANGELOG.md` entry.
+
 ## M0.5 — the backend comparison, measured
 
 Every number here was run on 2026-09-09, Node.js v24.20.0, macOS (darwin

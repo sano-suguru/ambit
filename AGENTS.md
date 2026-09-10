@@ -166,11 +166,14 @@ Non-obvious constraints:
   comparison compiler lives in `.m05-native/` (gitignored), installed by
   `node scripts/m05-native-install.ts`; `test/architecture.test.ts` keeps it
   out of `src/` and out of the published package.
-- `scripts/` holds the M0.5 measurement procedures. It is linted and
-  formatted by Biome but is outside `tsconfig.json`'s `include` and outside
+- `scripts/` holds the measurement procedures — M0.5's backend comparison, and
+  the analysis-quality benchmark (`bench-corpus.ts` over the fixed corpus in
+  `test/corpus/corpus.json`, whose checkout is `corpus.ts`'s job). It is linted
+  and formatted by Biome but is outside `tsconfig.json`'s `include` and outside
   `package.json`'s `files`: the native probes load a compiler that is not
   installed by default, so they cannot be type-checked, and nothing there
-  is shipped or run by `ambit check`.
+  is shipped or run by `ambit check`. `bench-corpus.ts` fetches from the
+  network, so `pnpm test` does not run it.
 
 ## Verification
 
@@ -197,7 +200,19 @@ regression. If you are about to write one, fix the defect instead. If one
 already exists, inverting it is part of the fix, not a weakened test —
 that is the one case the paragraph above does not cover.
 
-`pnpm test` is not the whole signal. Run Ambit against its own source:
+`pnpm test` is not the whole signal. A change to the analysis is also measured
+against real third-party code:
+
+```sh
+node scripts/bench-corpus.ts
+```
+
+The corpus is fixed (`test/corpus/corpus.json`) and pinned twice — by commit
+SHA and by the git tree object of each measured subtree — so the benchmark
+refuses to run against a drifted checkout. Do not add, drop, or re-scope a
+target to move the number; the numbers themselves belong in `docs/status.md`.
+
+Run Ambit against its own source too:
 
 ```sh
 node src/cli/main.ts check src --coverage
