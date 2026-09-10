@@ -1,4 +1,4 @@
-import { ambitHandler } from "ambit/runtime/hono";
+import { ambitHandler } from "ambit-ts/runtime/hono";
 import type { Context } from "hono";
 import type { CreateOrderInput } from "../domain/model.ts";
 import { subtotal, taxFor } from "../domain/tax.ts";

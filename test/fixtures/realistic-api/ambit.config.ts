@@ -4,7 +4,7 @@
 //
 // A bare object rather than `defineConfig({ … })` — the two are the same
 // value, and a scratch copy of this fixture outside the repository cannot
-// resolve `ambit/config`. The installed-package path is
+// resolve `ambit-ts/config`. The installed-package path is
 // `test/e2e.install.test.ts`'s job.
 export default {
   contracts: {},

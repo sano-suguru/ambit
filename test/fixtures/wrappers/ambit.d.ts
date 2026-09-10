@@ -4,7 +4,7 @@
  * export name (`src/checker/backend/legacy-ts.ts`), which is the same whether
  * the package is installed or declared here.
  */
-declare module "ambit/runtime" {
+declare module "ambit-ts/runtime" {
   export interface AmbitSpec {
     readonly capabilities?: readonly string[];
     readonly budget?: { readonly timeMs?: number };
@@ -16,8 +16,8 @@ declare module "ambit/runtime" {
   ): (...args: Args) => Result;
 }
 
-declare module "ambit/runtime/hono" {
-  import type { AmbitSpec } from "ambit/runtime";
+declare module "ambit-ts/runtime/hono" {
+  import type { AmbitSpec } from "ambit-ts/runtime";
 
   export function ambitHandler<Args extends readonly unknown[], Result>(
     spec: AmbitSpec,
@@ -26,8 +26,8 @@ declare module "ambit/runtime/hono" {
   ): (c: unknown) => Promise<unknown>;
 }
 
-declare module "ambit/runtime/next" {
-  import type { AmbitSpec } from "ambit/runtime";
+declare module "ambit-ts/runtime/next" {
+  import type { AmbitSpec } from "ambit-ts/runtime";
 
   export function ambitRoute<Args extends readonly unknown[], Result>(
     spec: AmbitSpec,

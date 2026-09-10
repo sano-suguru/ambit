@@ -822,9 +822,9 @@ function isFunctionValuedProperty(member: ts.ClassElement): member is ts.Propert
  * all; an adapter that reordered them would silently stop being read.
  */
 const RUNTIME_WRAPPER_NAMES: ReadonlyMap<string, string> = new Map([
-  ["ambit/runtime.withAmbit", "withAmbit"],
-  ["ambit/runtime/hono.ambitHandler", "ambitHandler"],
-  ["ambit/runtime/next.ambitRoute", "ambitRoute"],
+  ["ambit-ts/runtime.withAmbit", "withAmbit"],
+  ["ambit-ts/runtime/hono.ambitHandler", "ambitHandler"],
+  ["ambit-ts/runtime/next.ambitRoute", "ambitRoute"],
 ]);
 
 /**

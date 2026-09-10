@@ -117,8 +117,9 @@ path — a plan built on a guess here can look complete and fix nothing.
 
 ## Toolchain
 
-Node.js 24 (pnpm 12, single package — no workspaces; splitting into
-`@ambit/*` packages waits until npm publish is in view), TypeScript
+Node.js 24 (pnpm 12, single package — no workspaces; the package is
+`ambit-ts`, and `docs/DESIGN.md` §6 keeps it single until a production
+adopter makes the runtime split worth doing), TypeScript
 6.0.3, Vitest 4, Biome.
 
 Non-obvious constraints:

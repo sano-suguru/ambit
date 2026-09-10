@@ -1,4 +1,4 @@
-import { ambitRoute } from "ambit/runtime/next";
+import { ambitRoute } from "ambit-ts/runtime/next";
 import { fetchRate } from "../../lib/rates.ts";
 
 /**

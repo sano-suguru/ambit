@@ -1,6 +1,6 @@
-import { withAmbit } from "ambit/runtime";
-import { ambitHandler } from "ambit/runtime/hono";
-import { ambitRoute } from "ambit/runtime/next";
+import { withAmbit } from "ambit-ts/runtime";
+import { ambitHandler } from "ambit-ts/runtime/hono";
+import { ambitRoute } from "ambit-ts/runtime/next";
 
 /**
  * @entrypoint

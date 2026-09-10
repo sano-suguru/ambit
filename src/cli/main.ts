@@ -397,7 +397,7 @@ function errorMessage(error: unknown): string {
  * it.
  *
  * npm installs `bin` as a symlink (`node_modules/.bin/ambit ->
- * ../ambit/dist/cli/main.js`), and `process.argv[1]` is then the *symlink*
+ * ../ambit-ts/dist/cli/main.js`), and `process.argv[1]` is then the *symlink*
  * path while `import.meta.url` is the resolved target — so comparing the two
  * directly makes the installed CLI silently do nothing and exit 0, which reads
  * exactly like "checked, no violations" (DESIGN.md §3.4 forbids that). The

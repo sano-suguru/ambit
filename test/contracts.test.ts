@@ -418,7 +418,7 @@ describe('contract-to-handler agreement (DESIGN.md §4.4, "Mapping contracts to 
   });
 
   /**
-   * The Next.js adapter (`ambit/runtime/next`'s `ambitRoute`) is the third
+   * The Next.js adapter (`ambit-ts/runtime/next`'s `ambitRoute`) is the third
    * name in `RUNTIME_WRAPPER_NAMES`, and it earns nothing of its own: it puts
    * `spec` and `handler` in the same first two positions, so the extraction
    * written for `withAmbit` reaches it unchanged. These three assert that it

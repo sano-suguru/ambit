@@ -94,12 +94,12 @@ describe("architecture constraint: the config layer is independent of the compil
   // parsing it, and the contracts it declares are plain data about symbol ids
   // the backend already produced. Named file by file rather than left to the
   // src/-wide rule above, because these three are the ones a future change
-  // would be tempted to give a parser — and the `ambit/config` entry point is
+  // would be tempted to give a parser — and the `ambit-ts/config` entry point is
   // imported by *consumer* projects, where pulling in a compiler would be a
   // dependency they never asked for.
   const CONFIG_FILES = ["src/core/config.ts", "src/config.ts", "src/checker/config.ts"];
 
-  it("neither the config types, the ambit/config entry, nor the loader imports typescript", async () => {
+  it("neither the config types, the ambit-ts/config entry, nor the loader imports typescript", async () => {
     for (const relative of CONFIG_FILES) {
       const content = await readFile(path.join(PROJECT_ROOT, relative), "utf8");
       expect(TYPESCRIPT_IMPORT.test(content), `${relative} imports "typescript"`).toBe(false);

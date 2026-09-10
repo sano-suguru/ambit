@@ -1,10 +1,10 @@
 /**
- * The `ambit/runtime` surface this project uses. Declared locally for the same
+ * The `ambit-ts/runtime` surface this project uses. Declared locally for the same
  * reason as the other packages: the fixture must resolve with nothing
  * installed, and Ambit matches `withAmbit` by module specifier and export
  * name, which are the same either way.
  */
-declare module "ambit/runtime" {
+declare module "ambit-ts/runtime" {
   export interface AmbitBudget {
     readonly timeMs?: number;
     readonly costUsd?: number;
@@ -23,8 +23,8 @@ declare module "ambit/runtime" {
   ): (...args: Args) => Result;
 }
 
-declare module "ambit/runtime/hono" {
-  import type { AmbitSpec } from "ambit/runtime";
+declare module "ambit-ts/runtime/hono" {
+  import type { AmbitSpec } from "ambit-ts/runtime";
   import type { Context } from "hono";
 
   export function ambitHandler<Args extends readonly unknown[], Result>(

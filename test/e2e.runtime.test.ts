@@ -17,7 +17,7 @@ const execFileAsync = promisify(execFile);
  *
  * Everything here runs in a scratch project that installed Ambit from a
  * tarball, against a real HTTP server on 127.0.0.1 — so it exercises the
- * published `ambit/runtime` entry point, the real `fetch`, and a real socket.
+ * published `ambit-ts/runtime` entry point, the real `fetch`, and a real socket.
  * The allowed request has to actually come back with a body; the denied one
  * has to fail without the server ever seeing it.
  */
@@ -92,7 +92,7 @@ describe("runtime enforcement against a real server, through the installed packa
   it("lets a granted request reach the server and return its body", async () => {
     const before = seen.length;
     const { stdout, stderr } = await runScript(`
-import { withAmbit, installFetchHook } from "ambit/runtime";
+import { withAmbit, installFetchHook } from "ambit-ts/runtime";
 installFetchHook();
 const handler = withAmbit(
   { capabilities: ["http:get:127.0.0.1:${port}"] },
@@ -108,7 +108,7 @@ console.log("BODY:" + (await handler()));
   it("blocks an ungranted request before it reaches the socket", async () => {
     const before = seen.length;
     const { stdout } = await runScript(`
-import { withAmbit, installFetchHook, AmbitCapabilityError } from "ambit/runtime";
+import { withAmbit, installFetchHook, AmbitCapabilityError } from "ambit-ts/runtime";
 installFetchHook();
 const handler = withAmbit(
   { capabilities: ["http:get:api.example.test"] },
@@ -139,7 +139,7 @@ try {
 
     const { stdout } = await runScript(`
 import nodeFs from "node:fs";
-import { withAmbit, installFsHook, AmbitCapabilityError } from "ambit/runtime";
+import { withAmbit, installFsHook, AmbitCapabilityError } from "ambit-ts/runtime";
 installFsHook();
 const handler = withAmbit({ capabilities: ["fs:read:${allowed}"] }, async () => {
   const ok = nodeFs.readFileSync("${allowed}", "utf8");
@@ -159,7 +159,7 @@ console.log("RESULT:" + (await handler()));
     const target = path.join(consumer, "must-not-exist.txt");
     const { stdout } = await runScript(`
 import nodeFs from "node:fs";
-import { withAmbit, installFsHook } from "ambit/runtime";
+import { withAmbit, installFsHook } from "ambit-ts/runtime";
 installFsHook();
 const handler = withAmbit({ capabilities: [] }, async () =>
   nodeFs.promises.writeFile("${target}", "x").then(() => "REACHED", (e) => e.name),
@@ -180,13 +180,13 @@ console.log("RESULT:" + (await handler()));
     const preload = path.join(consumer, "ambit-preload.mjs");
     await fs.writeFile(
       preload,
-      'import { installFsHook, setUnscopedPolicy } from "ambit/runtime";\ninstallFsHook();\n',
+      'import { installFsHook, setUnscopedPolicy } from "ambit-ts/runtime";\ninstallFsHook();\n',
     );
     const script = path.join(consumer, "named-import.mjs");
     await fs.writeFile(
       script,
       `import { readFileSync } from "node:fs";
-import { withAmbit } from "ambit/runtime";
+import { withAmbit } from "ambit-ts/runtime";
 const handler = withAmbit({ capabilities: [] }, async () => {
   try { readFileSync("${secret}", "utf8"); return "REACHED"; } catch (e) { return e.name; }
 });
@@ -206,7 +206,7 @@ console.log("RESULT:" + (await handler()));
     const { stdout } = await runScript(`
 import { execFileSync } from "node:child_process";
 import nodeCp from "node:child_process";
-import { withAmbit, installChildProcessHook, AmbitCapabilityError } from "ambit/runtime";
+import { withAmbit, installChildProcessHook, AmbitCapabilityError } from "ambit-ts/runtime";
 installChildProcessHook();
 const handler = withAmbit({ capabilities: ["proc:spawn:/bin/echo"] }, async () => {
   const ok = nodeCp.execFileSync("/bin/echo", ["ambit"]).toString().trim();
@@ -239,7 +239,7 @@ console.log("RESULT:" + (await handler()));
     try {
       const { stdout } = await runScript(`
 import pg from "pg";
-import { withAmbit, installPgHook, AmbitCapabilityError } from "ambit/runtime";
+import { withAmbit, installPgHook, AmbitCapabilityError } from "ambit-ts/runtime";
 installPgHook(pg);
 const pool = new pg.Pool({ connectionString: "postgres://u:p@127.0.0.1:${dbPort}/app" });
 const handler = withAmbit({ capabilities: ["db:read:app"] }, async () => {
@@ -270,7 +270,7 @@ process.exit(0);
     const { stdout } = await runScript(`
 import nodeFs from "node:fs";
 import nodeCp from "node:child_process";
-import { installFsHook, installChildProcessHook, setUnscopedPolicy, AmbitCapabilityError } from "ambit/runtime";
+import { installFsHook, installChildProcessHook, setUnscopedPolicy, AmbitCapabilityError } from "ambit-ts/runtime";
 installFsHook();
 installChildProcessHook();
 const results = [];
@@ -300,7 +300,7 @@ console.log("RESULT:" + results.join(","));
     // joining the context's signal to the hooked request, the signal would
     // fire and the request would run to completion — the row would be false.
     const { stdout } = await runScript(`
-import { withAmbit, installFetchHook } from "ambit/runtime";
+import { withAmbit, installFetchHook } from "ambit-ts/runtime";
 installFetchHook();
 const handler = withAmbit(
   {
@@ -333,8 +333,8 @@ try {
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import pg from "pg";
-import { ambitHandler } from "ambit/runtime/hono";
-import { installFetchHook, installPgHook } from "ambit/runtime";
+import { ambitHandler } from "ambit-ts/runtime/hono";
+import { installFetchHook, installPgHook } from "ambit-ts/runtime";
 installFetchHook();
 installPgHook(pg);
 
@@ -456,7 +456,7 @@ const CASES = (p) => [
   it("stops enforcing once the hook is removed (P5: backing out)", async () => {
     const before = seen.length;
     const { stdout } = await runScript(`
-import { withAmbit, installFetchHook } from "ambit/runtime";
+import { withAmbit, installFetchHook } from "ambit-ts/runtime";
 const restore = installFetchHook();
 restore();
 const handler = withAmbit(

@@ -19,7 +19,7 @@ import { applyEdits } from "./support/apply-edits.ts";
  * the handler's `@budget`.
  *
  * The fixture depends on nothing installed: `pg`, `@prisma/client`, `openai`,
- * `hono` and `ambit/runtime` are declared under `types/` and the tsconfig sets
+ * `hono` and `ambit-ts/runtime` are declared under `types/` and the tsconfig sets
  * `types: []`, so a scratch copy outside the repository resolves exactly the
  * same way. Every accident is applied to such a copy as a textual patch, which
  * is what an agent's edit actually looks like — one baseline, six edits, not
@@ -475,7 +475,7 @@ export const GET = ambitHandler(`,
   }, 60_000);
 
   it("type-checks as a scratch copy with nothing installed (P5)", async () => {
-    // The fixture now imports `ambit/runtime/hono` and `hono`, both declared
+    // The fixture now imports `ambit-ts/runtime/hono` and `hono`, both declared
     // under `types/`. If that declaration were wrong, or if the adapter's
     // three-argument shape did not type-check, this fails — and it is also the
     // shape of the claim that removing Ambit leaves a project valid.

@@ -1,4 +1,4 @@
-import { ambitRoute } from "ambit/runtime/next";
+import { ambitRoute } from "ambit-ts/runtime/next";
 import type { CreateOrderInput } from "../../domain/model.ts";
 import { subtotal, taxFor } from "../../domain/tax.ts";
 import { insertOrder, selectOrderTotals } from "../../lib/db.ts";

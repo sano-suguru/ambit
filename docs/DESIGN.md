@@ -47,8 +47,8 @@ Check speed affects how many iterations an agent can run and how long developmen
 | Adopted analysis backend | The JS-implemented TypeScript Compiler API (`ts.createProgram` + type checker). Adopted as the default in §3.5. The version tracks the latest stable release of the JS-implementation line (6.0.3 as of 2026-09) |
 | Ambit-specific static analysis | Function summaries, call relationships, fixed-point computation of side effects, capability comparison, diagnostics, and fix candidates are to be implemented in TypeScript |
 | Editor integration | Uses the same checker as the CLI. Choose among a Language Service Plugin, an LSP connection, or a thin editor extension after verifying fit |
-| Runtime library | `@ambit/runtime`. Implemented in TypeScript and run as JavaScript. Entry-point context, `AsyncLocalStorage`, audit hooks, optional `contract()` |
-| Development and distribution | pnpm (single package; splitting into `@ambit/*` waits until npm publish is in view). During development there is no build: `.ts` runs directly under Node 24's type stripping, and `tsc --noEmit` is for type checking only. The test runner is Vitest (changed from node:test); the linter and formatter is Biome. Conformance tests, GitHub Actions, npm |
+| Runtime library | `ambit-ts/runtime`. Implemented in TypeScript and run as JavaScript. Entry-point context, `AsyncLocalStorage`, audit hooks, optional `contract()` |
+| Development and distribution | pnpm. Distributed as one npm package, `ambit-ts` (§6). During development there is no build: `.ts` runs directly under Node 24's type stripping, and `tsc --noEmit` is for type checking only. The test runner is Vitest (changed from node:test); the linter and formatter is Biome. Conformance tests, GitHub Actions, npm |
 | Domain | Cloud backends: HTTP APIs, jobs and workflows, LLM agents, data processing |
 
 Bun / Deno / edge runtimes are outside Phase 1's guarantee. Even where they have been observed to work, they are not implicitly given the same guarantee as Node.js.
@@ -181,7 +181,7 @@ Merging is per tag, in the priority order JSDoc > config > `spec`.
 Where the code cannot be touched (third-party code, generated code, early adoption), the same contracts can be declared in `ambit.config.ts` by naming the symbol ([ADR-0003](adr/0003-out-of-code-declarations.md)).
 
 ```ts
-import { defineConfig } from "ambit/config";
+import { defineConfig } from "ambit-ts/config";
 
 export default defineConfig({
   effects: { payments: ["network", "db_write"] },
@@ -345,11 +345,11 @@ Table names are not read out of SQL statements to derive `db:` capabilities. The
 
 **Runtime enforcement is per entry point**
 
-`@ambit/runtime` pushes the capability set onto `AsyncLocalStorage` at the moment an entry point is entered. Supported operations from then on are matched against that set. `AsyncLocalStorage` is responsible for holding the context; the blocking itself is implemented by the adapter.
+`ambit-ts/runtime` pushes the capability set onto `AsyncLocalStorage` at the moment an entry point is entered. Supported operations from then on are matched against that set. `AsyncLocalStorage` is responsible for holding the context; the blocking itself is implemented by the adapter.
 
 The following ways of establishing the context are provided.
 
-- A framework adapter (`ambit/runtime/hono` and so on) wraps the handler at each route registration. It maps the declaration to the actual handler and pushes the context at run time. It is not one middleware inserted for the whole application: contracts differ per route, and placing `spec` and the handler in the same call is the premise of the agreement check below.
+- A framework adapter (`ambit-ts/runtime/hono` and so on) wraps the handler at each route registration. It maps the declaration to the actual handler and pushes the context at run time. It is not one middleware inserted for the whole application: contracts differ per route, and placing `spec` and the handler in the same call is the premise of the agreement check below.
 - Where there is no adapter, insert `withAmbit(spec, handler)` by hand.
 
 The capability set need be written in one place only. A literal array in a `withAmbit` wrapping a handler declared in the same file *is* that handler's `@capabilities` declaration ("Removing the double declaration" below). Only when it is also written in JSDoc does the checker check **agreement at the source level**: under the same conditions as reading a declaration (a literal array, and a `handler` naming a declaration in the same file), it compares the two as sets and errors if they disagree. A dynamically assembled array and a handler in another file can be read neither as a declaration nor for comparison, so they are made visible with a warning (they are not passed silently). The same rule applies to adapter registration.
@@ -472,7 +472,7 @@ export async function POST(req: Request): Promise<Response> { /* ... */ }
 **Opt-in: per function**
 
 ```ts
-import { contract } from "@ambit/runtime";
+import { contract } from "ambit-ts/runtime";
 
 export const summarize = contract(
   { budget: { timeMs: 1000, llmCalls: 1 } },
@@ -646,26 +646,26 @@ Exit codes:
 
 Reducing authority is not what this command watches for. Failing on a decrease would give the writer a reason not to touch contracts at all. `unknown` is not authority (§4.3) so it does not count as an increase, but it is reported.
 
-- Distribution is `npm install -D @ambit/cli` and `npm install @ambit/runtime`. The supported OS / CPU and distribution conditions of any native binary are published.
-- Production uses `@ambit/runtime` and the necessary adapters and contract data. The compiler and the development CLI are not made required production dependencies.
+- Distribution is one package, `ambit-ts`: `npm install -D ambit-ts` installs the CLI (`ambit`) and the runtime together. The supported OS / CPU and distribution conditions of any native binary are published.
+- Production uses `ambit-ts/runtime` and the necessary adapters and contract data. The compiler and the development CLI are not to be required production dependencies. **The single package does not yet meet this**: `typescript` is a `dependencies` entry of `ambit-ts`, so a process that imports only `ambit-ts/runtime` still installs the compiler. What meets it is a separate runtime package; the decision is to keep the single package until there is a production adopter, and to split the runtime out at that point ([ADR-0009](adr/0009-package-name-and-single-package.md)).
 - Editors obtain diagnostics and fix candidates from the same checker as the CLI. The chosen approach — Language Service Plugin, LSP, or a thin extension — is verified by M4.
 - CI integrates via the exit code and the structured output. A dedicated CI plugin is not required. On GitHub Actions, the output of `ambit check --format github` becomes annotations directly (§5.1). Installing a dedicated Action or plugin is not demanded.
 - A JSDoc declaration by itself does not change runtime behavior. The settings and steps needed to deliver contracts to the runtime are stated explicitly per framework.
 
 ### 6.1 Package responsibilities
 
-| Package | Responsibility |
+| Responsibility area | Content |
 |---|---|
-| `@ambit/core` | The contract model, analysis representation, capability comparison, diagnostic format. Does not depend on a compiler API |
-| `@ambit/checker` | Contract analysis using information from the connection layer, inference, coverage, fix candidates |
-| `@ambit/cli` | Commands, exit codes, structured output, control of iterative checking |
-| `@ambit/runtime` | Context, matching and blocking of supported operations, budget measurement, adapters |
-| `@ambit/stubs` | Contract definitions and trust information for external libraries |
-| Editor connection package | Connection to the shared checker. The name and the Plugin / LSP approach are settled after verification |
+| `src/core` | The contract model, analysis representation, capability comparison, diagnostic format. Does not depend on a compiler API |
+| `src/checker` | Contract analysis using information from the connection layer, inference, coverage, fix candidates |
+| `src/cli` | Commands, exit codes, structured output, control of iterative checking |
+| `src/runtime` (`ambit-ts/runtime`) | Context, matching and blocking of supported operations, budget measurement, adapters |
+| `src/stubs` | Contract definitions and trust information for external libraries |
+| Editor connection | Connection to the shared checker. Whether it is a separate package, and the Plugin / LSP approach, are settled after verification |
 
 The compiler connection layer is implemented separately from the checker, but whether it becomes an independently published npm package is undecided. Do not add public API that is not needed.
 
-The table above is a goal for package splitting; expressing the same separation of responsibilities as directories within a single package is acceptable (`AGENTS.md` Toolchain).
+The table above is a separation of responsibilities, not a package list. It is expressed as directories inside the single `ambit-ts` package, and the subpath exports (`ambit-ts`, `ambit-ts/config`, `ambit-ts/runtime`, `ambit-ts/runtime/hono`, `ambit-ts/runtime/next`) are what a consumer sees of it. A later split of the runtime into a package of its own keeps those specifiers working by re-export, because from the first publish onward changing a specifier is an RFC change (§9).
 
 ### 6.2 Iterative checking and caching
 
@@ -807,7 +807,7 @@ The versions of the analysis engine are pinned and recorded alongside (§3.4), s
 - Changing the default backend, or making a breaking change to the range of TypeScript supported, also requires an RFC.
 - Decision rationale lives in [`docs/adr/`](adr/README.md), not in this file. Before the first public release a decision is made by editing this file and writing the record there; from the first release onward the accepted RFC is the record.
 - Publish a conformance test suite (`conformance/`) and keep alternative implementations possible. Keep the connection trials against a type engine separate from trials of the contract model itself.
-- Put the stewardship of the trademark and the specification in writing at an early stage. Securing the npm scope `@ambit` is M0 work and is not described as already done.
+- Put the stewardship of the trademark and the specification in writing at an early stage. The npm name `ambit` and the scope `@ambit` were both already taken by unrelated owners, so the published name is `ambit-ts` ([ADR-0009](adr/0009-package-name-and-single-package.md)); the name is not described as reserved beyond that.
 - `rfcs/` and `conformance/` are put in place from the first public release onward. Until then this file is edited directly, and the conformance tests are substituted by Vitest under `test/`.
 
 ## 10. Success Metrics

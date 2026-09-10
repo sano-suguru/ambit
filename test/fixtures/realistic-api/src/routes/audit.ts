@@ -1,4 +1,4 @@
-import { ambitHandler } from "ambit/runtime/hono";
+import { ambitHandler } from "ambit-ts/runtime/hono";
 import type { Context } from "hono";
 import { pluralize, summaryLine } from "../domain/format.ts";
 import { auditSize, auditTrail, classifyRisk, record } from "../lib/index.ts";

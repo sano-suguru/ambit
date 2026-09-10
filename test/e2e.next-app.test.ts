@@ -13,7 +13,7 @@ import type { Diagnostic } from "../src/core/index.ts";
  * `ambitRoute` beside each handler.
  *
  * The fixture depends on nothing installed: `next/server`, `pg` and
- * `ambit/runtime` / `ambit/runtime/next` are declared under `types/` and the
+ * `ambit-ts/runtime` / `ambit-ts/runtime/next` are declared under `types/` and the
  * tsconfig sets `types: []`, so a scratch copy outside the repository resolves
  * exactly the same way — the same condition `test/fixtures/realistic-api`
  * meets.
@@ -134,7 +134,7 @@ describe("the Next.js App Router fixture (DESIGN.md §4.4)", () => {
     // No registration and no contract — the prose above it in the fixture
     // names `ambitRoute` to say why it is absent, so match the import and the
     // call rather than the word.
-    expect(source).not.toContain('from "ambit/runtime/next"');
+    expect(source).not.toContain('from "ambit-ts/runtime/next"');
     expect(source).not.toContain("ambitRoute(");
     // A JSDoc tag line, not the word: the prose says why there is no
     // `@entrypoint` here, which is not the same as writing one.

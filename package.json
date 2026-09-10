@@ -1,5 +1,5 @@
 {
-  "name": "ambit",
+  "name": "ambit-ts",
   "version": "0.0.0",
   "private": true,
   "description": "A contract layer on top of TypeScript for AI-generated code",

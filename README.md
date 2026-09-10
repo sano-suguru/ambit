@@ -78,7 +78,7 @@ Point `check` at your own directory next, and run `ambit init` to have it
 propose `@effects` for the functions that have none.
 
 > **Not on npm yet.** To use Ambit in another project, build a tarball:
-> `pnpm pack`, then `npm install -D /path/to/ambit-0.0.0.tgz`. `npm remove ambit`
+> `pnpm pack`, then `npm install -D /path/to/ambit-ts-0.0.0.tgz`. `npm remove ambit-ts`
 > undoes it, and the `@effects` comments left behind still type-check and run.
 
 See **[CLI and CI](#cli-and-ci)** below for the flags, the exit codes, and the
@@ -111,7 +111,7 @@ For code you cannot edit — third party, generated, or not yours yet — declar
 the same contracts in `ambit.config.ts`:
 
 ```ts
-import { defineConfig } from "ambit/config";
+import { defineConfig } from "ambit-ts/config";
 
 export default defineConfig({
   effects: { payments: ["network", "db_write"] },
@@ -135,7 +135,7 @@ the opposite: it is adopted **per entrypoint**. Every entrypoint needs its own
 `withAmbit` or adapter registration, and a JSDoc tag alone never turns it on.
 
 ```ts
-import { installFetchHook, withAmbit } from "ambit/runtime";
+import { installFetchHook, withAmbit } from "ambit-ts/runtime";
 
 installFetchHook();
 
@@ -191,7 +191,7 @@ On Hono, the adapter registers the same handler instead of a hand-written
 
 ```ts
 import { Hono } from "hono";
-import { ambitHandler } from "ambit/runtime/hono";
+import { ambitHandler } from "ambit-ts/runtime/hono";
 
 const app = new Hono();
 

@@ -1,4 +1,4 @@
-import { ambitHandler } from "ambit/runtime/hono";
+import { ambitHandler } from "ambit-ts/runtime/hono";
 import type { Context } from "hono";
 import { validateEmail } from "../domain/validate.ts";
 import { fetchRate, listUsers, prisma, summarize } from "../lib/index.ts";

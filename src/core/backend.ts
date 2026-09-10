@@ -242,9 +242,9 @@ export interface ExtractedFunction {
 
 /**
  * A call that establishes an entrypoint's context, as the source shows it: a
- * hand-written `withAmbit(spec, handler)` from `ambit/runtime`, or a framework
+ * hand-written `withAmbit(spec, handler)` from `ambit-ts/runtime`, or a framework
  * adapter's registration (`ambitHandler(spec, handler, decode)` from
- * `ambit/runtime/hono`) — DESIGN.md §4.4, "Mapping contracts to handlers".
+ * `ambit-ts/runtime/hono`) — DESIGN.md §4.4, "Mapping contracts to handlers".
  *
  * Ambit reads it to check one thing only: that the capability list the runtime
  * would establish is the one the handler's JSDoc declares. Written twice, the

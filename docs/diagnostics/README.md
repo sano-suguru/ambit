@@ -250,8 +250,8 @@ handler's `@capabilities`.
 
 DESIGN.md §4.4 chose explicit registration, so the capability set that reaches
 the runtime is the one in the `withAmbit(spec, handler)`, `ambitHandler(spec,
-handler, decode)` (the `ambit/runtime/hono` adapter) or `ambitRoute(spec,
-handler, decode)` (the `ambit/runtime/next` adapter) beside the handler. A
+handler, decode)` (the `ambit-ts/runtime/hono` adapter) or `ambitRoute(spec,
+handler, decode)` (the `ambit-ts/runtime/next` adapter) beside the handler. A
 literal one *is* the handler's `@capabilities`, so the tag need not repeat it.
 Writing both is still allowed, and this reports the two disagreeing, as sets of
 the text each one wrote. The message names the call the source actually wrote. Order does not matter; anything else does, including a glob on one
@@ -427,7 +427,7 @@ Entrypoint with no capabilities.
 **Category:** capabilities
 
 A function marked `@entrypoint` declares no `@capabilities`. An entrypoint is
-where `@ambit/runtime` would establish a capability context (DESIGN.md §4.4);
+where `ambit-ts/runtime` would establish a capability context (DESIGN.md §4.4);
 one with no declared set establishes nothing to check against. §4.4:
 "leaving them unspecified is warned about as equivalent to unknown".
 

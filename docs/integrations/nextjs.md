@@ -1,6 +1,6 @@
 # Next.js integration
 
-`ambit/runtime/next` reaches exactly one thing: an App Router **Route Handler**
+`ambit-ts/runtime/next` reaches exactly one thing: an App Router **Route Handler**
 in `app/**/route.ts`, on the **Node.js runtime**, registered through
 `ambitRoute`. Everything else on this page is about what that sentence excludes.
 
@@ -11,7 +11,7 @@ the `ambitRoute` call the method is assigned from:
 
 ```ts
 // app/rates/route.ts
-import { ambitRoute } from "ambit/runtime/next";
+import { ambitRoute } from "ambit-ts/runtime/next";
 
 /**
  * @entrypoint
@@ -46,7 +46,7 @@ import {
   installChildProcessHook,
   installFetchHook,
   installFsHook,
-} from "ambit/runtime";
+} from "ambit-ts/runtime";
 
 export function register(): void {
   // `register()` runs on the Edge runtime too, where none of these hooks

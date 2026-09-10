@@ -630,8 +630,8 @@ parsed, validated, and carried on the context for an adapter to use.
 
 ## Framework adapters
 
-Two adapters exist: `ambitHandler` from `ambit/runtime/hono` and `ambitRoute`
-from `ambit/runtime/next`. Express, BullMQ, `worker_threads` and the rest have
+Two adapters exist: `ambitHandler` from `ambit-ts/runtime/hono` and `ambitRoute`
+from `ambit-ts/runtime/next`. Express, BullMQ, `worker_threads` and the rest have
 none, and a handler they register establishes no Ambit context.
 
 Both are declared the same way: a devDependency here and a type-only import,
@@ -641,8 +641,8 @@ the handler and its `decode`.
 
 | Adapter | Verified against | By |
 |---|---|---|
-| `ambit/runtime/hono` — `ambitHandler` | `hono@4`, `@hono/node-server@1` | `test/runtime.hono.test.ts` in process, `test/e2e.runtime.test.ts` through a real server and a real socket, `test/e2e.install.test.ts` through the installed package |
-| `ambit/runtime/next` — `ambitRoute` | `next@16`, Node.js runtime only | `test/runtime.next.test.ts` — the exported Route Handler called directly with a real `NextRequest`, which is what Next.js does with it; `test/e2e.next-app.test.ts` for an `app/**/route.ts` project through `ambit check`; `test/e2e.install.test.ts` type-checks README's route and `instrumentation.ts` snippets against the installed package |
+| `ambit-ts/runtime/hono` — `ambitHandler` | `hono@4`, `@hono/node-server@1` | `test/runtime.hono.test.ts` in process, `test/e2e.runtime.test.ts` through a real server and a real socket, `test/e2e.install.test.ts` through the installed package |
+| `ambit-ts/runtime/next` — `ambitRoute` | `next@16`, Node.js runtime only | `test/runtime.next.test.ts` — the exported Route Handler called directly with a real `NextRequest`, which is what Next.js does with it; `test/e2e.next-app.test.ts` for an `app/**/route.ts` project through `ambit check`; `test/e2e.install.test.ts` type-checks README's route and `instrumentation.ts` snippets against the installed package |
 
 What the Next.js row does **not** claim: no test starts a `next` server
 process, so the adapter is verified as a Route Handler function, not as a
@@ -693,8 +693,8 @@ Limits of what the adapters guarantee:
   all is unverified. DESIGN.md §12 "Edge runtimes" guarantees the Node.js
   runtime only in Phase 1. Leaving an Edge route unwrapped is the honest form:
   a registration that reads as enforced and is not would be worse than none.
-- **A file that imports `ambit/runtime/<framework>` does not type-check after
-  `npm remove ambit`.** P5 (DESIGN.md §2, "allow backing out at any time")
+- **A file that imports `ambit-ts/runtime/<framework>` does not type-check after
+  `npm remove ambit-ts`.** P5 (DESIGN.md §2, "allow backing out at any time")
   guarantees that the JSDoc contracts survive removal — they are comments on
   ordinary TypeScript, and nothing reads them at run time. The adapter call is not
   covered by that: `ambitHandler(spec, handler, decode)` is a value imported

@@ -1,8 +1,8 @@
 /**
- * The `ambit/runtime` and `ambit/runtime/next` surfaces this project uses,
+ * The `ambit-ts/runtime` and `ambit-ts/runtime/next` surfaces this project uses,
  * declared locally so the fixture type-checks with nothing installed.
  */
-declare module "ambit/runtime" {
+declare module "ambit-ts/runtime" {
   export interface AmbitBudget {
     readonly timeMs?: number;
     readonly costUsd?: number;
@@ -16,8 +16,8 @@ declare module "ambit/runtime" {
   }
 }
 
-declare module "ambit/runtime/next" {
-  import type { AmbitSpec } from "ambit/runtime";
+declare module "ambit-ts/runtime/next" {
+  import type { AmbitSpec } from "ambit-ts/runtime";
   import type { NextRequest } from "next/server";
 
   export interface RouteContext<Params extends Record<string, string | readonly string[]>> {

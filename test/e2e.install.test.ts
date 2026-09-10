@@ -107,7 +107,7 @@ describe("distribution: pack, install into a clean project, uninstall", () => {
         "typescript@6.0.3",
         "hono@4",
         // README's Next.js snippets are checked against the real `next` types,
-        // not against a locally declared shape: `ambit/runtime/next` types its
+        // not against a locally declared shape: `ambit-ts/runtime/next` types its
         // `decode` with `NextRequest`, and `skipLibCheck` would quietly turn an
         // unresolved one into `any` — a snippet that type-checks for the wrong
         // reason. `@types/node` is what `process.env.NEXT_RUNTIME` needs, and
@@ -130,7 +130,7 @@ describe("distribution: pack, install into a clean project, uninstall", () => {
   });
 
   it("ships no .ts source under node_modules (Node cannot strip types there)", async () => {
-    const packageDir = path.join(consumer, "node_modules", "ambit");
+    const packageDir = path.join(consumer, "node_modules", "ambit-ts");
     const stack = [packageDir];
     const tsFiles: string[] = [];
     while (stack.length > 0) {
@@ -192,15 +192,15 @@ describe("distribution: pack, install into a clean project, uninstall", () => {
     expect(result.stdout).toContain("fetchRate declares pure but performs [network] directly");
   }, 120_000);
 
-  it("resolves the ambit/runtime/hono subpath and enforces through it (§4.4)", async () => {
+  it("resolves the ambit-ts/runtime/hono subpath and enforces through it (§4.4)", async () => {
     // Deliberately outside `src/`: the uninstall test typechecks `src/`, and a
-    // file importing `ambit/runtime/hono` cannot type-check once the package is
+    // file importing `ambit-ts/runtime/hono` cannot type-check once the package is
     // gone. P5 claims the *contract JSDoc* survives removal, not the imports.
     await fs.writeFile(
       path.join(consumer, "adapter.ts"),
       `import { Hono } from "hono";
-import { ambitHandler } from "ambit/runtime/hono";
-import { installFetchHook } from "ambit/runtime";
+import { ambitHandler } from "ambit-ts/runtime/hono";
+import { installFetchHook } from "ambit-ts/runtime";
 
 installFetchHook();
 const app = new Hono();
@@ -268,8 +268,8 @@ console.log("DENIED:" + JSON.stringify(await denied.json()));
     expect(executed.stdout.trim()).toBe('DENIED:{"error":"AmbitCapabilityError"}');
   }, 120_000);
 
-  it("loads an ambit.config.ts that imports defineConfig from ambit/config (§4.1)", async () => {
-    // The whole point of the `ambit/config` subpath is that a consumer's
+  it("loads an ambit.config.ts that imports defineConfig from ambit-ts/config (§4.1)", async () => {
+    // The whole point of the `ambit-ts/config` subpath is that a consumer's
     // config file can import it. Nothing in this repository can test that: in
     // a clone the specifier resolves to `./dist/config.js` by self-reference,
     // and in a scratch copy it resolves to nothing at all. Only an installed
@@ -281,7 +281,7 @@ console.log("DENIED:" + JSON.stringify(await denied.json()));
     // `fetchRate` as `pure` too, which its `fetch` does not.
     await fs.writeFile(
       path.join(consumer, "ambit.config.ts"),
-      `import { defineConfig } from "ambit/config";
+      `import { defineConfig } from "ambit-ts/config";
 
 export default defineConfig({
   contracts: {
@@ -322,6 +322,107 @@ export default defineConfig({
     await fs.rm(path.join(consumer, "ambit.config.ts"));
   }, 120_000);
 
+  it("reads a spec through every installed runtime specifier (§4.4)", async () => {
+    // The wrapper table in `src/checker/backend/legacy-ts.ts` keys on the
+    // *written* module specifier, so the package's name is part of the
+    // checker's behavior and not only of its manifest: a key that stops
+    // matching stops every `spec` from being read as a declaration (§4.4).
+    // `test/fixtures/wrappers/` asks the same question of an ambient
+    // `declare module`, where the alias resolves in one hop. Here the hops run
+    // through a real `node_modules/ambit-ts/dist/**.d.ts`, which is the shape
+    // a consumer actually has, and all three table entries are asked at once.
+    const dir = path.join(consumer, "registrations");
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "routes.ts"),
+      `import { withAmbit } from "ambit-ts/runtime";
+import { ambitHandler } from "ambit-ts/runtime/hono";
+import { ambitRoute } from "ambit-ts/runtime/next";
+
+/**
+ * @entrypoint
+ * @capabilities db:read:orders
+ * @effects pure
+ */
+export function byHand(id: string): string {
+  return id;
+}
+
+/**
+ * @entrypoint
+ * @capabilities db:read:orders
+ * @effects pure
+ */
+export function byHono(id: string): string {
+  return id;
+}
+
+/**
+ * @entrypoint
+ * @capabilities db:read:orders
+ * @effects pure
+ */
+export function byNext(id: string): string {
+  return id;
+}
+
+export const BY_HAND = withAmbit({ capabilities: ["db:write:orders"] }, byHand);
+export const BY_HONO = ambitHandler({ capabilities: ["db:write:orders"] }, byHono, () => [""]);
+export const BY_NEXT = ambitRoute({ capabilities: ["db:write:orders"] }, byNext, () => [""]);
+`,
+    );
+
+    // Its own tsconfig: the consumer's includes `src/**/*.ts` only, and
+    // `ambit check` reads the nearest one (the target directory upwards), so
+    // without this the run would find no files and exit 2.
+    await fs.writeFile(
+      path.join(dir, "tsconfig.json"),
+      `${JSON.stringify(
+        {
+          compilerOptions: {
+            target: "ES2023",
+            module: "NodeNext",
+            moduleResolution: "nodenext",
+            strict: true,
+            noEmit: true,
+            skipLibCheck: true,
+          },
+          include: ["**/*.ts"],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const result = await run(
+      path.join("node_modules", ".bin", "ambit"),
+      ["check", "registrations", "--format", "json"],
+      consumer,
+    );
+    const diagnostics = result.stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((record) => record.kind === undefined);
+
+    // Each registration grants `db:write:orders` where the JSDoc says
+    // `db:read:orders`. A specifier the checker no longer recognizes produces
+    // no AMB-E010 at all, so the count is the assertion.
+    const drift = diagnostics.filter((d) => d.id === "AMB-E010");
+    expect(drift, `exit=${result.exitCode} ${result.stderr}${result.stdout}`).toHaveLength(3);
+    for (const wrapper of ["withAmbit", "ambitHandler", "ambitRoute"]) {
+      expect(
+        drift.some((d) => d.message.includes(`${wrapper} grants [db:write:orders]`)),
+        `${wrapper}: ${result.stdout}`,
+      ).toBe(true);
+    }
+
+    // Removed again: the directory is not part of what the uninstall test
+    // type-checks, and a file importing the package cannot survive its removal.
+    await fs.rm(dir, { recursive: true });
+  }, 120_000);
+
   it("type-checks the documented examples against the installed package", async () => {
     // The claim is the documents', so the documents are the input: copying the
     // examples into this file would let the copy drift from them silently,
@@ -341,7 +442,7 @@ export default defineConfig({
       const text = await fs.readFile(new URL(file, root), "utf8");
       for (const match of text.matchAll(/```ts\n([\s\S]*?)```/g)) {
         const source = match[1] ?? "";
-        if (source.includes('from "ambit/')) examples.push(source);
+        if (source.includes('from "ambit-ts/')) examples.push(source);
       }
     }
 
@@ -412,14 +513,14 @@ export default defineConfig({
   }, 120_000);
 
   it("uninstalls cleanly, leaving the consumer's own code untouched and valid", async () => {
-    const removed = await run("npm", ["remove", "ambit"], consumer);
+    const removed = await run("npm", ["remove", "ambit-ts"], consumer);
     expect(removed.exitCode, removed.stderr).toBe(0);
 
     // Nothing of Ambit's is left behind …
-    await expect(fs.stat(path.join(consumer, "node_modules", "ambit"))).rejects.toThrow();
+    await expect(fs.stat(path.join(consumer, "node_modules", "ambit-ts"))).rejects.toThrow();
     await expect(fs.stat(path.join(consumer, "node_modules", ".bin", "ambit"))).rejects.toThrow();
     const manifest = JSON.parse(await fs.readFile(path.join(consumer, "package.json"), "utf8"));
-    expect(manifest.devDependencies?.ambit).toBeUndefined();
+    expect(manifest.devDependencies?.["ambit-ts"]).toBeUndefined();
 
     // … and the contract declarations left in the source are inert: they are
     // JSDoc comments, so the project still type-checks and still runs

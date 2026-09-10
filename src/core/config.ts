@@ -2,7 +2,7 @@
  * The shape of `ambit.config.ts` (DESIGN.md §4.1, "Out-of-code declarations").
  *
  * Types only — no loader, no filesystem, no compiler. This module is what
- * `ambit/config` exports, so a consumer's config file gets the same type
+ * `ambit-ts/config` exports, so a consumer's config file gets the same type
  * checking a JSDoc contract gets from the checker, without pulling the
  * checker (or `typescript`) into their project's type graph.
  */
@@ -56,7 +56,7 @@ export interface AmbitConfig {
  * Identity. It exists for the type checking and completion a consumer gets
  * from writing `defineConfig({ … })`, and for nothing else — so a config that
  * exports a bare object literal is exactly as valid, which is what the
- * in-repo fixtures rely on (they cannot resolve `ambit/config` from a scratch
+ * in-repo fixtures rely on (they cannot resolve `ambit-ts/config` from a scratch
  * directory).
  */
 export function defineConfig(config: AmbitConfig): AmbitConfig {

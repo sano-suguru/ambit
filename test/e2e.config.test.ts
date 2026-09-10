@@ -16,7 +16,7 @@ import type { Diagnostic } from "../src/core/index.ts";
  * The configs here export a bare object rather than calling `defineConfig`.
  * `defineConfig` is the identity function, so the two are the same value —
  * and a scratch directory outside this repository cannot resolve
- * `ambit/config` unless the package is installed, which is
+ * `ambit-ts/config` unless the package is installed, which is
  * `test/e2e.install.test.ts`'s job, not this file's.
  */
 
