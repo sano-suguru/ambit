@@ -42,6 +42,33 @@ const MUTATING_BUILTINS: ReadonlySet<string> = new Set([
   "WeakMap.delete",
   "WeakSet.add",
   "WeakSet.delete",
+  // Surfaced by `node scripts/bench-corpus.ts` over `test/corpus/corpus.json`:
+  // `Headers.set`, `Headers.delete`, `Headers.append`, `URLSearchParams.append`,
+  // `FormData.append` and `Uint8Array.set` together account for the WHATWG
+  // half of that measurement's `builtin-method` names. Each writes through the
+  // receiver, so the locality rule can answer for it; the readers on the same
+  // types are in `src/stubs/pure-builtins.ts`.
+  //
+  // `Object.assign`, `Object.freeze`, `Object.defineProperty`, `Reflect.set`
+  // and `Reflect.deleteProperty` also surfaced and are deliberately in neither
+  // table: they mutate an *argument*, and the locality rule reads the receiver,
+  // which for them is the `Object` / `Reflect` global. It would answer a
+  // question about the wrong value.
+  "Headers.append",
+  "Headers.delete",
+  "Headers.set",
+  "URLSearchParams.append",
+  "URLSearchParams.delete",
+  "URLSearchParams.set",
+  "URLSearchParams.sort",
+  "FormData.append",
+  "FormData.delete",
+  "FormData.set",
+  "Uint8Array.copyWithin",
+  "Uint8Array.fill",
+  "Uint8Array.reverse",
+  "Uint8Array.set",
+  "Uint8Array.sort",
 ]);
 
 export function isMutatingBuiltin(qualifiedName: string): boolean {

@@ -43,7 +43,8 @@ import {
 import { lookupClientEffects } from "../stubs/data-clients.ts";
 import { lookupHttpCapability } from "../stubs/http-capabilities.ts";
 import { lookupStubEffect } from "../stubs/node-builtins.ts";
-import { isKnownPureBuiltin } from "../stubs/pure-builtins.ts";
+import { lookupBuiltinEffect } from "../stubs/builtin-effects.ts";
+import { isKnownPureBuiltin, isKnownPureGlobalCall } from "../stubs/pure-builtins.ts";
 import type { ResolvedConfig } from "./config.ts";
 
 /**
@@ -436,6 +437,23 @@ function toCall(site: CallSite): Call {
         ...(required?.targetUnknown ? { capabilityTargetUnknown: true as const } : {}),
       };
     }
+    // A global called as a bare identifier (`Number(x)`) has a textual name in
+    // this namespace rather than a checker-derived one, so the pure allowlist
+    // for those is consulted here. Only when the connector layer already
+    // resolved the callee into TypeScript's default lib: the name alone is not
+    // evidence that this `Number` is the builtin one
+    // (`src/stubs/pure-builtins.ts`, `PURE_GLOBAL_CALLS`).
+    if (
+      site.unresolvedReason === "builtin-method" &&
+      isKnownPureGlobalCall(site.calleeQualifiedName) &&
+      !site.callbackByReference
+    ) {
+      return {
+        kind: "known-pure",
+        location: site.location,
+        qualifiedName: site.calleeQualifiedName,
+      };
+    }
     // A named call that didn't resolve to a project function and doesn't
     // match a known stub (e.g. a third-party library call): unresolved, not
     // "no effect" (DESIGN.md §3.4 — never turn an unanalyzed call into
@@ -450,6 +468,17 @@ function toCall(site: CallSite): Call {
     };
   }
   if (site.pureBuiltinName) {
+    // A builtin whose effect is known exactly is a stub call, not an absence
+    // of effect and not `unknown` (`src/stubs/builtin-effects.ts`).
+    const builtinEffect = lookupBuiltinEffect(site.pureBuiltinName);
+    if (builtinEffect) {
+      return {
+        kind: "stub",
+        location: site.location,
+        effects: [builtinEffect],
+        qualifiedName: site.pureBuiltinName,
+      };
+    }
     // A callback passed by reference is never walked, so it can't be
     // trusted as pure even when the method name itself is allowlisted
     // (CallSite.callbackByReference's doc comment).

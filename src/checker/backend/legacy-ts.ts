@@ -1466,6 +1466,12 @@ function classifyCall(
       calleeQualifiedName: qualifiedName,
       literalArguments: literalArgumentsOf(node),
       unresolvedReason: fallbackReason,
+      // Carried for the same reason it is carried on `pureBuiltinName`: a
+      // name in this namespace can also be allowlisted as pure (a bare global
+      // like `Number(x)`), and an opaque callable argument must refuse that
+      // verdict (DESIGN.md §4.2 rule 4). It says nothing about a stub match,
+      // which is decided by the name and the literal arguments alone.
+      ...(hasOpaqueCallableArgument(node, checker) ? { callbackByReference: true as const } : {}),
     };
   }
 

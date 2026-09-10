@@ -47,6 +47,14 @@ const NULLARY_ONLY_EFFECTS: ReadonlyMap<string, KnownEffect> = new Map([["new Da
  * connector layer marks `new Promise(namedExecutor)` `callbackByReference`
  * and `summarize.ts` then refuses the pure verdict — the executor's body was
  * never walked (DESIGN.md §4.2 rule 4).
+ *
+ * `new Proxy` is deliberately absent, though measurement surfaces it more
+ * often than most entries here. The construction itself performs nothing, but
+ * what it installs are traps that run on ordinary property access and
+ * assignment — expressions Ambit does not see as calls at all. Listing the
+ * construction as effect-free would put a "no `KnownEffect`" verdict at the
+ * one place a reader would take it for a statement about the object, and there
+ * is nothing behind it. `unknown` at the construction is the honest answer.
  */
 const PURE_CONSTRUCTORS: ReadonlySet<string> = new Set([
   "new Map",
@@ -66,6 +74,16 @@ const PURE_CONSTRUCTORS: ReadonlySet<string> = new Set([
   "new AggregateError",
   "new URL",
   "new URLSearchParams",
+  // The Fetch API's value types, surfaced by `node scripts/bench-corpus.ts`
+  // over `test/corpus/corpus.json`. Constructing one allocates a value and
+  // normalizes its arguments; nothing is sent, and nothing is read. The
+  // operations *on* them stay where they were — a `Response` body is read
+  // through `Body.json` / `Body.text`, which no table answers, because what
+  // the body is backed by is not visible from the construction.
+  "new Headers",
+  "new Request",
+  "new Response",
+  "new FormData",
   "new TextEncoder",
   "new TextDecoder",
   "new AbortController",
