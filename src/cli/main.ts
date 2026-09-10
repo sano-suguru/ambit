@@ -4,6 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { CoverageReport } from "../checker/coverage.ts";
 import {
+  buildAuthorityRecords,
   type ConfigTarget,
   computeCoverage,
   diagnose,
@@ -19,7 +20,7 @@ import {
   resolveConfig,
   summarizeExtractedFiles,
 } from "../checker/index.ts";
-import type { Diagnostic } from "../core/index.ts";
+import type { AuthorityRecord, Diagnostic } from "../core/index.ts";
 import { displayName, isEffectsContract } from "../core/index.ts";
 
 /**
@@ -49,6 +50,7 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   let diagnostics: readonly Diagnostic[];
   let coverage: CoverageReport;
+  let authority: readonly AuthorityRecord[];
   try {
     // Loaded before extraction so a broken config stops the run before any
     // work is reported (DESIGN.md §3.4): a config that could not be read must
@@ -93,6 +95,7 @@ export async function main(argv: readonly string[]): Promise<number> {
             args.strict,
             config,
           );
+    authority = buildAuthorityRecords(state);
     coverage = computeCoverage({
       filesAnalyzed: project.files.length,
       skippedFunctions: project.skippedFunctions,
@@ -106,6 +109,16 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   for (const diagnostic of diagnostics) {
     process.stdout.write(formatDiagnostic(diagnostic, args));
+  }
+
+  // The per-function authority records (DESIGN.md §5.1). Emitted after the
+  // diagnostics and before the trailing `summary` line, so a consumer that
+  // reads the last record as the summary keeps working, and only for `check`:
+  // `init` reports proposals about contracts that do not exist yet.
+  if (args.format === "json" && args.command === "check") {
+    for (const record of authority) {
+      process.stdout.write(`${JSON.stringify(record)}\n`);
+    }
   }
 
   // Always report what was analyzed — a silent, empty result must never

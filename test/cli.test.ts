@@ -397,6 +397,89 @@ describe("ambit check (CLI)", () => {
     }
   });
 
+  it("emits one authority record per analyzed function, before the summary line", async () => {
+    const { stdout } = await runCli(["check", PROPAGATION_FIXTURES, "--format", "json"]);
+    const records = stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const authority = records.filter((r) => r.kind === "authority");
+    const summary = records.find((r) => r.kind === "summary");
+    expect(authority.length).toBe(summary.functionsExtracted);
+    // The summary must stay the last record: a consumer reading `at(-1)`
+    // as the summary predates the authority records and must keep working.
+    expect(records.at(-1)).toMatchObject({ kind: "summary" });
+    const lastAuthorityIndex = records.findLastIndex((r) => r.kind === "authority");
+    expect(lastAuthorityIndex).toBeLessThan(records.indexOf(summary));
+  });
+
+  it("an authority record carries symbol, effects, capabilities and entrypoint", async () => {
+    const { stdout } = await runCli(["check", PROPAGATION_FIXTURES, "--format", "json"]);
+    const authority = stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((r) => r.kind === "authority");
+
+    for (const record of authority) {
+      expect(typeof record.symbol).toBe("string");
+      expect(record.symbol).toContain("#");
+      expect(typeof record.entrypoint).toBe("boolean");
+      expect(record.effects.declared === null || Array.isArray(record.effects.declared)).toBe(true);
+      expect(Array.isArray(record.effects.observed)).toBe(true);
+      expect(typeof record.effects.unknown).toBe("boolean");
+      expect(
+        record.capabilities.declared === null || Array.isArray(record.capabilities.declared),
+      ).toBe(true);
+      expect(Array.isArray(record.capabilities.required)).toBe(true);
+      expect(typeof record.capabilities.unknown).toBe("boolean");
+    }
+
+    // A declared-`pure` function that reaches network through a callee: the
+    // declared empty set and the observed effect are both visible, and the
+    // path names the hop that carried it.
+    const undeclaredNetwork = authority.find(
+      (r) => r.symbol === "undici-fetch.ts#pureCallsUndiciFetch",
+    );
+    expect(undeclaredNetwork.effects.declared).toEqual([]);
+    expect(undeclaredNetwork.effects.observed).toEqual(["network"]);
+    expect(undeclaredNetwork.paths).toContainEqual({
+      authority: "network",
+      kind: "effect",
+      via: [],
+      operation: { qualifiedName: "undici.fetch", file: "undici-fetch.ts", line: 8 },
+    });
+  });
+
+  it("distinguishes an undeclared function from one that declared pure", async () => {
+    const { stdout } = await runCli(["check", PROPAGATION_FIXTURES, "--format", "json"]);
+    const authority = stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((r) => r.kind === "authority");
+
+    const undeclared = authority.find(
+      (r) => r.symbol === "rule3-unknown.ts#callsSomethingUnresolved",
+    );
+    const declaredPure = authority.find((r) => r.symbol === "rule3-unknown.ts#pureReachesUnknown");
+    expect(undeclared.effects.declared).toBeNull();
+    expect(declaredPure.effects.declared).toEqual([]);
+  });
+
+  it("does not emit authority records for init, which proposes contracts rather than reporting them", async () => {
+    const { stdout } = await runCli(["init", PROPAGATION_FIXTURES, "--format", "json"]);
+    const records = stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    expect(records.some((r) => r.kind === "authority")).toBe(false);
+  });
+
   it("every NDJSON diagnostic carries an engine identity", async () => {
     const { stdout } = await runCli(["check", PROPAGATION_FIXTURES, "--format", "json"]);
     const lines = stdout.trim().split("\n").filter(Boolean);

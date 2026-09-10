@@ -796,6 +796,48 @@ Optional アクセスなどの型安全性は再実装しない。選択した T
 ワークスペース基準に直して出す。§6 の「専用 CI プラグインを必須にしない」を
 満たすための出力形式であり、NDJSON の消費者には影響しない。
 
+`ambit check --format json` は診断に続けて、解析した関数 1 つにつき 1 行、
+`kind: "authority"` のレコードを出力する。これは診断ではなく、その関数が
+持つ権限そのものである。違反の無い関数も含めて全件出る。
+
+```json
+{
+  "kind": "authority",
+  "symbol": "src/tax.ts#calculateTax",
+  "location": {"file": "src/tax.ts", "line": 42, "col": 12, "endLine": 42, "endCol": 40},
+  "entrypoint": false,
+  "effects": {"declared": [], "observed": ["network"], "unknown": false},
+  "capabilities": {"declared": null, "required": ["http:get:api.example.com"], "unknown": false},
+  "paths": [
+    {
+      "authority": "network",
+      "kind": "effect",
+      "via": [{"symbol": "src/rates.ts#fetchRate", "file": "src/rates.ts", "line": 10}],
+      "operation": {"qualifiedName": "fetch", "file": "src/rates.ts", "line": 12}
+    }
+  ]
+}
+```
+
+- `declared` は `null` が「タグが無い」、`[]` が「`pure` と宣言した」。区別する。
+  解析できなかったタグ（`AMB-E002`）は `null` 側に置く。壊れた宣言を、書かれて
+  いない宣言より狭い許可として読まない。
+- `observed` / `required` は伝播後の値。`unknown` は権限ではなく「解析が届いて
+  いない」という別の主張なので、`effects` / `capabilities` それぞれの独立した
+  真偽値として持つ（§4.3）。
+- `paths` は実際に到達している権限にだけ付き、`via` と `operation` は
+  `AMB-E001` と同じ計算で作る。宣言だけあって本体が到達しない権限に経路は
+  付けない（§5.3、経路を捏造しない）。
+- レコードはシンボル ID 順、レコード内の配列も整列済み。同じツリーを 2 回
+  解析すれば同一の出力になる。順序の揺れが差分として出ないようにするため。
+- 位置は既存の診断行と `kind: "summary"` 行の間。末尾のレコードを `summary`
+  として読む既存の消費者を壊さない（§5.2）。`init` は出さない。提案は
+  「まだ無い契約」についての出力であり、権限の現状ではない。
+
+これはチェッカー側の成果物であり、実行時に読まれることはない。§4.4 案 2 が
+退けたのは**ランタイムに配る**契約データであって、この出力には当たらない。
+`ambit diff`（§6）はこのレコードだけを入力に権限差分を計算する。
+
 `via` は関数の列であり、各要素の位置はその関数の宣言位置である。効果を起こす操作そのものの位置（`fetch(...)` の行）は `contract.operation` が持つ。読み手が診断だけで操作の行に到達できるようにするためで、`via` の意味は変えない。
 
 この例では修正対象の41行目が `/** @effects pure */` の20文字であると仮定する。位置は例示用で、実際のパッチは解析した元ファイルに基づいて生成する。契約を守る具体的パッチを生成できないため、緩和候補だけを表示している。元仕様の省略記号を含む擬似パッチを、適用可能な修正として出力しない。
