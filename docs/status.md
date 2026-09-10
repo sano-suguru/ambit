@@ -15,13 +15,13 @@ partial. The details are per row.
 ## Baseline commands
 
 ```sh
-pnpm test                     # 412 tests, 27 files — pass
+pnpm test                     # 454 tests, 29 files — pass
 pnpm exec tsc --noEmit        # pass
 ./node_modules/.bin/biome ci .  # pass
 node src/cli/main.ts check src --coverage   # exit 0
 node src/cli/main.ts check test/fixtures/realistic-api --coverage   # exit 0
 node src/cli/main.ts check test/fixtures/next-app --coverage         # exit 0
-node src/cli/main.ts diff HEAD src           # exit 0 on a clean tree
+node src/cli/main.ts diff HEAD src           # exit 0 with the ledger's five approvals in place
 ```
 
 The M0.5 comparison is a separate, manual procedure — it spawns a Go engine and
@@ -36,28 +36,41 @@ node scripts/m05-probe/native-primitives.ts test/fixtures/backend-conformance
 ```
 
 `.github/workflows/ci.yml` runs `ambit diff HEAD~1 src --format github` as a
-**non-gating** step (`continue-on-error: true`), and `actions/checkout` is
-given `fetch-depth: 0` so the history exists locally — the default of 1 would
-make `HEAD~1` unresolvable, and `test/e2e.diff.test.ts` additionally resolves
-a pinned SHA, which a shallow clone of any fixed depth would eventually not
-reach. It has now run in GitHub Actions
-once, on the pull request that introduced it
+**gating** step, and `actions/checkout` is given `fetch-depth: 0` so the
+history exists locally — the default of 1 would make `HEAD~1` unresolvable,
+and `test/e2e.diff.test.ts` additionally resolves a pinned SHA, which a shallow
+clone of any fixed depth would eventually not reach. On a `pull_request` event
+`HEAD~1` is the base tip, so the comparison is main against the pull request's
+tree — the comparison the step is for.
+
+It ran non-gating once before the ledger existed, on the pull request that
+introduced `ambit diff`
 ([run 34429541730](https://github.com/sano-suguru/ambit/actions/runs/34429541730)):
 the step exited 1 and emitted 16 annotations naming the eight symbols the
-`diff` command itself added, each with its call path. The job stayed green
-because of `continue-on-error`. On a `pull_request` event `HEAD~1` is the base
-tip, so the comparison was main against the pull request's tree — the
-comparison the step is for.
+`diff` command itself added, each with its call path, and the job stayed green
+only because of `continue-on-error`.
 
-**Promoting it to a gate is now blocked by something other than evidence.** A
-pull request that legitimately adds authority — the one above is exactly that
-— would fail the build with no way to say so, because there is no approval
-mechanism: no allowlist, no pinned baseline, no "this increase is reviewed".
-DESIGN.md §6 defines the exit codes and this repository implements them; what
-is missing is the step above them. Until that exists, a gate would either
-block every honest authority-adding change or be routinely overridden, and
-neither is worth having. The step stays reporting-only, and the approval
-mechanism is the open question.
+### Promoting `ambit diff` to a gate
+
+**`continue-on-error: true` is now removed.** What was missing was an approval
+mechanism, and DESIGN.md §6.3 is it: `ambit.approvals.md`, read on both sides
+of the comparison, so a line grants only in the comparison that adds it
+([ADR-0008](adr/0008-approving-an-authority-increase.md)). Measured on this
+change, which is itself a pull request that legitimately adds authority:
+`diff HEAD src` reported five increases and exited 1 with no ledger, and exited
+0 with the five approval lines written — the only difference between the two
+runs being `ambit.approvals.md`. The five are `findApprovalsFile`,
+`isProjectBoundary` and `loadApprovals` (`fs_read`, reading the ledger) and
+`gitRaw` and `renamedFiles` (`process`, running `git diff --find-renames`).
+
+Five lines is the honest cost of per-symbol granularity for a change of this
+size: every new function that performs I/O is a new symbol holding authority.
+A sixth was avoided rather than approved — `reviewIncreases` first reported
+`state_write` for mutating an array retrieved from a local `Map`, which is the
+mutation analysis being conservative about a value's provenance rather than a
+defect (measured directly: `Map.set` on a locally created map is `pure`;
+`map.get(k).push(x)` is `state_write`). Rewriting it to hold a cursor instead
+of shifting the bucket made the function `pure` and removed the line.
 
 `pnpm exec biome ci .` returns 1 in one local shell because of a
 user-installed command wrapper, not because of this repository —
@@ -67,17 +80,28 @@ runs `pnpm exec biome ci .` in GitHub Actions, where no such wrapper exists.
 
 ## Ambit's own source (`check src --coverage`)
 
-| Figure | After the Hono adapter | Before `ambit.config.ts` | After `ambit.config.ts` | After M0.5 | After the CI gate | After the Next.js adapter |
-|---|---|---|---|---|---|---|
-| files analyzed | 27 | 27 | 29 | 29 | 29 | 30 |
-| functions extracted | 194 | 202 | 236 | 238 | 246 | 248 |
-| functions with a declared `@effects` | 4 | 4 | 4 (jsdoc 4, config 0) | 4 (jsdoc 4, config 0) | 4 (jsdoc 4, config 0) | 4 (jsdoc 4, config 0) |
-| `unknown` rate | 64.4% (125/194) | 63.4% (128/202) | 65.7% (155/236) | 66.0% (157/238) | 65.9% (162/246) | **66.1% (164/248)** |
-| `boundary` rate | 0.0% (0/194) | 0.0% (0/202) | 0.0% (0/236) | 0.0% (0/238) | 0.0% (0/246) | 0.0% (0/248) |
-| call sites | 1003 — resolved 299, stub 3, known-pure 258, mutation 94, unresolved 349 | 1035 — resolved 315, stub 3, known-pure 260, mutation 93, unresolved 364 | 1278 — resolved 404, stub 8, known-pure 327, mutation 110, unresolved 429 | 1287 — resolved 406, stub 8, known-pure 327, mutation 110, unresolved 436 | 1322 — resolved 419, stub 8, known-pure 341, mutation 110, unresolved 444 | 1335 — resolved 423, stub 8, known-pure 344, mutation 111, unresolved 449 |
-| unresolved by reason | `builtin-method` 68, `external-module` 265, `unresolved-symbol` 12, `callback-parameter` 4 | `builtin-method` 72, `external-module` 276, `unresolved-symbol` 12, `callback-parameter` 4 | `builtin-method` 102, `external-module` 307, `dynamic-import` 1, `unresolved-symbol` 15, `callback-parameter` 4 | `builtin-method` 102, `external-module` 314, `dynamic-import` 1, `unresolved-symbol` 15, `callback-parameter` 4 | `builtin-method` 107, `external-module` 317, `dynamic-import` 1, `unresolved-symbol` 15, `callback-parameter` 4 | `builtin-method` 108, `external-module` 318, `dynamic-import` 1, `unresolved-symbol` 16, `callback-parameter` 6 |
-| skipped function-like nodes | 90 (`callback-argument` 75, `nested-function` 15) | 91 (`callback-argument` 76, `nested-function` 15) | 109 (`callback-argument` 91, `object-literal-method` 3, `nested-function` 15) | 109 (`callback-argument` 91, `object-literal-method` 3, `nested-function` 15) | 114 (`callback-argument` 96, `object-literal-method` 3, `nested-function` 15) | 116 (`callback-argument` 97, `object-literal-method` 3, `nested-function` 16) |
-| exit code | 0 | 0 | 0 | 0 | 0 | 0 |
+| Figure | After the Hono adapter | Before `ambit.config.ts` | After `ambit.config.ts` | After M0.5 | After the CI gate | After the Next.js adapter | After the approval ledger |
+|---|---|---|---|---|---|---|---|
+| files analyzed | 27 | 27 | 29 | 29 | 29 | 30 | 39 |
+| functions extracted | 194 | 202 | 236 | 238 | 246 | 248 | 302 |
+| functions with a declared `@effects` | 4 | 4 | 4 (jsdoc 4, config 0) | 4 (jsdoc 4, config 0) | 4 (jsdoc 4, config 0) | 4 (jsdoc 4, config 0) | 14 (jsdoc 14, config 0) |
+| `unknown` rate | 64.4% (125/194) | 63.4% (128/202) | 65.7% (155/236) | 66.0% (157/238) | 65.9% (162/246) | 66.1% (164/248) | **62.9% (190/302)** |
+| `boundary` rate | 0.0% (0/194) | 0.0% (0/202) | 0.0% (0/236) | 0.0% (0/238) | 0.0% (0/246) | 0.0% (0/248) | 0.0% (0/302) |
+| call sites | 1003 — resolved 299, stub 3, known-pure 258, mutation 94, unresolved 349 | 1035 — resolved 315, stub 3, known-pure 260, mutation 93, unresolved 364 | 1278 — resolved 404, stub 8, known-pure 327, mutation 110, unresolved 429 | 1287 — resolved 406, stub 8, known-pure 327, mutation 110, unresolved 436 | 1322 — resolved 419, stub 8, known-pure 341, mutation 110, unresolved 444 | 1335 — resolved 423, stub 8, known-pure 344, mutation 111, unresolved 449 | 1619 — resolved 542, stub 17, known-pure 423, mutation 138, unresolved 499 |
+| unresolved by reason | `builtin-method` 68, `external-module` 265, `unresolved-symbol` 12, `callback-parameter` 4 | `builtin-method` 72, `external-module` 276, `unresolved-symbol` 12, `callback-parameter` 4 | `builtin-method` 102, `external-module` 307, `dynamic-import` 1, `unresolved-symbol` 15, `callback-parameter` 4 | `builtin-method` 102, `external-module` 314, `dynamic-import` 1, `unresolved-symbol` 15, `callback-parameter` 4 | `builtin-method` 107, `external-module` 317, `dynamic-import` 1, `unresolved-symbol` 15, `callback-parameter` 4 | `builtin-method` 108, `external-module` 318, `dynamic-import` 1, `unresolved-symbol` 16, `callback-parameter` 6 | `builtin-method` 138, `external-module` 337, `dynamic-import` 1, `unresolved-symbol` 17, `callback-parameter` 6 |
+| skipped function-like nodes | 90 (`callback-argument` 75, `nested-function` 15) | 91 (`callback-argument` 76, `nested-function` 15) | 109 (`callback-argument` 91, `object-literal-method` 3, `nested-function` 15) | 109 (`callback-argument` 91, `object-literal-method` 3, `nested-function` 15) | 114 (`callback-argument` 96, `object-literal-method` 3, `nested-function` 15) | 116 (`callback-argument` 97, `object-literal-method` 3, `nested-function` 16) | 152 (`callback-argument` 133, `object-literal-method` 3, `nested-function` 16) |
+| exit code | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+The last column is the current tree, measured on 2026-09-10 with `node
+src/cli/main.ts check src --coverage`, exit code 0. It spans two changes, not
+one: `ambit diff` itself was never added to this table, so the jump from 30
+files to 39 is that command plus the approval ledger together. The `unknown`
+rate is the first fall this table has recorded — 66.1% → 62.9% — because both
+changes are `src/core/` and `src/cli/` code that calls almost nothing outside
+Node's standard library, unlike the connection layer that drove every earlier
+column upward. Ten more functions carry a declared `@effects` for the same
+reason: `runDiff`, `git`, `gitRaw`, `renamedFiles` and the rest have to declare
+what they do, because they are the parts of Ambit that run a subprocess.
 
 The "After the CI gate" column added the call-path rendering,
 `contract.operation`, and `--format github` — eight helper functions, all
@@ -277,6 +301,8 @@ of `unknown` in the fixture.
 | `check src`, five consecutive runs, 2026-09-09 after M0.5 (29 files, 238 functions) | 1.24 / 0.88 / 1.17 / 0.99 / 1.02 s |
 | `check src`, five consecutive runs, 2026-09-10 after `ambit diff` (37 files, 286 functions) | 1.14 / 1.04 / 1.05 / 1.04 / 1.21 s |
 | `diff HEAD src`, five consecutive runs, 2026-09-10 (same tree, two analyses) | 2.56 / 2.06 / 1.99 / 1.83 / 1.97 s |
+| `check src`, five consecutive runs, 2026-09-10 after the approval ledger (39 files, 302 functions) | 1.11 / 1.07 / 1.09 / 1.08 / 1.10 s |
+| `diff HEAD src`, five consecutive runs, 2026-09-10 after the approval ledger (same tree, two analyses, one `git diff`) | 1.86 / 1.98 / 1.94 / 1.87 / 1.89 s |
 
 The backend's share of that is now measured separately (the M0.5 section
 above): 426 ms of program construction plus 110 ms of walking, on the same
@@ -292,6 +318,11 @@ has been set: there is nothing yet to compare against.
 Every row is labelled with the tree it was measured on. The last two rows are
 the current tree; the rows above them are smaller trees and are kept as
 recorded, not restated for this build.
+
+The approval ledger costs nothing measurable. It adds one `git diff
+--find-renames` and two reads of a small file to a command that already runs
+two whole analyses, and `diff` on the current tree is not slower than the
+larger-tree row above it.
 
 `diff` costs about twice a `check`, and that is the whole of it: the base ref
 is a fresh `git worktree` and both sides run the same analysis from scratch.
@@ -769,8 +800,8 @@ version's API: the direct API confirmation was done against 7.0.2.
 |---|---|
 | Spec section | §4.2, §4.3, §5.1–5.3, §6.2 |
 | Acceptance | dogfooding on Ambit itself; diagnostics update on a contract-comment-only change; schema and measurement conditions fixed |
-| Implemented | `@effects` parsing and propagation (rules 1–7 incl. cycles, constructors, `super`, object literals), `unknown`, `--coverage` (with a `declared-by` jsdoc/config split), NDJSON diagnostics with `engine`, a `kind: "authority"` NDJSON record per function (§5.1), `ambit diff <ref>` comparing the working tree's authority against a base ref and exiting 1 on an increase (§6), `--strict`, `fixes[].edits` for AMB-E001, `ambit init` contract inference. `ambit.config.ts` (§4.1): out-of-code contracts for all five tags, JSDoc-wins merging with `AMB-W005` on a difference, `AMB-W006` for an exact key that matches nothing, user-defined effects usable from both JSDoc and config, per-directory `strict`, and `ambit init --config` for the declarations no comment can carry |
-| Evidence | `test/{effects,propagate,summarize,diagnose,construction,cli,fix}.test.ts`; `test/authority-diff.test.ts` (17, the comparison as a pure function, no repository), `test/diff-output.test.ts` (13, the text and GitHub renderings), `test/e2e.diff.test.ts` (8, against this repository's own history, asserting the worktree is gone after every path); `check src --coverage` exit 0; `test/backend.legacy-ts.test.ts` self-hosting block; `test/init.test.ts` round-trips every proposal through `check`; `test/e2e.config.test.ts` (15 cases, all through the CLI as a subprocess); `test/e2e.realistic.test.ts` round-trips `init --config`; `test/e2e.install.test.ts` loads a config that imports `ambit/config` from the installed package |
+| Implemented | `@effects` parsing and propagation (rules 1–7 incl. cycles, constructors, `super`, object literals), `unknown`, `--coverage` (with a `declared-by` jsdoc/config split), NDJSON diagnostics with `engine`, a `kind: "authority"` NDJSON record per function (§5.1), `ambit diff <ref>` comparing the working tree's authority against a base ref, carrying symbols across the file renames git reports, and exiting 1 on an increase no approval covers (§6, §6.3), the `ambit.approvals.md` ledger read on both sides of that comparison, `--strict`, `fixes[].edits` for AMB-E001, `ambit init` contract inference. `ambit.config.ts` (§4.1): out-of-code contracts for all five tags, JSDoc-wins merging with `AMB-W005` on a difference, `AMB-W006` for an exact key that matches nothing, user-defined effects usable from both JSDoc and config, per-directory `strict`, and `ambit init --config` for the declarations no comment can carry |
+| Evidence | `test/{effects,propagate,summarize,diagnose,construction,cli,fix}.test.ts`; `test/authority-diff.test.ts` (23, the comparison as a pure function including renames, no repository), `test/approvals.test.ts` (19, the ledger grammar and the count-based rule, no repository), `test/diff-output.test.ts` (21, the text and GitHub renderings), `test/e2e.diff.test.ts` (8, against this repository's own history, asserting the worktree is gone after every path), `test/e2e.approvals.test.ts` (9, each case building a repository of its own, for the git rename reading and the ledger on both sides); `check src --coverage` exit 0; `test/backend.legacy-ts.test.ts` self-hosting block; `test/init.test.ts` round-trips every proposal through `check`; `test/e2e.config.test.ts` (15 cases, all through the CLI as a subprocess); `test/e2e.realistic.test.ts` round-trips `init --config`; `test/e2e.install.test.ts` loads a config that imports `ambit/config` from the installed package |
 | Outstanding | **The price table is not implemented** — `@budget costUsd` parses, carries and is compared, and nothing prices an LLM call, so it is never enforced (§4.5). Config has no `stubs` key either: a package's effect definitions still come only from `src/stubs/` (§4.2). **No resident or incremental check** (§6.2) — measured above: a re-check costs the same as a first check. **No versioned JSON Schema** for the diagnostic format (§5.2); the shape is fixed in code and documented, not schema-validated. |
 
 ### M2 — capabilities, budget, runtime hooks, framework adapters, 50 stubs

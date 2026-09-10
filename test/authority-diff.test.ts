@@ -6,6 +6,7 @@ import {
   deletedSymbols,
   diffAuthority,
   hasAuthorityIncrease,
+  movedSymbols,
   pathFor,
   unchangedSymbols,
   unknownGained,
@@ -262,5 +263,94 @@ describe("diffAuthority", () => {
     expect(deletedSymbols(diff)).toHaveLength(0);
     expect(unknownGained(diff)).toHaveLength(0);
     expect(unchangedSymbols(diff)).toHaveLength(2);
+  });
+});
+
+/**
+ * Carrying a symbol across a file git reported as renamed (DESIGN.md §6.3).
+ *
+ * The rename map is an input, not something derived here: this module runs no
+ * git, and matching two symbols on anything weaker than git's own report
+ * would be a guess about identity.
+ */
+describe("diffAuthority with renamed files", () => {
+  const renames = new Map([["old/tax.ts", "new/tax.ts"]]);
+
+  it("compares a moved function against its old path instead of reporting a new symbol", () => {
+    const diff = diffAuthority(
+      [record("old/tax.ts#applyTax", { declared: ["network"] })],
+      [record("new/tax.ts#applyTax", { declared: ["network"] })],
+      renames,
+    );
+    expect(hasAuthorityIncrease(diff)).toBe(false);
+    expect(deletedSymbols(diff)).toHaveLength(0);
+    expect(movedSymbols(diff)).toHaveLength(1);
+    expect(movedSymbols(diff)[0]?.movedFrom).toBe("old/tax.ts#applyTax");
+    expect(unchangedSymbols(diff)).toHaveLength(1);
+  });
+
+  it("reports only what a move widened, not the authority it carried along", () => {
+    const diff = diffAuthority(
+      [record("old/tax.ts#applyTax", { declared: ["network"] })],
+      [record("new/tax.ts#applyTax", { declared: ["network", "fs_write"] })],
+      renames,
+    );
+    const increases = authorityIncreases(diff);
+    expect(increases).toHaveLength(1);
+    expect(increases[0]?.status).toBe("moved");
+    expect(increases[0]?.added).toEqual([{ kind: "effect", name: "fs_write" }]);
+  });
+
+  it("still reports a moved function that lost authority as a decrease, not a deletion", () => {
+    const diff = diffAuthority(
+      [record("old/tax.ts#applyTax", { declared: ["network", "fs_write"] })],
+      [record("new/tax.ts#applyTax", { declared: ["network"] })],
+      renames,
+    );
+    expect(hasAuthorityIncrease(diff)).toBe(false);
+    expect(authorityDecreases(diff)).toHaveLength(1);
+    expect(deletedSymbols(diff)).toHaveLength(0);
+  });
+
+  it("does not excuse a different function in the renamed file", () => {
+    // The file moved; `helper` did not exist in it before. Nothing about a
+    // rename says a symbol that was never there is not new.
+    const diff = diffAuthority(
+      [record("old/tax.ts#applyTax", { declared: ["network"] })],
+      [
+        record("new/tax.ts#applyTax", { declared: ["network"] }),
+        record("new/tax.ts#helper", { declared: ["fs_write"] }),
+      ],
+      renames,
+    );
+    const increases = authorityIncreases(diff);
+    expect(increases).toHaveLength(1);
+    expect(increases[0]?.symbol).toBe("new/tax.ts#helper");
+    expect(increases[0]?.status).toBe("new");
+  });
+
+  it("leaves a symbol alone when the remapped id would collide with one the base already has", () => {
+    // Unreachable through git, which cannot report a rename onto a path that
+    // existed on the base side. Resolving the collision by guessing which
+    // record wins is the one answer that could hide an increase, so neither
+    // is remapped.
+    const diff = diffAuthority(
+      [record("old/tax.ts#f", { declared: ["network"] }), record("new/tax.ts#f")],
+      [record("new/tax.ts#f", { declared: ["network"] })],
+      renames,
+    );
+    expect(movedSymbols(diff)).toHaveLength(0);
+    expect(authorityIncreases(diff)).toHaveLength(1);
+    expect(deletedSymbols(diff)).toHaveLength(1);
+  });
+
+  it("ignores a rename of a file neither side has a record for", () => {
+    const diff = diffAuthority(
+      [record("src/a.ts#f")],
+      [record("src/a.ts#f")],
+      new Map([["src/gone.ts", "src/arrived.ts"]]),
+    );
+    expect(movedSymbols(diff)).toHaveLength(0);
+    expect(unchangedSymbols(diff)).toHaveLength(1);
   });
 });

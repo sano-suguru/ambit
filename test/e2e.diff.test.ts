@@ -90,7 +90,7 @@ describe("ambit diff against this repository's history", () => {
     const before = await worktreeCount();
     const { stdout, exitCode } = await runCli(["diff", BEFORE_DIFF, "src"]);
     expect(exitCode).toBe(1);
-    expect(stdout).toContain("Authority increased in");
+    expect(stdout).toContain("increased without approval");
     expect(await worktreeCount()).toBe(before);
 
     const github = await runCli(["diff", BEFORE_DIFF, "src", "--format", "github"]);
@@ -124,7 +124,9 @@ describe("ambit diff against this repository's history", () => {
       const { exitCode } = await runCli(["diff", "HEAD", "src", ...flag]);
       expect(exitCode, `diff should reject ${flag.join(" ")}`).toBe(2);
     }
+    // The flag `diff` does support is accepted, whatever the working tree
+    // then reports: 0 or 1 is an answer, 2 is the usage error being tested for.
     const supported = await runCli(["diff", "HEAD", "src", "--format", "github"]);
-    expect(supported.exitCode).toBe(0);
+    expect(supported.exitCode).not.toBe(2);
   }, 180_000);
 });

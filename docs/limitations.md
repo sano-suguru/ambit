@@ -74,7 +74,7 @@ apply.
 ### What `ambit diff` can and cannot see
 
 `ambit diff <ref>` compares the working tree's authority against a base ref
-and fails on an increase.
+and fails on an increase that no approval covers (DESIGN.md §6.3).
 
 It exists because `check` alone cannot catch a widened declaration. `check`
 validates the code against whatever contract is currently written, so editing
@@ -98,15 +98,21 @@ Authority increased in 1 symbol:
 Four things `diff` does not see, or sees differently from how a reader might
 expect:
 
-- **A function that is moved or renamed reads as a deletion plus a new
-  symbol.** A symbol id is `<path relative to the checked directory>#<declaration
-  path>` (DESIGN.md §5.3), so `src/tax.ts#calculateTax` and
-  `src/pricing/tax.ts#calculateTax` are two different symbols, and nothing
-  tries to match them up. Moving a function that already had `network`
-  therefore shows up as a new symbol holding `network` — which exits 1 — and
-  the old one as deleted. That is over-reporting, not under-reporting: the
-  alternative would be a guess about identity, and a wrong guess would hide a
-  function that gained authority on the way.
+- **A function whose file git does not report as renamed reads as a deletion
+  plus a new symbol.** A symbol id is `<path relative to the checked
+  directory>#<declaration path>` (DESIGN.md §5.3), so
+  `src/tax.ts#calculateTax` and `src/pricing/tax.ts#calculateTax` are two
+  different symbols. `ambit diff` re-expresses the base side's ids under the
+  head side's paths for every rename `git diff --find-renames` reports, so an
+  ordinary file move is compared against itself and needs no approval. Two
+  cases are left, and each costs one approval line: a function renamed
+  *within* a file (git reports no rename, and matching two declaration paths
+  inside one file would be a guess about identity), and a move git does not
+  detect — because the edit that came with it fell under its similarity
+  threshold, or because the new path is not tracked yet, since rename
+  detection compares the index and the working tree against the base commit.
+  Both over-report rather than under-report, which is the direction §3.4
+  requires.
 - **Gaining `unknown` is not an increase, because unknown is not authority.**
   A call the analysis cannot resolve means the effect set may be incomplete
   (DESIGN.md §4.3) — it does not mean the function acquired anything. `ambit
@@ -124,14 +130,37 @@ expect:
   diff.
 - **It compares two trees, so it runs the analysis twice.** There is no cache
   and no resident path (DESIGN.md §6.2 is a separate open question), and the
-  base side is a fresh `git worktree`. Measured on this repository, one run
-  each: `check src` 1.35s, `diff HEAD src` 1.94s.
+  base side is a fresh `git worktree`. Measured on this repository, five runs
+  each: `check src` 1.07–1.11 s, `diff HEAD src` 1.86–1.98 s.
+
+### What an approval means, and what it does not
+
+An increase passes when `ambit.approvals.md` gains a line naming it, in the
+same change (DESIGN.md §6.3). Three limits of that are worth stating plainly:
+
+- **Ambit does not know a person wrote the line.** An agent can write one as
+  easily as a reviewer can. What the mechanism supplies is the record and its
+  visibility in the pull request's diff; what supplies the person is the
+  repository's branch protection, and a `CODEOWNERS` entry naming the file so
+  that changing it needs an approver. Neither is something Ambit can check.
+- **An approval says nothing about whether the increase is safe.** It says one
+  named increase was shown to whoever read the diff.
+- **A malformed line grants nothing and does not fail on its own.** A `- ` line
+  under the `Approvals` heading that does not parse is reported with its line
+  number; the increase it was meant to approve stays unapproved, and that is
+  what fails. A line written *above* that heading is prose and is not reported
+  at all — which is what lets the file explain itself in a bullet list, and
+  also means an approval written in the wrong place is silently inert. The
+  increase still fails, so the failure is visible; the reason for it is one
+  line further away.
 
 The working tree's `node_modules` is symlinked into the base checkout before
 the base side is analyzed. Without it the two sides differ by their
-environment rather than by their contracts: measured on this repository, the
-base side reports 536 unresolved call sites against the head side's 517, and
-an `any-typed` unresolved reason the head side does not have at all.
+environment rather than by their contracts: re-measured on 2026-09-10 against
+commit `42addc9`, a checkout without `node_modules` reports 498 unresolved call
+sites against 479 with it, and an `any-typed` reason (77 sites) that the side
+with `node_modules` does not have at all — `external-module` 64 against 331,
+`unresolved-symbol` 236 against 17.
 
 ## `ambit.config.ts`
 

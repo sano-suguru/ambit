@@ -219,7 +219,7 @@ does not break code that has no contracts yet.
 |---|---|
 | `ambit check <dir>` | Static check. `--coverage`, `--strict`, `--format json`, `--format github` |
 | `ambit init <dir>` | Proposes `@effects` for undeclared functions. `--config` for the ones no comment can carry |
-| `ambit diff <ref> [dir]` | Compares the working tree's authority against a base ref and fails on an increase |
+| `ambit diff <ref> [dir]` | Compares the working tree's authority against a base ref and fails on an increase no approval covers |
 
 Exit codes: **0** when nothing was reported, **1** on an error, **2** when the
 analysis itself could not run. That exit code is the whole CI integration:
@@ -299,6 +299,12 @@ claim:
   green again. `ambit diff <ref>` is what reviews increases in authority, and it
   has documented blind spots of its own
   ([limitations](docs/limitations.md#what-ambit-diff-can-and-cannot-see)).
+- **That an approved increase is a safe one.** An approval line in
+  `ambit.approvals.md` records that an increase was put in front of a reviewer,
+  in the same pull request, where it can be read. It does not record that the
+  reviewer was right, and Ambit cannot check that a person wrote the line at
+  all — branch protection and a `CODEOWNERS` entry on the file are what make
+  that true.
 - **Targets finer than the resource.** A database target names the database, not
   the table — Ambit does not read table names out of SQL — and a shell spawn
   names the shell, not the program inside the command string.
@@ -310,9 +316,9 @@ claim:
 ## Status
 
 Ambit is experimental and not production-ready; diagnostic ids and the NDJSON
-field shape can still change. `check src` over Ambit's own source — 37 files,
-286 functions — takes 1.04–1.21 s across five runs; `diff HEAD src`, which
-analyzes two trees, takes 1.83–2.56 s across five runs. Nothing is cached, so a
+field shape can still change. `check src` over Ambit's own source — 39 files,
+302 functions — takes 1.07–1.11 s across five runs; `diff HEAD src`, which
+analyzes two trees, takes 1.86–1.98 s across five runs. Nothing is cached, so a
 re-check costs the same. The analysis backend has been measured on a
 300-file project (458 ms, 348 MiB peak) as part of choosing it; the CLI on top
 of it has not. What is implemented and what is not, milestone by milestone with

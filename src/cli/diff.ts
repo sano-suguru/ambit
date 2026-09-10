@@ -1,22 +1,40 @@
 import path from "node:path";
-import type { AuthorityDiff, AuthorityRef, SymbolAuthorityDiff } from "../core/index.ts";
+import type {
+  ApprovalReview,
+  AuthorityDiff,
+  AuthorityRef,
+  IncreaseItem,
+  MalformedApprovalLine,
+} from "../core/index.ts";
 import {
   authorityDecreases,
-  authorityIncreases,
   deletedSymbols,
   diffAuthority,
   displayName,
+  formatApprovalLine,
+  movedSymbols,
   pathFor,
+  reviewIncreases,
   unchangedSymbols,
   unknownGained,
 } from "../core/index.ts";
 import { analyze } from "./analyze.ts";
+import { loadApprovals } from "./approvals.ts";
 import { githubAnnotation, workspacePath } from "./github.ts";
-import { addWorktree, git, removeWorktree, repositoryRoot } from "./worktree.ts";
+import { addWorktree, git, removeWorktree, renamedFiles, repositoryRoot } from "./worktree.ts";
 
 /** What `ambit diff` compared, and what came out. */
 export interface DiffResult {
   readonly diff: AuthorityDiff;
+  /**
+   * Which increases the approval ledger lets through, which it does not, and
+   * which lines granted nothing (DESIGN.md §6.3).
+   */
+  readonly review: ApprovalReview;
+  /** `-` lines in the head side's ledger that did not parse. Reported; they grant nothing. */
+  readonly malformedApprovals: readonly MalformedApprovalLine[];
+  /** The ledger that governed the head side, relative to the checked directory's repository. */
+  readonly approvalsFile?: string;
   /** The ref as given, and the commit it resolved to — a branch name moves, a sha does not. */
   readonly ref: string;
   readonly baseCommit: string;
@@ -46,23 +64,46 @@ export async function runDiff(ref: string, dir: string): Promise<DiffResult> {
   const baseCommit = await git(repoRoot, "rev-parse", ref);
   const subdir = path.relative(repoRoot, path.resolve(dir));
 
+  // Asked of the working tree, before the base checkout exists: `git diff`
+  // compares the index and the working tree against `baseCommit`, and the
+  // temporary worktree is neither.
+  const renames = await renamedFiles(repoRoot, baseCommit, subdir);
+
   const worktree = await addWorktree(repoRoot, baseCommit);
   try {
     // The same subpath on both sides: a symbol id is relative to the
     // directory that was checked (DESIGN.md §5.3), so comparing `src` against
     // a whole repository would make every id look new.
-    const base = await analyze(path.join(worktree.root, subdir));
-    const head = await analyze(path.resolve(dir));
+    const baseDir = path.join(worktree.root, subdir);
+    const headDir = path.resolve(dir);
+    const base = await analyze(baseDir);
+    const head = await analyze(headDir);
+    // The ledger is read on both sides, because an approval counts only in
+    // the comparison that adds it (DESIGN.md §6.3).
+    const baseApprovals = loadApprovals(baseDir);
+    const headApprovals = loadApprovals(headDir);
+
+    const diff = diffAuthority(base.authority, head.authority, renames);
     return {
-      diff: diffAuthority(base.authority, head.authority),
+      diff,
+      review: reviewIncreases(diff, baseApprovals.parsed.approvals, headApprovals.parsed.approvals),
+      malformedApprovals: headApprovals.parsed.malformed,
+      ...(headApprovals.filePath
+        ? { approvalsFile: path.relative(repoRoot, headApprovals.filePath) }
+        : {}),
       ref,
       baseCommit,
       subdir,
-      dir: path.resolve(dir),
+      dir: headDir,
     };
   } finally {
     await removeWorktree(worktree);
   }
+}
+
+/** Whether the comparison fails: an increase with no approval in force (DESIGN.md §6.3). */
+export function hasUnapprovedIncrease(result: DiffResult): boolean {
+  return result.review.unapproved.length > 0;
 }
 
 /**
@@ -76,10 +117,10 @@ export async function runDiff(ref: string, dir: string): Promise<DiffResult> {
  * contract to find the one that changed.
  */
 export function formatDiffText(result: DiffResult): string {
-  const { diff } = result;
-  const increases = authorityIncreases(diff);
+  const { diff, review } = result;
   const decreases = authorityDecreases(diff);
   const deleted = deletedSymbols(diff);
+  const moved = movedSymbols(diff);
   const unknown = unknownGained(diff);
   const where = result.subdir === "" ? "the repository root" : result.subdir;
 
@@ -88,13 +129,62 @@ export function formatDiffText(result: DiffResult): string {
     "",
   ];
 
-  if (increases.length === 0) {
+  if (review.unapproved.length === 0 && review.approved.length === 0) {
     lines.push("No authority increased.", "");
-  } else {
-    lines.push(`Authority increased in ${count(increases.length, "symbol")}:`, "");
-    for (const entry of increases) {
-      lines.push(...renderIncrease(entry));
-    }
+  }
+
+  if (review.unapproved.length > 0) {
+    lines.push(
+      `${count(review.unapproved.length, "authority")} increased without approval:`,
+      "",
+      ...review.unapproved.flatMap((item) => renderIncrease(item)),
+      `Add each line above to ${result.approvalsFile ?? APPROVALS_HINT}, with the reason, and`,
+      "commit it in the same change (DESIGN.md §6.3). An approval already in the base",
+      "grants nothing.",
+      "",
+    );
+  }
+
+  // Approved increases are still printed in full. The point of the ledger is
+  // that an increase is visible to whoever reads the pull request, and a
+  // section that collapses to a count would undo exactly that.
+  if (review.approved.length > 0) {
+    lines.push(
+      `${count(review.approved.length, "authority")} increased, approved in this change:`,
+      "",
+      ...review.approved.flatMap((item) => [
+        ...renderIncrease(item, { suggestApproval: false }),
+        `      approved: ${item.approval.reason} (${result.approvalsFile ?? APPROVALS_HINT}:${item.approval.line})`,
+        "",
+      ]),
+    );
+  }
+
+  if (review.unused.length > 0) {
+    lines.push(
+      `${count(review.unused.length, "approval")} added here matched no increase and granted nothing:`,
+      ...review.unused.map(
+        (approval) =>
+          `  ${result.approvalsFile ?? APPROVALS_HINT}:${approval.line}  ${approval.symbol} ${approval.authority.kind}:${approval.authority.name}`,
+      ),
+      "",
+    );
+  }
+
+  if (result.malformedApprovals.length > 0) {
+    lines.push(
+      `${count(result.malformedApprovals.length, "line")} in ${result.approvalsFile ?? APPROVALS_HINT} did not parse as an approval and granted nothing:`,
+      ...result.malformedApprovals.map((entry) => `  line ${entry.line}: ${entry.text}`),
+      "",
+    );
+  }
+
+  if (moved.length > 0) {
+    lines.push(
+      `${count(moved.length, "symbol")} moved with a renamed file and was compared against its old path:`,
+      ...moved.map((entry) => `  ${entry.movedFrom} -> ${entry.symbol}`),
+      "",
+    );
   }
 
   // Not an increase — `unknown` is not authority (DESIGN.md §4.3) — but never
@@ -132,31 +222,42 @@ export function formatDiffText(result: DiffResult): string {
   return lines.join("\n");
 }
 
+/** Where to write an approval when the repository has no ledger yet (DESIGN.md §6.3). */
+const APPROVALS_HINT = "ambit.approvals.md";
+
 /**
- * One increased symbol: the symbol at its own position, then each authority
- * it gained with the path that carries it.
+ * One authority one symbol gained: the symbol at its own position, the
+ * authority, and the path that carries it.
  *
  * A path is shown only where the record has one. An authority a function
  * declares but does not reach has no path, and none is invented
  * (DESIGN.md §5.3).
+ *
+ * For an increase with nothing approving it, the ledger line to add follows,
+ * ready to copy — the grammar of §6.3 is a thing to paste, not to recall.
  */
-function renderIncrease(entry: SymbolAuthorityDiff): readonly string[] {
+function renderIncrease(
+  item: IncreaseItem,
+  options: { readonly suggestApproval?: boolean } = {},
+): readonly string[] {
+  const { entry, ref } = item;
   const at = entry.head ? ` (${entry.head.location.file}:${entry.head.location.line})` : "";
-  const isNew = entry.status === "new" ? "  [new symbol]" : "";
-  const lines = [`  ${entry.symbol}${at}${isNew}`];
-  for (const ref of entry.added) {
-    lines.push(`    + ${refText(ref)}`);
-    const path = pathFor(entry.head, ref);
-    for (const hop of path?.via ?? []) {
-      lines.push(`      -> ${displayName(hop.symbol)} (${hop.file}:${hop.line})`);
-    }
-    if (path?.operation) {
-      lines.push(
-        `      operation: ${path.operation.qualifiedName} (${path.operation.file}:${path.operation.line})`,
-      );
-    }
+  const what =
+    entry.status === "new" ? "  [new symbol]" : entry.status === "moved" ? "  [moved]" : "";
+  const lines = [`  ${entry.symbol}${at}${what}`, `    + ${refText(ref)}`];
+
+  const path = pathFor(entry.head, ref);
+  for (const hop of path?.via ?? []) {
+    lines.push(`      -> ${displayName(hop.symbol)} (${hop.file}:${hop.line})`);
   }
-  lines.push("");
+  if (path?.operation) {
+    lines.push(
+      `      operation: ${path.operation.qualifiedName} (${path.operation.file}:${path.operation.line})`,
+    );
+  }
+  if (options.suggestApproval !== false) {
+    lines.push(`    ${formatApprovalLine(entry.symbol, ref)}`, "");
+  }
   return lines;
 }
 
@@ -168,8 +269,15 @@ function refText(ref: AuthorityRef): string {
   return ref.kind === "effect" ? ref.name : `capability ${ref.name}`;
 }
 
+/**
+ * `1 symbol` / `2 symbols`, with the plural spelled out where appending an
+ * `s` gets it wrong — "2 authoritys" is the sort of thing a reader stops on.
+ */
+const PLURALS: Readonly<Record<string, string>> = { authority: "authorities" };
+
 function count(n: number, noun: string): string {
-  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+  if (n === 1) return `${n} ${noun}`;
+  return `${n} ${PLURALS[noun] ?? `${noun}s`}`;
 }
 
 /**
@@ -182,37 +290,58 @@ function count(n: number, noun: string): string {
  * and carries the reason without the reader opening the job log — the same
  * shape `check --format github` uses (DESIGN.md §5.1 / §6).
  *
- * Only increases are annotated. A decrease and a deletion are reported by
- * the text output and do not fail a build (§6), so an annotation on them
- * would be noise on a diff.
+ * An unapproved increase is an `error`, and carries the ledger line to add.
+ * An **approved** one is a `notice`, carrying the reason that was given: it
+ * does not fail the build, and it must still be visible on the diff, because
+ * an increase nobody sees is the thing the ledger exists to prevent (§6.3).
+ * A decrease and a deletion are reported by the text output and do not fail a
+ * build (§6), so an annotation on them would be noise on a diff.
  */
 export function formatDiffGithub(result: DiffResult): string {
   let out = "";
-  for (const entry of authorityIncreases(result.diff)) {
-    const head = entry.head;
-    if (!head) continue;
-    for (const ref of entry.added) {
-      const path = pathFor(head, ref);
-      const what = entry.status === "new" ? "new symbol" : "authority increased";
-      out += githubAnnotation({
-        severity: "error",
-        file: workspacePath(result.dir, head.location.file),
-        line: head.location.line,
-        col: head.location.col,
-        title: "ambit diff",
-        body: [
-          `${displayName(head.symbol)} gained ${refText(ref)} since ${result.ref} (${what})`,
-          ...(path?.via ?? []).map(
-            (hop) => `-> ${displayName(hop.symbol)} (${hop.file}:${hop.line})`,
-          ),
-          ...(path?.operation
-            ? [
-                `operation: ${path.operation.qualifiedName} (${path.operation.file}:${path.operation.line})`,
-              ]
-            : []),
-        ],
-      });
-    }
+  for (const item of result.review.unapproved) {
+    out += increaseAnnotation(result, item, "error", [
+      `add to ${result.approvalsFile ?? APPROVALS_HINT}: ${formatApprovalLine(item.entry.symbol, item.ref)}`,
+    ]);
+  }
+  for (const item of result.review.approved) {
+    out += increaseAnnotation(result, item, "notice", [
+      `approved in this change: ${item.approval.reason}`,
+    ]);
   }
   return out;
+}
+
+function increaseAnnotation(
+  result: DiffResult,
+  item: IncreaseItem,
+  severity: string,
+  trailer: readonly string[],
+): string {
+  const head = item.entry.head;
+  if (!head) return "";
+  const path = pathFor(head, item.ref);
+  const what =
+    item.entry.status === "new"
+      ? "new symbol"
+      : item.entry.status === "moved"
+        ? "moved, and widened"
+        : "authority increased";
+  return githubAnnotation({
+    severity,
+    file: workspacePath(result.dir, head.location.file),
+    line: head.location.line,
+    col: head.location.col,
+    title: "ambit diff",
+    body: [
+      `${displayName(head.symbol)} gained ${refText(item.ref)} since ${result.ref} (${what})`,
+      ...(path?.via ?? []).map((hop) => `-> ${displayName(hop.symbol)} (${hop.file}:${hop.line})`),
+      ...(path?.operation
+        ? [
+            `operation: ${path.operation.qualifiedName} (${path.operation.file}:${path.operation.line})`,
+          ]
+        : []),
+      ...trailer,
+    ],
+  });
 }
