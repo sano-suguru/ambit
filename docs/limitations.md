@@ -57,11 +57,12 @@ parsed and carried on the context, and nothing increments them.
 
 ## Commands and flags
 
-`ambit check` and `ambit init` are implemented, with `--format json`,
-`--format github`, `--coverage`, `--strict`, and `init --config`. `--format
-github` renders the same diagnostics as GitHub Actions workflow commands, with
-the call path folded into the annotation body; it changes no exit code. `ambit run`, `ambit agent`,
-`ambit stubs`, and `ambit sbom` are planned, not built.
+`ambit check`, `ambit init` and `ambit diff` are implemented, with `--format
+json`, `--format github`, `--coverage`, `--strict`, and `init --config`.
+`--format github` renders the same diagnostics as GitHub Actions workflow
+commands, with the call path folded into the annotation body; on `check` it
+changes no exit code. `ambit run`, `ambit agent`, `ambit stubs`, and `ambit
+sbom` are planned, not built.
 
 `ambit init` proposes `@effects` JSDoc. `ambit init --config` proposes an
 `ambit.config.ts` entry instead, for the declarations no comment can carry —
@@ -69,6 +70,47 @@ and only by appending to an existing `contracts: {` block. It creates no
 config file: the `defineConfig` import specifier depends on how the consumer
 installed Ambit, and DESIGN.md §5.3 forbids emitting a patch that may not
 apply.
+
+### What `ambit diff` can and cannot see
+
+`ambit diff <ref>` compares the working tree's authority against a base ref
+and fails on an increase. Four things it does not see, or sees differently
+from how a reader might expect:
+
+- **A function that is moved or renamed reads as a deletion plus a new
+  symbol.** A symbol id is `<path relative to the checked directory>#<declaration
+  path>` (DESIGN.md §5.3), so `src/tax.ts#calculateTax` and
+  `src/pricing/tax.ts#calculateTax` are two different symbols, and nothing
+  tries to match them up. Moving a function that already had `network`
+  therefore shows up as a new symbol holding `network` — which exits 1 — and
+  the old one as deleted. That is over-reporting, not under-reporting: the
+  alternative would be a guess about identity, and a wrong guess would hide a
+  function that gained authority on the way.
+- **Gaining `unknown` is not an increase, because unknown is not authority.**
+  A call the analysis cannot resolve means the effect set may be incomplete
+  (DESIGN.md §4.3) — it does not mean the function acquired anything. `ambit
+  diff` reports the symbols that newly reach an unresolved call in their own
+  section and exits 0 on them alone. A range that stopped being analyzable is
+  never reported as "nothing increased here", but it does not fail a build
+  either. If that matters for a directory, `check --strict` is the tool that
+  makes an unresolved call an error.
+- **A symbol with no declaration path never appears at all.** A function
+  Ambit could not extract — the `skipped` count in `--coverage`, and the
+  symbols `AMB-E003` names as having nowhere to hang a contract — has no
+  record on either side, so no comparison is made for it. Whatever authority
+  such a function gains, `ambit diff` is silent about it. The `skipped`
+  breakdown in `check --coverage` is the number to read alongside a green
+  diff.
+- **It compares two trees, so it runs the analysis twice.** There is no cache
+  and no resident path (DESIGN.md §6.2 is a separate open question), and the
+  base side is a fresh `git worktree`. Measured on this repository, one run
+  each: `check src` 1.35s, `diff HEAD src` 1.94s.
+
+The working tree's `node_modules` is symlinked into the base checkout before
+the base side is analyzed. Without it the two sides differ by their
+environment rather than by their contracts: measured on this repository, the
+base side reports 536 unresolved call sites against the head side's 517, and
+an `any-typed` unresolved reason the head side does not have at all.
 
 ## `ambit.config.ts`
 
