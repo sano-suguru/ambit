@@ -133,6 +133,20 @@ describe("diffAuthority", () => {
     expect(withoutAuthority.symbols[0]?.status).toBe("new");
   });
 
+  it("a deletion alone is not an increase, and neither is a decrease alone", () => {
+    // The two cases DESIGN.md §6 reports and passes: exit 0, not silence.
+    const deletionOnly = diffAuthority([record("src/a.ts#f", { declared: ["network"] })], []);
+    expect(hasAuthorityIncrease(deletionOnly)).toBe(false);
+    expect(deletedSymbols(deletionOnly)).toHaveLength(1);
+
+    const decreaseOnly = diffAuthority(
+      [record("src/a.ts#f", { declared: ["network"] })],
+      [record("src/a.ts#f", { declared: [] })],
+    );
+    expect(hasAuthorityIncrease(decreaseOnly)).toBe(false);
+    expect(authorityDecreases(decreaseOnly)).toHaveLength(1);
+  });
+
   it("does not count gaining unknown as an increase, but does report it", () => {
     const base = [record("src/u.ts#f", { declared: [], unknown: false })];
     const head = [record("src/u.ts#f", { declared: [], unknown: true })];

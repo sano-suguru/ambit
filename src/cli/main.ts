@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import type { CoverageReport } from "../checker/coverage.ts";
 import type { Diagnostic } from "../core/index.ts";
-import { displayName, isEffectsContract } from "../core/index.ts";
+import { displayName, hasAuthorityIncrease, isEffectsContract } from "../core/index.ts";
 import { type Analysis, analyze } from "./analyze.ts";
 import { formatDiffGithub, formatDiffText, runDiff } from "./diff.ts";
 import { githubAnnotation, workspacePath } from "./github.ts";
@@ -106,7 +106,11 @@ async function diffCommand(args: Args): Promise<number> {
   process.stdout.write(
     args.format === "github" ? formatDiffGithub(result) : formatDiffText(result),
   );
-  return EXIT_OK;
+  // An increase, or a new symbol that holds authority, fails (DESIGN.md §6).
+  // A decrease and a deletion are reported and pass: taking authority away is
+  // not the thing this command is watching for, and failing on it would give
+  // an author a reason to leave a contract alone.
+  return hasAuthorityIncrease(result.diff) ? EXIT_VIOLATIONS : EXIT_OK;
 }
 
 interface Args {

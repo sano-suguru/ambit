@@ -30,6 +30,17 @@ async function worktreeCount(): Promise<number> {
   return stdout.trim().split("\n").filter(Boolean).length;
 }
 
+async function runCli(args: readonly string[]): Promise<{ stdout: string; exitCode: number }> {
+  const cli = path.join(REPO_ROOT, "src", "cli", "main.ts");
+  try {
+    const { stdout } = await execFileAsync("node", [cli, ...args], { cwd: REPO_ROOT });
+    return { stdout, exitCode: 0 };
+  } catch (error) {
+    const e = error as { stdout?: string; code?: number };
+    return { stdout: e.stdout ?? "", exitCode: e.code ?? 1 };
+  }
+}
+
 describe("ambit diff against this repository's history", () => {
   it("reports the authority the diff command itself introduced, and removes the worktree", async () => {
     const before = await worktreeCount();
@@ -74,4 +85,34 @@ describe("ambit diff against this repository's history", () => {
     ).rejects.toThrow(/no analyzable functions found/);
     expect(await worktreeCount()).toBe(before);
   }, 120_000);
+
+  it("exits 1 when authority increased, and annotates each increase", async () => {
+    const before = await worktreeCount();
+    const { stdout, exitCode } = await runCli(["diff", BEFORE_DIFF, "src"]);
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("Authority increased in");
+    expect(await worktreeCount()).toBe(before);
+
+    const github = await runCli(["diff", BEFORE_DIFF, "src", "--format", "github"]);
+    expect(github.exitCode).toBe(1);
+    const annotations = github.stdout.split("\n").filter((line) => line.startsWith("::error "));
+    expect(annotations.length).toBeGreaterThan(0);
+    for (const annotation of annotations) {
+      expect(annotation).toContain("title=ambit diff");
+      expect(annotation).toMatch(/ gained [a-z_]+ since /);
+    }
+    expect(await worktreeCount()).toBe(before);
+  }, 180_000);
+
+  it("exits 2, not 0, when the comparison could not be made", async () => {
+    // "Could not compare" must never come out as "nothing increased".
+    const { exitCode } = await runCli(["diff", "no-such-ref-for-ambit-diff", "src"]);
+    expect(exitCode).toBe(2);
+    expect(await worktreeCount()).toBe(1);
+  }, 120_000);
+
+  it("exits 2 when given no ref at all", async () => {
+    const { exitCode } = await runCli(["diff"]);
+    expect(exitCode).toBe(2);
+  }, 60_000);
 });
