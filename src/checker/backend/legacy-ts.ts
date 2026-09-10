@@ -1451,7 +1451,9 @@ function classifyCall(
   // `legacyTsBackend: TsBackend = { extractProject }`. Genuine dynamic
   // dispatch is untouched: a receiver with no single literal behind it fails
   // the guards in `objectLiteralReceiverTarget` and stays unresolved.
-  const receiverMemberId = objectLiteralReceiverTarget(callee, checker, declaredNodeToId);
+  const receiverMemberId =
+    objectLiteralReceiverTarget(callee, checker, declaredNodeToId) ??
+    constructedInstanceMemberTarget(callee, checker, declaredNodeToId);
   if (receiverMemberId) return { location, resolvedCallee: receiverMemberId };
 
   // An import binding whose alias couldn't be followed to any declaration at
@@ -1692,6 +1694,77 @@ function objectLiteralReceiverTarget(
     return objectLiteralMemberTarget(member, checker, declaredNodeToId);
   }
   return undefined;
+}
+
+/**
+ * The extracted method a receiver bound by `const` to `new C(...)` names, when
+ * `C` is a class in this project.
+ *
+ * DESIGN.md §4.2 rule 7 requires the annotation not to change the answer:
+ * "Because it follows the entity rather than the type annotation, `const
+ * handlers: H = { read }` and `const handlers = { read }` give the same
+ * result", and "Method resolution on class instances rests on the same
+ * premise". Without this, only the unannotated form resolved — the checker
+ * lands on the class's own member for `const c = new C()`, and on the
+ * *annotation's* member signature for `const c: I = new C()`, which no
+ * declaration path names.
+ *
+ * The premise is the one §4.2 rule 7 already states and no wider: `const`
+ * fixes the binding, so the value really is that `new`; it does not freeze the
+ * properties, so `c.m = other` still defeats it. A receiver that is anything
+ * else — a parameter, a `let`, a factory result — yields nothing and stays
+ * unresolved.
+ *
+ * The `extends` chain is walked because an inherited method is the one that
+ * runs. An override is found first: members are searched from the derived
+ * class outward.
+ */
+function constructedInstanceMemberTarget(
+  callee: ts.Expression,
+  checker: ts.TypeChecker,
+  declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+): SymbolId | undefined {
+  if (!ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.expression)) {
+    return undefined;
+  }
+  const receiver = symbolTargetOf(callee.expression, checker);
+  const declaration = receiver?.declarations?.[0];
+  if (!declaration || !ts.isVariableDeclaration(declaration)) return undefined;
+  if ((declaration.parent.flags & ts.NodeFlags.Const) === 0) return undefined;
+  const initializer = declaration.initializer
+    ? unwrapTypeOnlyExpression(declaration.initializer)
+    : undefined;
+  if (!initializer || !ts.isNewExpression(initializer)) return undefined;
+
+  const name = callee.name.text;
+  const visited = new Set<ts.ClassLikeDeclaration>();
+  let current = classDeclarationOf(initializer.expression, checker);
+  while (current && !visited.has(current)) {
+    visited.add(current);
+    for (const member of current.members) {
+      if (!member.name || !ts.isIdentifier(member.name) || member.name.text !== name) continue;
+      const id = declaredNodeToId.get(member);
+      if (id) return id;
+    }
+    const base = baseTypeExpressionOf(current);
+    current = base ? classDeclarationOf(base, checker) : undefined;
+  }
+  return undefined;
+}
+
+/** The class an expression names, following import aliases. */
+function classDeclarationOf(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.ClassLikeDeclaration | undefined {
+  return symbolTargetOf(expression, checker)?.declarations?.find(ts.isClassLike);
+}
+
+/** `getSymbolAtLocation`, with an import alias followed to what it names. */
+function symbolTargetOf(expression: ts.Expression, checker: ts.TypeChecker): ts.Symbol | undefined {
+  const symbol = checker.getSymbolAtLocation(expression);
+  if (!symbol) return undefined;
+  return (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(symbol) : symbol;
 }
 
 /**

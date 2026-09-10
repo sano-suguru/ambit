@@ -224,6 +224,28 @@ describe("legacyTsBackend.extractProject", () => {
     );
   });
 
+  it("resolves a class instance through its value, annotation or not (DESIGN.md §4.2 rule 7)", async () => {
+    const { files } = await extractFixture(FIXTURE_ROOT);
+    // `typedEngine: Runner` makes the checker resolve `.run` to Runner's
+    // member signature, which no declaration path names. Following the value
+    // reaches `Engine.run` anyway, and must give the bare binding's answer.
+    const annotated = findFn(files, "call-resolution.ts#callsInstanceTypedByInterface");
+    const bare = findFn(files, "call-resolution.ts#callsBareInstance");
+    expect(bare?.calls).toContainEqual(
+      expect.objectContaining({ resolvedCallee: "call-resolution.ts#Engine.run" }),
+    );
+    expect(annotated?.calls.map((c) => c.resolvedCallee)).toEqual(
+      bare?.calls.map((c) => c.resolvedCallee),
+    );
+  });
+
+  it("walks the extends chain to the method that actually runs", async () => {
+    const { files } = await extractFixture(FIXTURE_ROOT);
+    expect(findFn(files, "call-resolution.ts#callsInheritedInstanceMethod")?.calls).toContainEqual(
+      expect.objectContaining({ resolvedCallee: "call-resolution.ts#Engine.run" }),
+    );
+  });
+
   it("leaves a call unresolved when no single object literal stands behind the receiver", async () => {
     const { files } = await extractFixture(FIXTURE_ROOT);
     for (const caller of [
@@ -235,6 +257,13 @@ describe("legacyTsBackend.extractProject", () => {
       "callsMutableLiteral",
       // A spread can override the member with something this walk cannot see.
       "callsSpreadLiteral",
+      // The same two shapes on a class instance: a parameter is any object
+      // satisfying the type, and a factory result is not a `new` this walk
+      // can see. (A `let` is deliberately absent here: a class-typed binding
+      // reaches the class's own member through the checker, before any
+      // receiver rule runs, which is a different mechanism from this one.)
+      "callsRunnerParam",
+      "callsFactoryResult",
     ]) {
       const fn = findFn(files, `call-resolution.ts#${caller}`);
       expect(fn?.calls).toContainEqual(
