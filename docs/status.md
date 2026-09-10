@@ -439,11 +439,11 @@ see. That is a property of this corpus, not of the analysis.
 | Target | Subtree | Functions | `unknown` rate, before | after |
 |---|---|---|---|---|
 | `hono` | `src` | 644 | 78.4% | **52.6%** |
-| `trpc-server` | `packages/server/src` | 196 | 82.1% | **68.9%** |
-| `elysia` | `src` | 352 | 76.7% | **54.5%** |
-| `got` | `source` | 357 | 67.2% | **55.7%** |
-| `drizzle-orm` | `drizzle-orm/src` | 2651 | 45.5% | **39.4%** |
-| **median** | | 4200 | **76.7%** | **54.5%** |
+| `trpc-server` | `packages/server/src` | 196 | 82.1% | **59.7%** |
+| `elysia` | `src` | 352 | 76.7% | **51.7%** |
+| `got` | `source` | 357 | 67.2% | **54.6%** |
+| `drizzle-orm` | `drizzle-orm/src` | 2651 | 45.5% | **39.0%** |
+| **median** | | 4200 | **76.7%** | **52.6%** |
 
 "Before" is commit `fc1bcc9`, which fixed the corpus and recorded the baseline
 before any analyzer change. `ROADMAP.md`'s target is 30% for an adopting team
@@ -452,30 +452,59 @@ adopting team.
 
 What moved the number, in the order the measurement said to take it:
 
-| Change | `builtin-method` unresolved | median |
-|---|---|---|
-| baseline | 2856 | 76.7% |
-| default-lib classification (`pure-builtins.ts`, `mutating-builtins.ts`, `builtin-effects.ts`, Fetch API constructors) | 796 | 55.7% |
-| by-reference callbacks resolved from the actual argument (§4.2 rule 4) | 640 | 54.5% |
+| Change | median |
+|---|---|
+| baseline | 76.7% |
+| default-lib classification (`pure-builtins.ts`, `mutating-builtins.ts`, `builtin-effects.ts`, Fetch API constructors) | 55.7% |
+| by-reference callbacks resolved from the actual argument (§4.2 rule 4) | 54.5% |
+| calls to a function whose body this summary already walked (`inlined`) | 54.0% |
+| the locality rule applied to argument-position mutators (`Object.assign`) | 52.6% |
 
-The same two changes take `check src --coverage` from 62.9% to **37.0%**
-(115/311 functions; the denominator grew from 302 with the helpers the changes
+The same changes take `check src --coverage` from 62.9% to **37.3%**
+(117/314 functions; the denominator grew from 302 with the helpers the changes
 added) and `check test/fixtures/realistic-api --coverage` from 20.8% to
 **18.9%** (10/53).
 
-What is left is mostly not addressable by a table. Of 4171 unresolved call
-sites: `unresolved-symbol` 1723 (of which roughly 500 are calls to nested
-function declarations — §12's "Nested function declarations and the locality
-rule"), `any-typed` 1067 (the uninstalled-dependency cost above),
-`builtin-method` 640, `callback-parameter` 432 (a higher-order function calling
+### Why 30% is not reachable on this corpus
+
+Counting unresolved *call sites* stops being useful once a function reaches
+several of them: what decides the KPI is how many functions have **no**
+unresolved call left. Re-running the propagation with one whole reason category
+treated as fully resolved gives the ceiling each category can buy, and no
+category is close to enough on its own:
+
+| Hypothesis | median |
+|---|---|
+| as measured | 52.6% |
+| every `builtin-method` site resolved | 48.9% |
+| every `unresolved-symbol` site resolved | 48.6% |
+| every `callback-parameter` site resolved | 49.4% |
+| every `any-typed` site resolved | 42.0% |
+| `any-typed` **and** `import-binding` resolved — the upper bound for installing the corpus's dependencies | 40.6% |
+| those **plus** every `unresolved-symbol` site | 34.4% |
+| every unresolved site of every kind resolved | 5.9% |
+
+The row that matters is the second-to-last. Installing the dependencies — the
+one lever that is not an analysis improvement at all — would leave the median at
+**40.6%** even if every resulting call then resolved perfectly, which it would
+not. Reaching 30% needs three whole categories eliminated at once, and two of
+them (`any-typed`, `callback-parameter`) are not things a stub table or a
+resolution rule can answer: the first is a call through a type the compiler has
+given up on, the second is a higher-order function calling its own parameter,
+which §4.2 rule 4 leaves `unknown` without per-call-site specialization.
+
+What is left is mostly not addressable by a table. Of 3781 unresolved call
+sites: `unresolved-symbol` 1397 (a call to a nested function no longer counts here — its
+body is walked into the caller's summary and the site is tallied as `inlined`
+— but the nested function still has no id of its own, §12's "Nested function
+declarations and the locality rule"), `any-typed` 1067 (the uninstalled-dependency cost above),
+`builtin-method` 543, `callback-parameter` 432 (a higher-order function calling
 its own parameter, which §4.2 rule 4 leaves `unknown` without inter-procedural
 argument tracking), `overload-without-body` 175, `import-binding` 134.
 
-The 640 remaining `builtin-method` sites are the names the tables refuse on
+The 543 remaining `builtin-method` sites are the names the tables refuse on
 purpose, and they are worth naming because a reader will otherwise assume they
-were missed: `Object.assign` / `Object.freeze` / `Reflect.set` (51 + 20 + 4)
-mutate an *argument*, and §4.2's locality rule reads the receiver, so neither
-the pure table nor the mutating one can answer for them; the `ReadableStream`
+were missed: the `ReadableStream`
 controllers and readers, `Body.json` / `Response.json` (about 120 together)
 depend on what the object is backed by; `console.*` (45) writes to a stream
 §4.2's effect table has no name for. Each is `unknown`, which is the honest

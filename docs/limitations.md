@@ -306,9 +306,11 @@ matters as much:
   alias analysis: a fresh value handed to something else and mutated
   afterwards still reads as local.
 - A name that mutates an *argument* rather than its receiver — `Object.assign`,
-  `Object.freeze`, `Object.defineProperty`, `Reflect.set` — is in neither
-  table. The locality rule reads the receiver, which for these is the `Object`
-  or `Reflect` global; it would answer a question about the wrong value.
+  `Object.freeze`, `Object.defineProperty`, `Reflect.set` — has its own table,
+  and the locality rule is applied to that argument. `Object.assign({}, x)`
+  writes into a value the function just allocated and carries nothing;
+  `Object.assign(arg, x)` is `state_write`. `Reflect.apply` is not there: it
+  runs a function rather than writing into one, and stays `unknown`.
 - A name whose effect depends on what the object is backed by — `Body.json`
   and `Response.json`, a `ReadableStream`'s reader and controller,
   `SubtleCrypto` — is left `unknown`. A `Response` body can be a socket.
