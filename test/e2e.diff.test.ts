@@ -116,4 +116,15 @@ describe("ambit diff against this repository's history", () => {
     const { exitCode } = await runCli(["diff"]);
     expect(exitCode).toBe(2);
   }, 60_000);
+
+  it("exits 2 rather than silently ignoring a flag it does not act on", async () => {
+    // `--strict` accepted and dropped would make a green diff read as
+    // "strict found nothing" (DESIGN.md §3.4).
+    for (const flag of [["--coverage"], ["--strict"], ["--config"], ["--format", "json"]]) {
+      const { exitCode } = await runCli(["diff", "HEAD", "src", ...flag]);
+      expect(exitCode, `diff should reject ${flag.join(" ")}`).toBe(2);
+    }
+    const supported = await runCli(["diff", "HEAD", "src", "--format", "github"]);
+    expect(supported.exitCode).toBe(0);
+  }, 180_000);
 });

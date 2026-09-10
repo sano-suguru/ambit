@@ -191,6 +191,28 @@ function parseArgs(argv: readonly string[]): Args {
     }
     ref = first;
     if (second !== undefined) dir = second;
+    // A flag `diff` does not act on is an error, not something to drop
+    // quietly: an author who wrote `--strict` and got a green diff would
+    // read it as "strict found nothing" (DESIGN.md §3.4, the same reason an
+    // unknown option exits 2 rather than running).
+    const inert = [
+      ...(coverage ? ["--coverage"] : []),
+      ...(strict ? ["--strict"] : []),
+      ...(config ? ["--config"] : []),
+      ...(format === "json" ? ['--format "json"'] : []),
+    ];
+    if (inert.length > 0) {
+      return {
+        command,
+        dir,
+        ref,
+        format,
+        coverage,
+        strict,
+        config,
+        error: `diff does not support ${inert.join(", ")} (diff takes --format text or github)`,
+      };
+    }
   } else {
     const [first] = positionals;
     if (first !== undefined) dir = first;

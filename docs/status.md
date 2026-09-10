@@ -15,7 +15,7 @@ path, and M2–M4 are partial. The details are per row.
 ## Baseline commands
 
 ```sh
-pnpm test                     # 411 tests, 27 files — pass
+pnpm test                     # 412 tests, 27 files — pass
 pnpm exec tsc --noEmit        # pass
 ./node_modules/.bin/biome ci .  # pass
 node src/cli/main.ts check src --coverage   # exit 0
@@ -662,7 +662,7 @@ it is a claim the tree no longer supports.
 | Spec section | §4.2, §4.3, §5.1–5.3, §6.2 |
 | Acceptance | dogfooding on Ambit itself; diagnostics update on a contract-comment-only change; schema and measurement conditions fixed |
 | Implemented | `@effects` parsing and propagation (rules 1–7 incl. cycles, constructors, `super`, object literals), `unknown`, `--coverage` (with a `declared-by` jsdoc/config split), NDJSON diagnostics with `engine`, a `kind: "authority"` NDJSON record per function (§5.1), `ambit diff <ref>` comparing the working tree's authority against a base ref and exiting 1 on an increase (§6), `--strict`, `fixes[].edits` for AMB-E001, `ambit init` contract inference. `ambit.config.ts` (§4.1): out-of-code contracts for all five tags, JSDoc-wins merging with `AMB-W005` on a difference, `AMB-W006` for an exact key that matches nothing, user-defined effects usable from both JSDoc and config, per-directory `strict`, and `ambit init --config` for the declarations no comment can carry |
-| Evidence | `test/{effects,propagate,summarize,diagnose,construction,cli,fix}.test.ts`; `test/authority-diff.test.ts` (17, the comparison as a pure function, no repository), `test/diff-output.test.ts` (13, the text and GitHub renderings), `test/e2e.diff.test.ts` (7, against this repository's own history, asserting the worktree is gone after every path); `check src --coverage` exit 0; `test/backend.legacy-ts.test.ts` self-hosting block; `test/init.test.ts` round-trips every proposal through `check`; `test/e2e.config.test.ts` (15 cases, all through the CLI as a subprocess); `test/e2e.realistic.test.ts` round-trips `init --config`; `test/e2e.install.test.ts` loads a config that imports `ambit/config` from the installed package |
+| Evidence | `test/{effects,propagate,summarize,diagnose,construction,cli,fix}.test.ts`; `test/authority-diff.test.ts` (17, the comparison as a pure function, no repository), `test/diff-output.test.ts` (13, the text and GitHub renderings), `test/e2e.diff.test.ts` (8, against this repository's own history, asserting the worktree is gone after every path); `check src --coverage` exit 0; `test/backend.legacy-ts.test.ts` self-hosting block; `test/init.test.ts` round-trips every proposal through `check`; `test/e2e.config.test.ts` (15 cases, all through the CLI as a subprocess); `test/e2e.realistic.test.ts` round-trips `init --config`; `test/e2e.install.test.ts` loads a config that imports `ambit/config` from the installed package |
 | Outstanding | **The price table is not implemented** — `@budget costUsd` parses, carries and is compared, and nothing prices an LLM call, so it is never enforced (§4.5). Config has no `stubs` key either: a package's effect definitions still come only from `src/stubs/` (§4.2). **No resident or incremental check** (§6.2) — measured above: a re-check costs the same as a first check. **No versioned JSON Schema** for the diagnostic format (§5.2); the shape is fixed in code and documented, not schema-validated. |
 
 ### M2 — capabilities, budget, runtime hooks, framework adapters, 50 stubs
