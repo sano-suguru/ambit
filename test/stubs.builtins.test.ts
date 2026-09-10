@@ -174,6 +174,24 @@ describe("end to end on test/fixtures/builtins", () => {
     }
   });
 
+  it("settles a destructive method's comparator by rule 4, not by the mutation verdict", async () => {
+    // Regression: the mutation verdict covers the receiver only. A comparator
+    // that names a function under analysis contributes that function's
+    // effects; an opaque one still leaves the call `unknown`
+    // (DESIGN.md §4.2, "Local mutation and `pure`").
+    const { diagnostics } = await analyze();
+    const referenced = diagnostics.find((d) =>
+      d.message.startsWith("sortsItsOwnArrayWithAReferencedComparator "),
+    );
+    expect(referenced?.id).toBe("AMB-E001");
+    expect(observedEffects(referenced)).toContain("network");
+    expect(referenced?.message).toContain("byLengthThenFetch");
+    // The receiver is local, so the mutation itself still carries nothing.
+    expect(observedEffects(referenced)).not.toContain("state_write");
+
+    expect(await unknownOf("sortsItsOwnArrayWithAnOpaqueComparator")).toBe(true);
+  });
+
   it("reads a receiver-mutating WHATWG method through the locality rule", async () => {
     // The same call, twice: on an argument it is `state_write`, on a value the
     // function allocated itself it carries nothing (DESIGN.md §4.2, "Local

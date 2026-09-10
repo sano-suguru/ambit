@@ -283,7 +283,7 @@ Like rule 7, this is **not a soundness claim**. If a locally created value is ha
 
 The table of destructive methods follows the same inclusion rule as the `pure` table. Only names that showed up in measurements, and their in-place-mutation sibling methods on the same builtin type, are listed; when in doubt, not listed. In either table, an omission merely falls to `unknown`; it does not break in the direction of widening a guarantee.
 
-A destructive method that takes a callback by reference (`arr.sort(cmp)`) carries `unknown` by rule 4. If the root is externally reachable it holds both `state_write` and `unknown`.
+A destructive method that takes a callback by reference (`arr.sort(cmp)`) is settled by rule 4, on the actual argument: if `cmp` names a function under analysis, the method carries that function's effects, and if it does not, it carries `unknown`. Either way the receiver's own verdict is unchanged, so an externally reachable root holds `state_write` alongside whatever the callback contributed.
 
 **Handling of invalid tags**
 

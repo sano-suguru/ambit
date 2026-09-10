@@ -321,6 +321,31 @@ describe("legacyTsBackend.extractProject (self-hosting)", () => {
       expect.objectContaining({ mutation: expect.objectContaining({ escaping: true }) }),
     );
   });
+
+  it("follows Ambit's own `fn.calls.flatMap(toCalls)` to the function it names", async () => {
+    // A by-reference callback whose target is reached through a same-file
+    // declaration inside a nested arrow, on a `ReadonlyArray` receiver: the
+    // shape `test/fixtures/builtins` cannot produce, because there the
+    // referenced function is not also the one doing the referencing. Before
+    // DESIGN.md §4.2 rule 4 was applied to the actual argument, this call was
+    // the most frequent `ReadonlyArray.map` entry in `check src --coverage`.
+    const { files } = await extractFixture(SRC_ROOT);
+    const summarize = files
+      .find((f) => f.filePath === "checker/summarize.ts")
+      ?.functions.find((fn) => fn.id === "checker/summarize.ts#summarizeExtractedFiles");
+    expect(summarize?.calls).toContainEqual(
+      expect.objectContaining({
+        pureBuiltinName: "ReadonlyArray.flatMap",
+        callbackTargets: ["checker/summarize.ts#toCalls"],
+      }),
+    );
+    expect(summarize?.calls).not.toContainEqual(
+      expect.objectContaining({
+        pureBuiltinName: "ReadonlyArray.flatMap",
+        callbackByReference: true,
+      }),
+    );
+  });
 });
 
 describe("legacyTsBackend.extractProject (cross-module alias resolution)", () => {

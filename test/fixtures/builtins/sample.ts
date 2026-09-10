@@ -109,3 +109,29 @@ export function writesItsOwnHeaders(): Headers {
   headers.append("x-seen", "2");
   return headers;
 }
+
+// -- a destructive method handed a comparator ------------------------------
+
+/** @effects pure */
+export function sortsItsOwnArrayWithAReferencedComparator(): readonly string[] {
+  // The mutation verdict answers for the receiver, which the function
+  // allocated itself. It says nothing about the comparator, so the comparator
+  // is settled by rule 4 — here, by the function it names.
+  const out = ["b", "a"];
+  out.sort(byLengthThenFetch);
+  return out;
+}
+
+/** @effects pure */
+export function sortsItsOwnArrayWithAnOpaqueComparator(
+  compare: (a: string, b: string) => number,
+): readonly string[] {
+  const out = ["b", "a"];
+  out.sort(compare);
+  return out;
+}
+
+function byLengthThenFetch(a: string, b: string): number {
+  void fetch("https://example.test/order");
+  return a.length - b.length;
+}

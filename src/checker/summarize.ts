@@ -419,13 +419,15 @@ export type EffectAliases = ReadonlyMap<string, readonly KnownEffect[]> | undefi
  * higher-order call's callback effects are "inferred from the actual argument
  * at the call site", and when that argument names a function this project
  * extracted, the argument *is* the answer. Only a callee already known to
- * invoke what it is handed produces them, so a call that merely inspects a
- * function value gains no edge (`src/stubs/pure-builtins.ts`,
- * `HIGHER_ORDER_BUILTINS`).
+ * invoke what it is handed produces them — a higher-order allowlisted builtin
+ * or constructor, or a mutating builtin, whose verdict covers the receiver and
+ * not the comparator it was given. A call that merely inspects a function
+ * value gains no edge (`src/stubs/pure-builtins.ts`, `HIGHER_ORDER_BUILTINS`).
  */
 function toCalls(site: CallSite): readonly Call[] {
   const call = toCall(site);
   if (!site.callbackTargets || !invokesItsCallableArguments(call)) return [call];
+
   return [
     call,
     ...site.callbackTargets.map(
@@ -442,6 +444,11 @@ function toCalls(site: CallSite): readonly Call[] {
  * to the caller there would add effects without removing the uncertainty.
  */
 function invokesItsCallableArguments(call: Call): boolean {
+  // A mutating builtin that was handed a comparator runs it — `arr.sort(cmp)`
+  // is the case DESIGN.md §4.2 names. The mutation verdict answers what
+  // happens to the receiver and says nothing about the comparator, so without
+  // the edge the comparator's effects would simply vanish.
+  if (call.kind === "mutation") return true;
   if (call.kind !== "known-pure" || call.qualifiedName === undefined) return false;
   return isConstructorKey(call.qualifiedName)
     ? isHigherOrderConstructor(call.qualifiedName)

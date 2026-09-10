@@ -169,8 +169,10 @@ export interface CallSite {
    *
    * It is a fact about the call, not a verdict: `src/checker/summarize.ts`
    * turns these into call-graph edges only where the callee itself is known
-   * to invoke a function argument, so a method that merely inspects one
-   * (`Array.isArray(fn)`) gains no edge it does not have.
+   * to invoke what it is handed — a higher-order allowlisted builtin, or a
+   * mutating one whose verdict covers only its receiver (`arr.sort(cmp)`) —
+   * so a method that merely inspects a function value (`Array.isArray(fn)`)
+   * gains no edge it does not have.
    */
   readonly callbackTargets?: readonly SymbolId[];
   /**
