@@ -45,7 +45,8 @@ export const CONTRACT_TAGS: ReadonlySet<string> = new Set([
  * Peak RSS of this process's own child processes, in MiB.
  *
  * A backend that runs the analysis out of process pays for two heaps, and
- * §3.5 gate 4 asks for 「親子プロセスを含むメモリ」. The client exposes no pid,
+ * §3.5 gate 4 asks for "memory including child processes". The client
+ * exposes no pid,
  * so the children are found through the process table; a backend with no child
  * simply reports 0.
  */

@@ -13,8 +13,9 @@ import { checkCapabilities } from "./enforce.ts";
  * (`$extends`) returns a *new* client and so cannot be undone (P5).
  *
  * What this does **not** do: derive a table from the statement. §4.4 is
- * explicit — 「DB クライアントへのフックの存在だけで、任意の SQL のテーブル
- * 単位権限を判定できるとみなさない」 — so the target is the database the
+ * explicit — "the mere existence of a hook into a DB client is not taken to
+ * mean that table-level permissions can be decided for arbitrary SQL" — so the
+ * target is the database the
  * connection names, and the exception says so rather than leaving the reader
  * to assume table granularity.
  */

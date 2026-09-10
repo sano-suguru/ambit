@@ -320,7 +320,7 @@ try {
   }, 60_000);
 
   /**
-   * The Hono adapter (DESIGN.md §4.4「契約とハンドラの対応付け（決定）」),
+   * The Hono adapter (DESIGN.md §4.4, "Mapping contracts to handlers"),
    * driven by real HTTP requests to a real server. `ambitHandler` registers
    * the route, so the context comes from the registration and not from a
    * hand-written `withAmbit` — which is the whole claim being tested.
@@ -453,7 +453,7 @@ const CASES = (p) => [
     expect(results.warns).toEqual({ status: 200, body: { done: true } });
   }, 60_000);
 
-  it("stops enforcing once the hook is removed (P5: 撤退できること)", async () => {
+  it("stops enforcing once the hook is removed (P5: backing out)", async () => {
     const before = seen.length;
     const { stdout } = await runScript(`
 import { withAmbit, installFetchHook } from "ambit/runtime";

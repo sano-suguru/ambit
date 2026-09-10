@@ -37,8 +37,8 @@ import {
 /**
  * Compare declared vs. observed effects for every declared function and
  * produce diagnostics (DESIGN.md §5.1). Undeclared functions
- * (`declared.kind === "none"`) are not diagnosed here — see the plan's note
- * on §4.2/§4.3: undeclared is a coverage concern, not a propagation input.
+ * (`declared.kind === "none"`) are not diagnosed here — see §4.2/§4.3:
+ * undeclared is a coverage concern, not a propagation input.
  *
  * `engine` identifies the backend that produced `state` (DESIGN.md §3.4) and
  * is attached to every diagnostic emitted.
@@ -68,7 +68,8 @@ export function diagnose(
  * declaration means restructuring the code — moving the effectful call to a
  * caller that is allowed to make it — and Ambit cannot generate that patch
  * safely. DESIGN.md §5.3 forbids inventing one for the sake of ranking:
- * 「生成できない候補を順位のために捏造しない」. So this fix is always
+ * "Candidates that cannot be generated are not fabricated for the sake of
+ * ranking". So this fix is always
  * `consistentWithContract: false`, and `impact` says what widening costs.
  */
 function buildWidenFix(
@@ -167,7 +168,8 @@ function diagnoseEffects(
 }
 
 /**
- * DESIGN.md §4.4's 縮小則: a callee may not require a capability its caller
+ * DESIGN.md §4.4's narrowing rule: a callee may not require a capability its
+ * caller
  * does not grant. A function's own declaration is the grant; what its body
  * reaches is the requirement.
  */
@@ -438,8 +440,9 @@ function diagnoseBudget(
 }
 
 /**
- * DESIGN.md §4.4: 「エントリポイントは `@entrypoint` と `@capabilities` を…
- * 明示する。未指定は unknown 相当として警告」. An entrypoint is where the
+ * DESIGN.md §4.4: "An entry point states `@entrypoint` and `@capabilities`
+ * explicitly … Leaving them unspecified is warned about as equivalent to
+ * `unknown`". An entrypoint is where the
  * runtime establishes a capability context; one with no capability set
  * establishes nothing to check against.
  */
@@ -586,7 +589,7 @@ const UNCARRIED_REASON: Record<SkippedFunctionKind, string> = {
 
 /**
  * A contract tag written on a function-like node the backend does not extract
- * (DESIGN.md §4.1 permits `@effects` on 任意の関数・メソッド, but only an
+ * (DESIGN.md §4.1 permits `@effects` on any function or method, but only an
  * extracted node has a `SymbolId` to hang one on). Reported rather than
  * dropped, on the same principle as AMB-E002: a declaration that silently does
  * nothing looks like a guarantee and is not one.
@@ -613,8 +616,8 @@ export function diagnoseUncarriedContracts(
 
 /**
  * JSDoc and `ambit.config.ts` declare the same tag for one symbol and the two
- * do not agree (DESIGN.md §4.1: 「同一シンボルに JSDoc と config の両方が
- * あれば JSDoc を優先し、差異を警告する」).
+ * do not agree (DESIGN.md §4.1: "If a symbol has both JSDoc and config,
+ * JSDoc wins and the difference is warned about").
  *
  * A warning, not an error: JSDoc winning is the specified behaviour, so the
  * run is doing the right thing — but a config entry that is being ignored is
@@ -726,7 +729,8 @@ const HANDLER_NOT_IN_THIS_FILE =
  * This compares the two **as source**, half by half: the capability set
  * (`AMB-E010`) and the budget (`AMB-E011`) are fixed by the source
  * independently, so one may be comparable when the other is not. §12's
- * 「契約とハンドラの対応付け」 — matching a contract to a handler after a build
+ * "Mapping contracts to handlers" — matching a contract to a handler after a
+ * build
  * strips the comments, or after a bundler moves it — stays open, and a half
  * this comparison cannot reach is reported (`AMB-W004`) rather than passed
  * over.

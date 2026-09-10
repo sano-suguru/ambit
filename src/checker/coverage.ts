@@ -22,7 +22,8 @@ export interface CoverageReport {
   readonly functionsDeclared: number;
   /**
    * How {@link functionsDeclared} splits by where the declaration was written
-   * (DESIGN.md §4.1「コード外宣言」). Reported apart because the two are not
+   * (DESIGN.md §4.1, "Out-of-code declarations"). Reported apart because the
+   * two are not
    * interchangeable evidence: a JSDoc contract travels with the code and
    * survives the package being removed (P5), while a config contract is a
    * statement *about* code that was not touched — often third-party or
@@ -34,7 +35,8 @@ export interface CoverageReport {
   /**
    * Functions whose body is excluded from static analysis by `@boundary`
    * (DESIGN.md §4.6). Counted apart from everything else because §4.3
-   * requires it: 「境界への移行は解析成功と区別して集計する」. A boundary is a
+   * requires it: "Moving something to a boundary is tallied separately from
+   * succeeding at analysis". A boundary is a
    * declared hole, and a coverage figure that folded it into the resolved
    * count would report the hole as progress.
    */
@@ -45,8 +47,9 @@ export interface CoverageReport {
   readonly functionsSkipped: number;
   readonly skippedByKind: ReadonlyMap<SkippedFunctionKind, number>;
   /**
-   * The primary KPI (DESIGN.md §4.3 and `ROADMAP.md`, "the plan's note on
-   * measuring extraction coverage before trusting it"): the fraction of *all* extracted functions
+   * The primary KPI (DESIGN.md §4.3: "`ambit check --coverage` outputs the
+   * proportion of the codebase that depends on `unknown` and where it occurs.
+   * It is treated as a primary KPI"): the fraction of *all* extracted functions
    * — declared or not — whose propagated effect set carries `unknown`. This
    * is what a user actually cares about ("can Ambit say anything definite
    * about this function?"), not the raw call-site resolution rate below,
@@ -58,7 +61,8 @@ export interface CoverageReport {
    * {@link functionUnknownRate} because tagging a function `@boundary` moves
    * it out of the unknown numerator while leaving it in the denominator.
    * Without this figure beside it, declaring boundaries would read as an
-   * improving KPI (DESIGN.md §4.3: 「境界への移行は解析成功と区別して集計する」).
+   * improving KPI (DESIGN.md §4.3: "Moving something to a boundary is tallied
+   * separately from succeeding at analysis").
    * The two rates together are the fraction of functions whose contract is
    * not backed by a verified body.
    */
@@ -68,7 +72,7 @@ export interface CoverageReport {
   readonly callSitesStub: number;
   readonly callSitesPure: number;
   /**
-   * In-place mutation sites (DESIGN.md §4.2, 「ローカル変異と `pure`」).
+   * In-place mutation sites (DESIGN.md §4.2, "Local mutation and `pure`").
    * Counted apart from `callSitesPure` and `callSitesStub`: a local mutation
    * carries no effect but is not the same evidence as a call proven pure, and
    * an escaping one is a `state_write` that no stub table produced.

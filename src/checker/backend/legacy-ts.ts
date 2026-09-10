@@ -56,8 +56,9 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
   const absoluteRoot = path.resolve(rootDir);
 
   // A missing/non-directory target must fail loudly, not silently produce
-  // zero files (DESIGN.md §3.4: "起動不能、未対応設定、解析失敗を
-  // 「違反なし」に変換しない"). Without this check, ts.findConfigFile still
+  // zero files (DESIGN.md §3.4: "Do not convert a failure to start, an
+  // unsupported setting, or an analysis failure into 'no violations'").
+  // Without this check, ts.findConfigFile still
   // walks upward from a nonexistent path and can find an unrelated ancestor
   // tsconfig.json, silently analyzing the wrong (or no) files.
   if (!fs.existsSync(absoluteRoot) || !fs.statSync(absoluteRoot).isDirectory()) {
@@ -253,11 +254,10 @@ type FunctionLikeDeclaration =
  * Walk a source file collecting function declarations, class methods,
  * variable-declared function/arrow expressions, and the identifier-named
  * members of a module-scope `const` object literal — each paired with its
- * "."-joined declaration path (DESIGN.md §5.3's "ファイル・宣言経路など
- * との対応"). Anonymous functions and functions nested inside another
- * function's body are out of scope for this slice (plan: "最初の垂直
- * スライス" §含むもの) — nested closures' calls are still walked and
- * attributed to their enclosing named declaration.
+ * "."-joined declaration path (DESIGN.md §5.3: "A symbol ID's declaration
+ * path is joined with `"."`"). Anonymous functions and functions nested
+ * inside another function's body are not extracted — nested closures' calls
+ * are still walked and attributed to their enclosing named declaration.
  */
 function collectFunctionLikeDeclarations(
   sourceFile: ts.SourceFile,
@@ -813,8 +813,8 @@ function isFunctionValuedProperty(member: ts.ClassElement): member is ts.Propert
  *
  * The framework adapters are here because DESIGN.md §4.4 chose explicit
  * registration: a literal `spec` beside a same-file handler *is* that
- * handler's `@capabilities` and `@budget`（§4.4「二重宣言を消す（決定:
- * 2026-09-10）」）, so a registration this pass cannot see would take the
+ * handler's `@capabilities` and `@budget` (§4.4, "Removing the double
+ * declaration"), so a registration this pass cannot see would take the
  * declaration with it — and where a project does write the JSDoc tag as well,
  * the agreement check (`AMB-E010` / `AMB-E011`) has to reach the registration
  * or the duplication would go uncompared. All three take `(spec, handler, …)`
@@ -1005,7 +1005,8 @@ function numericLiteralOf(node: ts.Expression): number | undefined {
  * reader sees together — the JSDoc above the handler and the spec beside it.
  * A handler declared elsewhere is reported as uncompared (`AMB-W004`), not
  * silently accepted; whether the same equality is the right test across files
- * is part of §12's 「契約とハンドラの対応付け」, which this does not settle.
+ * is part of §12's "Mapping contracts to handlers", which this does not
+ * settle.
  */
 function sameFileHandlerOf(
   handler: ts.Expression | undefined,
@@ -1115,8 +1116,8 @@ function collectCalls(
       );
     } else {
       // Assignments are not calls, but they mutate exactly the same way a
-      // mutating builtin method does (DESIGN.md §4.2, 「ローカル変異と
-      // `pure`」), so they enter the same array.
+      // mutating builtin method does (DESIGN.md §4.2, "Local mutation and
+      // `pure`"), so they enter the same array.
       const mutation = classifyAssignment(node, sourceFile, checker, absoluteRoot, decl);
       if (mutation) calls.push(mutation);
     }
@@ -1244,7 +1245,7 @@ function classifyConstruct(
       callbackByReference:
         (ts.isNewExpression(site) && hasOpaqueCallableArgument(site, checker)) || undefined,
       // `new Date()` reads the clock; `new Date(2020, 0, 1)` does not
-      // (DESIGN.md §4.2 lists 時刻 under `env`).
+      // (DESIGN.md §4.2 lists the clock under `env`).
       constructedWithoutArguments:
         (ts.isNewExpression(site) ? (site.arguments?.length ?? 0) === 0 : true) || undefined,
     };
@@ -1291,8 +1292,8 @@ function unwrapNonNullAssertions(expression: ts.Expression): ts.Expression {
  * it is extracted (`collectFunctionLikeDeclarations`), so a call that stopped
  * at `declarations[0]` would reach a node with no id and no body — and a
  * body-less node infers an empty effect set, which reads as `pure` however the
- * implementation behaves. DESIGN.md §3.2 names this case: 「オーバーロードでは
- * 選択された宣言に本体がない場合があり」.
+ * implementation behaves. DESIGN.md §3.2 names this case: "With overloads
+ * the selected declaration may have no body".
  *
  * Returning the first declaration when nothing has a body is deliberate: the
  * caller needs a node to classify (ambient vs. project, parameter vs.
@@ -1598,8 +1599,9 @@ function objectLiteralReceiverTarget(
 }
 
 /**
- * The assignment-shaped mutation at `node`, if any (DESIGN.md §4.2, 「ローカル
- * 変異と `pure`」): `a.b = 1`, `a.b += 1`, `a.b++`, `delete a.b`, and a write
+ * The assignment-shaped mutation at `node`, if any (DESIGN.md §4.2, "Local
+ * mutation and `pure`"): `a.b = 1`, `a.b += 1`, `a.b++`, `delete a.b`, and a
+ * write
  * to a binding declared outside `enclosing`.
  *
  * Reassigning a variable the function itself declared (`let i = 0; i++`) is
@@ -1618,7 +1620,7 @@ function classifyAssignment(
 
   // A destructuring assignment writes to several places at once; one escaping
   // leaf makes the whole statement a `state_write` (DESIGN.md §4.2,
-  // 「ローカル判定の規則」).
+  // "The rule for deciding locality").
   const escaping = assignmentLeavesOf(target).some(
     (leaf) => !isLocalAssignmentLeaf(leaf, enclosing, checker),
   );
@@ -1706,7 +1708,8 @@ function isAssignmentOperator(kind: ts.SyntaxKind): boolean {
 
 /**
  * Whether the value `target` writes through was allocated inside `enclosing`
- * — the locality rule of DESIGN.md §4.2, 「ローカル判定の規則」, deliberately
+ * — the locality rule of DESIGN.md §4.2, "The rule for deciding locality",
+ * deliberately
  * as narrow as §4.2 rule 7 and, like it, not a soundness claim: a fresh value
  * handed to something else before being mutated still reads as local, because
  * Ambit does no alias analysis.

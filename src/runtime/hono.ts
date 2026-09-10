@@ -3,7 +3,7 @@ import type { AmbitSpec } from "./index.ts";
 import { withAmbit } from "./index.ts";
 
 /**
- * The Hono adapter (DESIGN.md §4.4「契約とハンドラの対応付け（決定）」).
+ * The Hono adapter (DESIGN.md §4.4, "Mapping contracts to handlers").
  *
  * `hono` is imported for **types only** and is a devDependency here, never a
  * dependency of the published package — the same reason `installPgHook(pg)`

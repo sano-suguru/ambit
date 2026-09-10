@@ -4,8 +4,8 @@
  * checker or on `typescript`.
  *
  * Runtime enforcement is a separate entry (`ambit/runtime`) so a production
- * process imports only what it needs (DESIGN.md §6: 「本番では
- * `@ambit/runtime` と必要なアダプタ・契約データを利用する。コンパイラや開発用
- * CLI を本番の必須依存にしない」).
+ * process imports only what it needs (DESIGN.md §6: "Production uses
+ * `@ambit/runtime` and the necessary adapters and contract data. The compiler
+ * and the development CLI are not made required production dependencies").
  */
 export * from "./core/index.ts";

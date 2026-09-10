@@ -136,7 +136,7 @@ describe("withAmbit + installFetchHook (mock-level)", () => {
     expect(() => withAmbit({ capabilities: ["db:read"] }, async () => 1)).toThrow(TypeError);
   });
 
-  it("restores the previous fetch on teardown (P5: 撤退できること)", () => {
+  it("restores the previous fetch on teardown (P5: backing out)", () => {
     withStubbedFetch(() => {
       const before = globalThis.fetch;
       const restore = installFetchHook();
@@ -319,7 +319,7 @@ describe("installFsHook (DESIGN.md §4.4 (b))", () => {
     }
   });
 
-  it("restores every patched member (P5: 撤退できること)", async () => {
+  it("restores every patched member (P5: backing out)", async () => {
     const before = { readFileSync: fs.readFileSync, readFile: fs.readFile, open: fs.open };
     const beforePromise = fsPromises.readFile;
     const restore = installFsHook();
@@ -388,7 +388,7 @@ describe("installChildProcessHook (DESIGN.md §4.4 (b))", () => {
     }
   });
 
-  it("restores every patched member (P5: 撤退できること)", async () => {
+  it("restores every patched member (P5: backing out)", async () => {
     const before = childProcess.execFileSync;
     const restore = installChildProcessHook();
     expect(childProcess.execFileSync).not.toBe(before);
@@ -486,7 +486,7 @@ describe("installPgHook (DESIGN.md §4.4 (c))", () => {
     }
   });
 
-  it("restores both prototypes (P5: 撤退できること)", async () => {
+  it("restores both prototypes (P5: backing out)", async () => {
     const statements: string[] = [];
     const pg = fakePg(statements);
     const before = pg.Pool.prototype.query;

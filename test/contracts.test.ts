@@ -240,7 +240,8 @@ describe("@boundary (DESIGN.md §4.6)", () => {
   });
 
   it("counts boundaries apart from analysis successes", async () => {
-    // §4.3: 「境界への移行は解析成功と区別して集計する」.
+    // §4.3: "Moving something to a boundary is tallied separately from
+    // succeeding at analysis".
     const { coverage } = await analyze(FIXTURE_ROOT);
     expect(coverage.functionsBoundary).toBe(5);
   });
@@ -263,13 +264,13 @@ describe("@budget (DESIGN.md §4.5)", () => {
   });
 });
 
-describe("contract-to-handler agreement (DESIGN.md §4.4「契約とハンドラの対応付け（決定）」)", () => {
+describe('contract-to-handler agreement (DESIGN.md §4.4, "Mapping contracts to handlers")', () => {
   /**
    * §4.4 chose explicit registration, which leaves the capability set written
    * twice — in the JSDoc and in the `spec`. The duplication does not go away,
    * so the source-level agreement check has to reach the adapter's
    * registrations as well as a hand-written `withAmbit`, or choosing that
-   *方式 would have quietly dropped a check.
+   * approach would have quietly dropped a check.
    */
   it("catches a hand-written withAmbit that drifts from the handler's @capabilities", async () => {
     const { diagnostics } = await analyze(WRAPPER_ROOT);

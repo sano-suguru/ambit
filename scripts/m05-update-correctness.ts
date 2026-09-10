@@ -1,5 +1,5 @@
 /**
- * DESIGN.md §3.5 gate 3 — 更新の正しさ.
+ * DESIGN.md §3.5 gate 3 — correctness of updates.
  *
  *     node scripts/m05-update-correctness.ts
  *

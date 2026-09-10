@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import type { Diagnostic } from "../src/core/index.ts";
 
 /**
- * `ambit.config.ts` end to end (DESIGN.md §4.1「コード外宣言」).
+ * `ambit.config.ts` end to end (DESIGN.md §4.1, "Out-of-code declarations").
  *
  * Every case is a scratch project built in a temp directory, checked through
  * the CLI as a subprocess: a config is loaded by *importing* it, and the only
@@ -273,8 +273,9 @@ export async function GET(): Promise<number> {
   });
 
   it("(c) expands a user-defined effect and catches the violation it makes visible", async () => {
-    // DESIGN.md §4.2: 「ユーザー定義エフェクトは `ambit.config.ts` で標準
-    // エフェクトの組み合わせとして宣言できる」. `payments` stands for
+    // DESIGN.md §4.2: "User-defined effects can be declared in
+    // `ambit.config.ts` as combinations of standard effects". `payments` stands
+    // for
     // network + db_write, so a function declaring it may do both — and a
     // function that declares it while also writing files is still a violation,
     // which is what proves the name expanded rather than swallowed everything.
@@ -351,8 +352,8 @@ export async function refund(id: string): Promise<number> {
   });
 
   it("(d) promotes AMB-W003 to an error inside a strict directory and leaves it outside", async () => {
-    // DESIGN.md §4.3: 「`ambit.config.ts` でディレクトリ単位に `strict` を
-    // 設定できる。新規コードから締め、レガシーは警告のままにする」. Both
+    // DESIGN.md §4.3: "`strict` can be set per directory in `ambit.config.ts`.
+    // Tighten new code while leaving legacy code at warnings". Both
     // files below make the same unresolvable-target call, so the only thing
     // separating them is which directory they are in.
     const source = (host: string) => `/**

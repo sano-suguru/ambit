@@ -1,5 +1,5 @@
-// Fixture for DESIGN.md §4.2「ローカル変異と `pure`」: which in-place changes
-// `pure` allows, and which are `state_write`.
+// Fixture for DESIGN.md §4.2, "Local mutation and `pure`": which in-place
+// changes `pure` allows, and which are `state_write`.
 
 const moduleTotals: number[] = [];
 

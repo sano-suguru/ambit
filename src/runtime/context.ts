@@ -5,8 +5,8 @@ import type { Budget, Capability } from "../core/index.ts";
  * The capability and budget context an entrypoint establishes (DESIGN.md
  * §4.4). `AsyncLocalStorage` holds the context; the blocking itself is the
  * hooks' job — §4.4 is explicit that the two are separate
- * (「`AsyncLocalStorage` はコンテキストの保持を担い、遮断そのものはアダプタが
- * 実装する」).
+ * ("`AsyncLocalStorage` is responsible for holding the context; the blocking
+ * itself is implemented by the adapter").
  *
  * Nothing here imports `typescript` or anything under `src/checker/`:
  * §3.4 keeps runtime enforcement independent of the analysis engine, so
@@ -34,7 +34,7 @@ export interface AuditEntry {
  * What a capability check does when no entrypoint context is active
  * (DESIGN.md §4.4 `runtime.unscoped`). `allow` is the default so that
  * adopting the runtime does not break code that has no entrypoints declared
- * yet (P3: 段階的導入).
+ * yet (P3: incremental adoption).
  */
 export type UnscopedPolicy = "allow" | "warn" | "deny";
 

@@ -17,8 +17,8 @@ import type { RouteContext } from "../src/runtime/next.ts";
 import { ambitRoute } from "../src/runtime/next.ts";
 
 /**
- * In-process tests for the Next.js App Router adapter (DESIGN.md §4.4「契約と
- * ハンドラの対応付け（決定）」).
+ * In-process tests for the Next.js App Router adapter (DESIGN.md §4.4,
+ * "Mapping contracts to handlers").
  *
  * A Route Handler is a plain function Next.js calls with `(request, context)`,
  * so calling the exported `GET` / `POST` directly is not a stand-in for the

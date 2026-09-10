@@ -130,8 +130,9 @@ describe("architecture constraint: the config layer is independent of the compil
 });
 
 describe("architecture constraint: the runtime is independent of the analysis engine", () => {
-  // DESIGN.md §3.4: 「ランタイム強制 … コンパイラから独立。解析エンジンを
-  // 本番依存にしない」. A production process that enforces capabilities must
+  // DESIGN.md §3.4, on runtime enforcement: "Independent of the compiler. Do
+  // not make the analysis engine a production dependency". A production
+  // process that enforces capabilities must
   // not have to load a TypeScript compiler or Ambit's checker to do it.
   const FORBIDDEN = [
     { pattern: /from\s+["']typescript["']/, what: '"typescript"' },

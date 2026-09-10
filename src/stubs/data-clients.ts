@@ -5,7 +5,7 @@ import { sqlStatementDirection } from "../core/index.ts";
  * Effect table for database and LLM client methods — the `db_read`,
  * `db_write`, and `llm` half of DESIGN.md §4.2's effect list, which nothing
  * bundled produced before this file existed. Same trust level as the other
- * bundled tables ("Ambit 同梱", the highest in §8).
+ * bundled tables: bundled with Ambit, the highest in §8.
  *
  * Keyed on the `calleeQualifiedName` the connector layer builds for a method
  * reached through a client value: the module specifier the client's class was
@@ -19,8 +19,9 @@ import { sqlStatementDirection } from "../core/index.ts";
  * from the user's schema and cannot be enumerated here).
  *
  * What this table does **not** claim: that the target of the operation is
- * known. §4.4 is explicit — 「DB クライアントへのフックの存在だけで、任意の
- * SQL のテーブル単位権限を判定できるとみなさない」 — so no row here derives a
+ * known. §4.4 is explicit — "the mere existence of a hook into a DB client is
+ * not taken to mean that table-level permissions can be decided for arbitrary
+ * SQL" — so no row here derives a
  * `db:read:<table>` capability. Effects only.
  */
 interface ClientMethodRule {

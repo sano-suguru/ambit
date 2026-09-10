@@ -1,4 +1,4 @@
-// Position reporting across non-ASCII text (§3.5 gate 1, 「Unicode の位置」).
+// Position reporting across non-ASCII text (§3.5 gate 1, "Unicode positions").
 //
 // Three widths disagree here, and a diagnostic that quotes the wrong one points
 // at the wrong column: "日本語" is 3 UTF-16 code units and 9 UTF-8 bytes; "🎯"

@@ -225,8 +225,8 @@ function parseArgs(argv: readonly string[]): Args {
  * `--format` values. `text` is for a human at a terminal, `json` is the NDJSON
  * of DESIGN.md §5.1 for agents and tools, and `github` renders the same
  * structured diagnostic as GitHub Actions workflow commands so a CI run
- * annotates the offending lines — §6: 「CI は終了コードと構造化出力で統合する。
- * 専用 CI プラグインを必須にしない」.
+ * annotates the offending lines — §6: "CI integrates via the exit code and
+ * the structured output. A dedicated CI plugin is not required".
  */
 const OUTPUT_FORMATS = ["text", "json", "github"] as const;
 
@@ -252,7 +252,7 @@ const GITHUB_COMMAND: Readonly<Record<Diagnostic["severity"], string>> = {
  * One GitHub Actions workflow command per diagnostic
  * (`::error file=...,line=...::message`), which is what makes a failing check
  * annotate the offending line in a pull request without installing anything —
- * DESIGN.md §6's "専用 CI プラグインを必須にしない".
+ * DESIGN.md §6's "A dedicated CI plugin is not required".
  *
  * The call path and the operation site are folded into the message with `%0A`
  * so the annotation is self-sufficient: a reader on the diff sees every hop
@@ -280,7 +280,8 @@ function formatJson(diagnostic: Diagnostic): string {
 
 /**
  * Human-readable form, rendered from the structured diagnostic (DESIGN.md §5:
- * 「人間向け表示は構造化診断からのレンダリングとして実装する」).
+ * "Human-facing display is implemented as a rendering of the structured
+ * diagnostics").
  *
  * The header line reports the function that declared the contract, at its own
  * `file:line`. `contract.via` — the call path from there to the function that

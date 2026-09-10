@@ -14,7 +14,8 @@
  * `node:` builtin call, a default-lib method, a contract comment, and a call
  * into the previous module — because a corpus of isolated pure functions would
  * measure parsing and almost no type resolution, which is exactly the
- * comparison §3.5 forbids (「構文解析のみと型解析を含む検査を速度比較しない」).
+ * comparison §3.5 forbids ("Do not compare parse-only speed against a check
+ * that includes type analysis").
  *
  * The tsconfig it writes names `"types": ["node"]` explicitly. That is not a
  * neutral choice and is recorded as such in `docs/status.md`: TypeScript 7.0.2

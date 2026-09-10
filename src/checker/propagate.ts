@@ -39,7 +39,7 @@ export interface PropagatedFunction {
    * grant checks through an undeclared middle function.
    *
    * A requirement arises in two ways. It is inherited from a callee's
-   * declaration — the 縮小則 between a caller's grant and a callee's
+   * declaration — the narrowing rule between a caller's grant and a callee's
    * declaration — or it is produced directly, by a bundled operation whose
    * target the source fixes: a literal URL's host (§4.4's static half,
    * `src/stubs/http-capabilities.ts`). The same operation with a target the
@@ -62,11 +62,12 @@ export interface PropagatedFunction {
 
 /**
  * Compute each function's transitive effect set by a worklist fixed point
- * over the call graph (DESIGN.md §4.2: "呼び出し関係の循環は...固定点に
- * 達するまで伝播させる"). Handles cycles by iterating to a stable state —
- * no strongly-connected-component precomputation, since `EffectSet` only
- * grows (union is monotonic) and the id space is finite, so this always
- * terminates (plan: "循環は素朴な worklist 反復で収束させる").
+ * over the call graph (DESIGN.md §4.2: "Cycles in the call graph are
+ * propagated to a fixed point using strongly connected components or the
+ * like"). Handles cycles by iterating to a stable state — no
+ * strongly-connected-component precomputation, since `EffectSet` only grows
+ * (union is monotonic) and the id space is finite, so this always
+ * terminates.
  */
 export function propagate(
   summaries: readonly FunctionSummary[],
@@ -136,7 +137,7 @@ function directEffects(summary: FunctionSummary): EffectSet {
     .flatMap((call) => call.effects);
   let set = effectSetOf(...stubEffects);
   // A mutation whose receiver is reachable from outside the function is a
-  // direct `state_write` (DESIGN.md §4.2, 「ローカル変異と `pure`」); a local
+  // direct `state_write` (DESIGN.md §4.2, "Local mutation and `pure`"); a local
   // one is recorded as a site but contributes nothing.
   if (summary.calls.some((call) => call.kind === "mutation" && call.escaping)) {
     set = unionEffectSets(set, effectSetOf("state_write"));
@@ -155,15 +156,16 @@ function directEffects(summary: FunctionSummary): EffectSet {
  * own record), and callers propagate the declared set rather than the
  * callee's inferred one. This is the usual modular-typing shape (a
  * function's signature, not its body, is what callers see) and is also
- * what makes "未宣言 = unknown" workable as a coverage concept rather than
- * a propagation rule — see the plan's note on DESIGN.md §4.2/§4.3.
+ * what makes "undeclared = unknown" workable as a coverage concept rather
+ * than a propagation rule — DESIGN.md §4.2 states it directly: "Undeclared"
+ * and "`unknown`" are not the same thing.
  * A declared tag never carries `unknown` itself, so trusting it means a
  * callee's own undeclared internal `unknown` does not leak to callers; it
  * stays that callee's own AMB-W001, not its callers'.
  *
  * An *undeclared* callee has no signature to trust, so its own
  * recursively-inferred `observed` set is used instead — this is what lets
- * inference cross undeclared code (§4.3 "段階的導入").
+ * inference cross undeclared code (§4.3, incremental adoption).
  */
 function contributionOf(
   calleeSummary: FunctionSummary,
@@ -185,8 +187,8 @@ function capabilityContributionOf(
 
 /**
  * A `@boundary` function's contract is taken as written and its body is not
- * propagated through (DESIGN.md §4.6: 「この関数の中は静的検査しない。外側に
- * 対して宣言したエフェクト・ケイパビリティを信じる」).
+ * propagated through (DESIGN.md §4.6: "do not statically check inside this
+ * function; trust the effects and capabilities it declares outward").
  *
  * What it declares is what it contributes. What it does *not* declare is
  * `unknown`, not empty: the body was excluded from analysis, so an
@@ -344,8 +346,9 @@ export function unknownWitnessChain(
 
 /**
  * A witness chain rendered as `contract.via` entries: each hop named by its
- * symbol id and located at its own declaration (DESIGN.md §5.1 — 「`via` は
- * 関数の列であり、各要素の位置はその関数の宣言位置である」).
+ * symbol id and located at its own declaration (DESIGN.md §5.1 — "`via` is a
+ * sequence of functions, and each element's position is that function's
+ * declaration position").
  *
  * Lives beside the chain walkers rather than beside either consumer, because
  * a diagnostic's path and an authority record's path must be the same path.

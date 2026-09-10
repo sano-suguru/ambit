@@ -2,7 +2,8 @@
  * Effects a function can have on the outside world (DESIGN.md §4.2).
  *
  * `pure` is not a member of this list — it is the empty {@link EffectSet}
- * (§4.2: "`pure` は空集合の別名"). `unknown` is likewise not a member; it is
+ * (§4.2 rule 2: "`pure` is another name for the empty set"). `unknown` is
+ * likewise not a member; it is
  * a separate flag on {@link EffectSet}, because "this function might have
  * more effects than listed" and "this function definitely has these
  * effects" are different guarantees and must not collapse into one value.
@@ -14,7 +15,7 @@ export const KNOWN_EFFECTS = [
   "fs_read",
   "fs_write",
   // Mutation of a value reachable from outside the function (DESIGN.md
-  // §4.2, 「ローカル変異と `pure`」). Mutating a value the function itself
+  // §4.2, "Local mutation and `pure`"). Mutating a value the function itself
   // allocated is not this effect — it is not observable to a caller.
   "state_write",
   "llm",
@@ -55,7 +56,7 @@ export function effectSetOf(...effects: readonly KnownEffect[]): EffectSet {
 }
 
 /**
- * `llm` implies `network` (DESIGN.md §4.2: "`llm` ... `network` を含意し"):
+ * `llm` implies `network` (DESIGN.md §4.2: "`llm` ... Implies `network`"):
  * expand a raw effect set so the containment relation always holds, no
  * matter where the set was built.
  */

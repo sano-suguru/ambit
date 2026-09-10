@@ -8,7 +8,8 @@
  * so `pnpm exec tsc --noEmit` silently changes compiler. That was observed, not
  * predicted: with the alias installed, `pnpm exec tsc --version` reported 7.0.2
  * and this repository's own type check produced 198 errors it does not have
- * under 5.9.3. DESIGN.md §12「ビルド用コンパイラと解析エンジンの分離」names
+ * under 5.9.3. DESIGN.md §12, "Separating the build compiler from the
+ * analysis engine", names
  * that coupling, and a comparison whose conclusion is "do not adopt" is the
  * wrong reason to introduce it.
  *

@@ -19,7 +19,8 @@ export interface ResolvedCall {
  * `effects` is a set, not one effect, because an operation's direction is not
  * always decidable from the source: `pool.query(sql)` with a non-literal
  * statement may read or write, and the stub table answers with both rather
- * than picking one (DESIGN.md §4.2, スタブの効果表). One call site produces one
+ * than picking one (DESIGN.md §4.2, "Operations whose read/write direction is
+ * not statically determined"). One call site produces one
  * `StubCall` whatever the size of that set — never one per effect, which
  * would double-count it in `--coverage`.
  */
@@ -70,8 +71,8 @@ export interface UnresolvedCall {
 }
 
 /**
- * A site that changes a value in place (DESIGN.md §4.2, 「ローカル変異と
- * `pure`」) — a mutating builtin method (`src/stubs/mutating-builtins.ts`)
+ * A site that changes a value in place (DESIGN.md §4.2, "Local mutation and
+ * `pure`") — a mutating builtin method (`src/stubs/mutating-builtins.ts`)
  * or an assignment / `++` / `delete` targeting a property.
  *
  * `escaping` is the whole decision: `false` means the mutated value was
@@ -109,8 +110,8 @@ export function callLeavesUnknown(call: Call): boolean {
  *
  * `{ kind: "none" }` is distinct from a declared empty set: it means no tag
  * was present at all (undeclared), which this slice treats as a coverage
- * concern rather than as `unknown` in propagation — see the plan's note on
- * DESIGN.md §4.2/§4.3.
+ * concern rather than as `unknown` in propagation (DESIGN.md §4.2:
+ * "Undeclared" and "`unknown`" are not the same thing).
  *
  * `{ kind: "invalid" }` means a tag was present but contained a token that is
  * neither `pure` nor a known effect (a typo, e.g. `@effects netwrok`) — see
@@ -156,8 +157,8 @@ export type DeclaredBoundary =
 
 /**
  * One tag where JSDoc and `ambit.config.ts` both declared something and the
- * two did not agree (DESIGN.md §4.1: 「同一シンボルに JSDoc と config の両方が
- * あれば JSDoc を優先し、差異を警告する」). Reported as `AMB-W005`.
+ * two did not agree (DESIGN.md §4.1: "If a symbol has both JSDoc and config,
+ * JSDoc wins and the difference is warned about"). Reported as `AMB-W005`.
  *
  * Both sides are held as their formatted text, not as parsed objects: the
  * comparison has already happened, and what the message needs is the two
@@ -191,7 +192,7 @@ export type DeclarationOrigin = "jsdoc" | "config" | "spec";
  * Per tag rather than per function because the sides fill different tags: a
  * function can take `@effects` from its JSDoc and its capability set from the
  * registration beside it, and `--coverage`'s `declared-by` breakdown counts
- * the `effects` half (DESIGN.md §4.1「コード外宣言」).
+ * the `effects` half (DESIGN.md §4.1, "Out-of-code declarations").
  */
 export interface ContractOrigins {
   readonly effects?: DeclarationOrigin;
@@ -221,7 +222,7 @@ export interface FunctionSummary {
    * Which side supplied each declared tag, when anything did. Absent for a
    * function nothing declared anything for. `--coverage` counts the `effects`
    * half apart so a codebase can see how much of its contract surface lives
-   * outside the code (DESIGN.md §4.1「コード外宣言」).
+   * outside the code (DESIGN.md §4.1, "Out-of-code declarations").
    */
   readonly declaredBy?: ContractOrigins;
   /** Tags JSDoc and config both declared and disagreed on. JSDoc is what {@link FunctionSummary} carries. */

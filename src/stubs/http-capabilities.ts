@@ -1,12 +1,14 @@
 import type { Capability, LiteralArgument } from "../core/index.ts";
 
 /**
- * The static half of DESIGN.md §4.4's 二重強制: which bundled operations carry
+ * The static half of DESIGN.md §4.4's dual enforcement: which bundled
+ * operations carry
  * an `http:<method>:<host>` capability requirement, and how to read it off the
  * call site.
  *
- * 「リテラル URL や既知クライアントなど静的に判定できる違反はチェッカーが
- * 止める。動的 URL・テーブル名などは対応するランタイムフックで照合する」 —
+ * "Violations that can be decided statically, such as literal URLs and known
+ * clients, are stopped by the checker. Dynamic URLs, table names and the like
+ * are matched by the corresponding runtime hook" —
  * so a literal URL (or a template literal whose static head already fixes the
  * host) becomes a requirement the checker compares against the grant, and
  * anything else becomes {@link HttpCapabilityRequirement.targetUnknown}, which
@@ -14,7 +16,7 @@ import type { Capability, LiteralArgument } from "../core/index.ts";
  * quietly report "no requirement": that would turn a dynamic URL into a
  * guarantee it was allowed.
  *
- * Trust level: bundled with Ambit ("Ambit 同梱", DESIGN.md §8).
+ * Trust level: bundled with Ambit (DESIGN.md §8).
  */
 interface HttpCapabilityRule {
   /** Which argument holds the URL. */

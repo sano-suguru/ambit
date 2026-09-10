@@ -12,7 +12,7 @@ import type { SymbolId } from "./symbol-id.ts";
  * "Authority" here is what a function may act with, not what a diagnostic
  * says about it: a record is emitted for every analyzed function, including
  * the ones nothing is wrong with. It is a checker-side artifact — nothing at
- * runtime reads it, so §4.4 案 2's objection to shipping contract data to the
+ * runtime reads it, so ADR-0005's objection to shipping contract data to the
  * runtime does not apply.
  *
  * Both halves of each contract are carried, and neither is derived from the

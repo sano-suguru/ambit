@@ -28,9 +28,9 @@ export interface ConfigTarget {
 }
 
 /**
- * `ambit init`'s analysis half (DESIGN.md §4.1: 「既存コードのエフェクトを
- * 4.2 の根拠から推論し、JSDoc の追加を診断の修正候補（5 章
- * `fixes[].edits`）として出力する」).
+ * `ambit init`'s analysis half (DESIGN.md §4.1: "`ambit init` infers the
+ * effects of existing code from the evidence in 4.2 and emits JSDoc additions
+ * as fix candidates in diagnostics (chapter 5, `fixes[].edits`)").
  *
  * For every function that has no `@effects` tag and whose propagated effect
  * set is fully known, emit an `AMB-I001` info diagnostic carrying one

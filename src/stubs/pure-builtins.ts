@@ -7,7 +7,7 @@
  * keys (e.g. `"node:fs.readFileSync"`) — the two tables are never merged or
  * compared (`src/core/backend.ts`'s `CallSite.pureBuiltinName` doc comment).
  * In-place mutation is a separate table, `src/stubs/mutating-builtins.ts`
- * (DESIGN.md §4.2, 「ローカル変異と `pure`」): a mutator's effect depends on
+ * (DESIGN.md §4.2, "Local mutation and `pure`"): a mutator's effect depends on
  * its receiver, so it cannot be answered by a name alone the way this table
  * answers. Nondeterminism beyond `env` is still outside the model; this
  * allowlist claims only "no `KnownEffect`", not "pure" in a stricter sense.

@@ -2,8 +2,9 @@ import type { KnownEffect } from "../core/index.ts";
 
 /**
  * Minimal effect table for common globals, Node.js builtins, and a handful
- * of widely-used third-party packages (DESIGN.md §4.2 "エフェクト検出の根拠"
- * lists both as legitimate sources — the same table, not a separate one).
+ * of widely-used third-party packages (DESIGN.md §4.2, "Evidence for effect
+ * detection", lists both as legitimate sources — the same table, not a
+ * separate one).
  * Matching is purely textual against the connector layer's best-effort
  * `calleeQualifiedName` (see `src/core/backend.ts`) — a call written as
  * `import * as f from "node:fs"; f.readFileSync(...)`, `import f from
@@ -17,7 +18,7 @@ import type { KnownEffect } from "../core/index.ts";
  * originating module specifier.
  *
  * `docs/diagnostics/` and DESIGN.md §8 track stub trust levels; this table
- * is "Ambit 同梱" (bundled with Ambit itself), the highest trust level.
+ * is bundled with Ambit itself, the highest trust level.
  */
 const STUB_EFFECTS: ReadonlyMap<string, KnownEffect> = new Map([
   ["fetch", "network"],
