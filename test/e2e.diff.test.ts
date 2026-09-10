@@ -61,7 +61,7 @@ describe("ambit diff against this repository's history", () => {
     expect(gitHelper?.added).toContainEqual({ kind: "effect", name: "process" });
   }, 120_000);
 
-  it("finds no increase when the base ref is the commit the working tree is on", async () => {
+  it("runs against HEAD and removes the worktree", async () => {
     // Committed source only: whatever is staged or unstaged in `src` at the
     // time is the one thing this cannot assume, so it asserts the shape of
     // the result rather than an empty one.
@@ -106,9 +106,10 @@ describe("ambit diff against this repository's history", () => {
 
   it("exits 2, not 0, when the comparison could not be made", async () => {
     // "Could not compare" must never come out as "nothing increased".
+    const before = await worktreeCount();
     const { exitCode } = await runCli(["diff", "no-such-ref-for-ambit-diff", "src"]);
     expect(exitCode).toBe(2);
-    expect(await worktreeCount()).toBe(1);
+    expect(await worktreeCount()).toBe(before);
   }, 120_000);
 
   it("exits 2 when given no ref at all", async () => {

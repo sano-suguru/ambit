@@ -14,11 +14,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # `ambit diff` needs the base commit to exist locally, and
-          # `actions/checkout` fetches a single commit by default. 2 is enough
-          # for `HEAD~1`; on a pull request that is the base tip, which is the
-          # comparison the step wants.
-          fetch-depth: 2
+          # `actions/checkout` fetches a single commit by default, and two
+          # things here need more. The `ambit diff` step needs `HEAD~1`, and
+          # `test/e2e.diff.test.ts` resolves a pinned SHA from this
+          # repository's own history — a shallow clone would fail the test
+          # gate before the diff step ever ran. Full history is what covers
+          # both; a depth chosen for `HEAD~1` alone does not.
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v6
 

@@ -37,8 +37,10 @@ node scripts/m05-probe/native-primitives.ts test/fixtures/backend-conformance
 
 `.github/workflows/ci.yml` runs `ambit diff HEAD~1 src --format github` as a
 **non-gating** step (`continue-on-error: true`), and `actions/checkout` is
-given `fetch-depth: 2` so the base commit exists locally — the default of 1
-would make `HEAD~1` unresolvable. It is not a gate yet, and the reason is not
+given `fetch-depth: 0` so the history exists locally — the default of 1 would
+make `HEAD~1` unresolvable, and `test/e2e.diff.test.ts` additionally resolves
+a pinned SHA, which a shallow clone of any fixed depth would eventually not
+reach. It is not a gate yet, and the reason is not
 a judgement about the command: **no CI run of it has been observed**. The work
 was done without pushing, so the only evidence is the same command run
 locally, which exits 0 on a clean tree and 1 on a tree whose authority grew.
