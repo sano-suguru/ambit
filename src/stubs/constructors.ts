@@ -133,6 +133,19 @@ export function isKnownPureConstructor(qualifiedName: string, withoutArguments: 
   return PURE_CONSTRUCTORS.has(qualifiedName);
 }
 
+/**
+ * Constructors from {@link PURE_CONSTRUCTORS} that run a function they are
+ * handed. `new Promise(executor)` calls `executor` immediately; every other
+ * entry stores or copies its arguments. Same role as
+ * `src/stubs/pure-builtins.ts`'s higher-order set, and the same reason for
+ * enumerating rather than deriving it.
+ */
+const HIGHER_ORDER_CONSTRUCTORS: ReadonlySet<string> = new Set(["new Promise"]);
+
+export function isHigherOrderConstructor(qualifiedName: string): boolean {
+  return HIGHER_ORDER_CONSTRUCTORS.has(qualifiedName);
+}
+
 export function isConstructorKey(qualifiedName: string): boolean {
   return qualifiedName.startsWith(CONSTRUCTOR_KEY_PREFIX);
 }

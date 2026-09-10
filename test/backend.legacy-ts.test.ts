@@ -156,11 +156,14 @@ describe("legacyTsBackend.extractProject", () => {
     expect(call?.callbackByReference).toBeUndefined();
   });
 
-  it("marks a call as callbackByReference when its callback is passed by reference, not written inline", async () => {
+  it("follows a by-reference callback that names a function in the same tree (DESIGN.md §4.2 rule 4)", async () => {
     const { files } = await extractFixture(FIXTURE_ROOT);
     const fn = findFn(files, "sample.ts#callsPureBuiltinByReference");
     const call = fn?.calls.find((c) => c.pureBuiltinName === "Array.map");
-    expect(call?.callbackByReference).toBe(true);
+    // Not opaque: the argument is the answer to what the callback does, so the
+    // call site carries an edge to it instead of falling to `unknown`.
+    expect(call?.callbackByReference).toBeUndefined();
+    expect(call?.callbackTargets).toEqual(["sample.ts#double"]);
   });
 
   it("marks a call as callbackByReference for an any-typed callback argument (getCallSignatures() is empty for any/unknown)", async () => {

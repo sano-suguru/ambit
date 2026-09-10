@@ -12,7 +12,9 @@ export function readsObjectAndString(input: Record<string, string>): string {
 }
 
 export function convertsWithGlobals(raw: string): number {
-  return Number(raw) + parseInt(raw, 10) + (isNaN(Number(raw)) ? 0 : 1);
+  // biome-ignore lint/suspicious/noGlobalIsNan: the global is the subject — it is what the bare-identifier table is keyed on
+  const nan = isNaN(Number(raw));
+  return Number(raw) + parseInt(raw, 10) + (nan ? 0 : 1);
 }
 
 export function readsADateInstance(at: Date): string {
@@ -45,15 +47,41 @@ export function compilesAString(source: string): unknown {
   return Function(source);
 }
 
-export function mapsByReference(values: readonly string[]): readonly string[] {
-  // The callback is passed by reference, so `Array.map` being allowlisted
-  // says nothing about what runs (DESIGN.md §4.2 rule 4).
+export function mapsAReferencedProjectFunction(values: readonly string[]): readonly string[] {
+  // The callback is passed by reference and names a function in this tree, so
+  // it is the answer to what the callback does (DESIGN.md §4.2 rule 4) — the
+  // call carries an edge to `upper` rather than falling to `unknown`.
+  return values.map(upper);
+}
+
+function upper(value: string): string {
+  return value.toUpperCase();
+}
+
+export function mapsAReferencedEffectfulFunction(values: readonly string[]): readonly string[] {
+  // Same shape, and still not "no effect": the referenced function's own body
+  // is what propagates.
   return values.map(logAndReturn);
 }
 
 function logAndReturn(value: string): string {
   console.log(value);
   return value;
+}
+
+export function mapsAnOpaqueCallback(
+  values: readonly string[],
+  transform: (value: string) => string,
+): readonly string[] {
+  // A parameter names no declaration this tree extracted, so the rule's other
+  // half applies: if it cannot be inferred, `unknown`.
+  return values.map(transform);
+}
+
+export function inspectsAFunctionValue(): boolean {
+  // `Array.isArray` cannot call what it is handed, so a callable argument
+  // does not cost the call its verdict.
+  return Array.isArray(upper);
 }
 
 // -- effects, not the absence of one --------------------------------------

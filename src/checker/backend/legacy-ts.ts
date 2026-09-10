@@ -1241,9 +1241,10 @@ function classifyConstruct(
       unresolvedReason: importBindingReason ?? ambientReason,
       // `new Promise(namedExecutor)` runs `namedExecutor` immediately; the
       // pure-constructor allowlist must not cover a body this walk never
-      // visited (DESIGN.md §4.2 rule 4).
-      callbackByReference:
-        (ts.isNewExpression(site) && hasOpaqueCallableArgument(site, checker)) || undefined,
+      // visited (DESIGN.md §4.2 rule 4). A named executor that *is* an
+      // extracted function is a `callbackTargets` edge instead — the body is
+      // right there to propagate from.
+      ...(ts.isNewExpression(site) ? callableArgumentFields(site, checker, declaredNodeToId) : {}),
       // `new Date()` reads the clock; `new Date(2020, 0, 1)` does not
       // (DESIGN.md §4.2 lists the clock under `env`).
       constructedWithoutArguments:
@@ -1471,7 +1472,7 @@ function classifyCall(
       // like `Number(x)`), and an opaque callable argument must refuse that
       // verdict (DESIGN.md §4.2 rule 4). It says nothing about a stub match,
       // which is decided by the name and the literal arguments alone.
-      ...(hasOpaqueCallableArgument(node, checker) ? { callbackByReference: true as const } : {}),
+      ...callableArgumentFields(node, checker, declaredNodeToId),
     };
   }
 
@@ -1484,7 +1485,10 @@ function classifyCall(
   if (ambientReason === "builtin-method" && resolvedSymbol) {
     const builtinName = checker.getFullyQualifiedName(resolvedSymbol);
     if (builtinName) {
-      const callbackByReference = hasOpaqueCallableArgument(node, checker) || undefined;
+      const callable = callableArgumentsOf(node, checker, declaredNodeToId);
+      const callbackByReference = callable.opaque || undefined;
+      const callbackTargets =
+        callable.targets.length > 0 ? { callbackTargets: callable.targets } : {};
       if (isMutatingBuiltin(builtinName) && ts.isPropertyAccessExpression(callee)) {
         const escaping = !isLocallyOwnedMutationTarget(callee.expression, enclosing, checker);
         // A local mutation carries no effect, so a callback the walk never
@@ -1496,10 +1500,12 @@ function classifyCall(
             pureBuiltinName: builtinName,
             unresolvedReason: ambientReason,
             callbackByReference,
+            ...callbackTargets,
           };
         }
         return {
           location,
+          ...callbackTargets,
           mutation: {
             escaping,
             qualifiedName: builtinName,
@@ -1512,6 +1518,7 @@ function classifyCall(
         pureBuiltinName: builtinName,
         unresolvedReason: ambientReason,
         callbackByReference,
+        ...callbackTargets,
       };
     }
   }
@@ -1807,13 +1814,40 @@ function isLexicallyInside(node: ts.Node, ancestor: ts.Node): boolean {
   return false;
 }
 
+/** {@link callableArgumentsOf}, in the optional-field shape a `CallSite` literal spreads. */
+function callableArgumentFields(
+  node: ts.CallExpression | ts.NewExpression,
+  checker: ts.TypeChecker,
+  declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+): Pick<CallSite, "callbackByReference" | "callbackTargets"> {
+  const callable = callableArgumentsOf(node, checker, declaredNodeToId);
+  return {
+    ...(callable.opaque ? { callbackByReference: true as const } : {}),
+    ...(callable.targets.length > 0 ? { callbackTargets: callable.targets } : {}),
+  };
+}
+
 /**
- * True if any argument is a callable passed by reference (an identifier,
- * property access, or other expression with call signatures) rather than
- * written inline as `x => ...` / `function (...) {...}`. `collectCalls`
- * only walks into an inline callback's body; a callback passed by reference
- * is invisible to it, so a method taking one (`forEach`, `map`, `some`, ...)
- * cannot be trusted as pure even if its own name is allowlisted.
+ * The callable arguments a call passes *by reference*, split by whether the
+ * reference can be followed.
+ *
+ * An inline arrow or function expression is neither: `collectCalls` walks its
+ * body and attributes its calls to the enclosing function already.
+ *
+ * `targets` are the references that name a declaration this project extracted,
+ * so DESIGN.md §4.2 rule 4's "inferred from the actual argument at the call
+ * site" can be carried out literally. `opaque` is what is left — a callable
+ * from a package, a parameter, a `.bind()` result — for which the rule's other
+ * half applies: "If it cannot be inferred, `unknown`".
+ *
+ * An argument counts as callable when it is passed by reference (an
+ * identifier, property access, or other expression with call signatures)
+ * rather than written inline as `x => ...` / `function (...) {...}`.
+ * `collectCalls` only walks into an inline callback's body; a callback passed
+ * by reference is invisible to it, so a method taking one (`forEach`, `map`,
+ * `some`, ...) cannot be trusted as pure on its own name alone — either the
+ * reference resolves to an extracted function, and the effects come from
+ * there, or it does not, and the call is `unknown`.
  *
  * An `any`/`unknown`-typed argument has no call signatures of its own
  * (`getCallSignatures()` returns `[]`), so it must be treated as opaque
@@ -1833,18 +1867,52 @@ function isLexicallyInside(node: ts.Node, ancestor: ts.Node): boolean {
  * rather than skipping it, so this narrowing can only add opacity checks
  * back in, never silently drop the `any`/`unknown` fail-open guard above.
  */
-function hasOpaqueCallableArgument(
+function callableArgumentsOf(
   node: ts.CallExpression | ts.NewExpression,
   checker: ts.TypeChecker,
-): boolean {
+  declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+): { readonly opaque: boolean; readonly targets: readonly SymbolId[] } {
   const signature = checker.getResolvedSignature(node);
-  return (node.arguments ?? []).some((arg, index) => {
-    if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) return false;
-    if (signature && !acceptsCallableArgument(signature, index, checker)) return false;
+  const targets: SymbolId[] = [];
+  let opaque = false;
+  for (const [index, arg] of (node.arguments ?? []).entries()) {
+    if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) continue;
+    if (signature && !acceptsCallableArgument(signature, index, checker)) continue;
     const type = checker.getTypeAtLocation(arg);
-    if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) return true;
-    return type.getCallSignatures().length > 0;
-  });
+    const callable =
+      (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0 ||
+      type.getCallSignatures().length > 0;
+    if (!callable) continue;
+    const target = extractedFunctionTarget(arg, checker, declaredNodeToId);
+    if (target) targets.push(target);
+    else opaque = true;
+  }
+  return { opaque, targets };
+}
+
+/**
+ * The `SymbolId` of the extracted function an expression names, when it names
+ * one. Follows the same path `classifyCall` follows for a callee — import
+ * aliases included — because "the function this expression refers to" is the
+ * same question in both places.
+ */
+function extractedFunctionTarget(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+): SymbolId | undefined {
+  const expr = unwrapNonNullAssertions(expression);
+  if (!ts.isIdentifier(expr) && !ts.isPropertyAccessExpression(expr)) return undefined;
+  const symbol = checker.getSymbolAtLocation(expr);
+  if (!symbol) return undefined;
+  const resolved =
+    (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(symbol) : symbol;
+  const declaration = implementationDeclarationOf(resolved);
+  if (!declaration) return undefined;
+  return (
+    declaredNodeToId.get(declaration) ??
+    objectLiteralMemberTarget(declaration, checker, declaredNodeToId)
+  );
 }
 
 /**

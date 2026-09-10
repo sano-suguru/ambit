@@ -66,21 +66,89 @@ function members(type: string, names: readonly string[]): readonly string[] {
  * declared type.
  */
 const ARRAY_READERS: readonly string[] = [
-  "at", "concat", "entries", "every", "filter", "find", "findIndex", "findLast",
-  "findLastIndex", "flat", "flatMap", "forEach", "includes", "indexOf", "join",
-  "keys", "lastIndexOf", "map", "reduce", "reduceRight", "slice", "some",
-  "toLocaleString", "toReversed", "toSorted", "toSpliced", "toString", "values",
+  "at",
+  "concat",
+  "entries",
+  "every",
+  "filter",
+  "find",
+  "findIndex",
+  "findLast",
+  "findLastIndex",
+  "flat",
+  "flatMap",
+  "forEach",
+  "includes",
+  "indexOf",
+  "join",
+  "keys",
+  "lastIndexOf",
+  "map",
+  "reduce",
+  "reduceRight",
+  "slice",
+  "some",
+  "toLocaleString",
+  "toReversed",
+  "toSorted",
+  "toSpliced",
+  "toString",
+  "values",
   "with",
+];
+
+/** The `Array` readers that take a callback. `sort`'s comparator is the mutating table's business. */
+const ARRAY_CALLBACK_TAKERS: readonly string[] = [
+  "every",
+  "filter",
+  "find",
+  "findIndex",
+  "findLast",
+  "findLastIndex",
+  "flatMap",
+  "forEach",
+  "map",
+  "reduce",
+  "reduceRight",
+  "some",
 ];
 
 /** Every `String` member: a string is immutable, so all of them are readers. */
 const STRING_READERS: readonly string[] = [
-  "at", "charAt", "charCodeAt", "codePointAt", "concat", "endsWith", "includes",
-  "indexOf", "isWellFormed", "lastIndexOf", "localeCompare", "match",
-  "matchAll", "normalize", "padEnd", "padStart", "repeat", "replace",
-  "replaceAll", "search", "slice", "split", "startsWith", "substring",
-  "toLocaleLowerCase", "toLocaleUpperCase", "toLowerCase", "toString",
-  "toUpperCase", "toWellFormed", "trim", "trimEnd", "trimStart", "valueOf",
+  "at",
+  "charAt",
+  "charCodeAt",
+  "codePointAt",
+  "concat",
+  "endsWith",
+  "includes",
+  "indexOf",
+  "isWellFormed",
+  "lastIndexOf",
+  "localeCompare",
+  "match",
+  "matchAll",
+  "normalize",
+  "padEnd",
+  "padStart",
+  "repeat",
+  "replace",
+  "replaceAll",
+  "search",
+  "slice",
+  "split",
+  "startsWith",
+  "substring",
+  "toLocaleLowerCase",
+  "toLocaleUpperCase",
+  "toLowerCase",
+  "toString",
+  "toUpperCase",
+  "toWellFormed",
+  "trim",
+  "trimEnd",
+  "trimStart",
+  "valueOf",
 ];
 
 /** The readers `Map` and `Set` share. Their mutators are in the mutating table. */
@@ -99,13 +167,34 @@ const COLLECTION_READERS: readonly string[] = [
  * of which are `env`.
  */
 const DATE_READERS: readonly string[] = [
-  "getDate", "getDay", "getFullYear", "getHours", "getMilliseconds",
-  "getMinutes", "getMonth", "getSeconds", "getTime", "getTimezoneOffset",
-  "getUTCDate", "getUTCDay", "getUTCFullYear", "getUTCHours",
-  "getUTCMilliseconds", "getUTCMinutes", "getUTCMonth", "getUTCSeconds",
-  "toDateString", "toISOString", "toJSON", "toLocaleDateString",
-  "toLocaleString", "toLocaleTimeString", "toString", "toTimeString",
-  "toUTCString", "valueOf",
+  "getDate",
+  "getDay",
+  "getFullYear",
+  "getHours",
+  "getMilliseconds",
+  "getMinutes",
+  "getMonth",
+  "getSeconds",
+  "getTime",
+  "getTimezoneOffset",
+  "getUTCDate",
+  "getUTCDay",
+  "getUTCFullYear",
+  "getUTCHours",
+  "getUTCMilliseconds",
+  "getUTCMinutes",
+  "getUTCMonth",
+  "getUTCSeconds",
+  "toDateString",
+  "toISOString",
+  "toJSON",
+  "toLocaleDateString",
+  "toLocaleString",
+  "toLocaleTimeString",
+  "toString",
+  "toTimeString",
+  "toUTCString",
+  "valueOf",
 ];
 
 /**
@@ -160,7 +249,14 @@ const PURE_BUILTINS: ReadonlySet<string> = new Set([
   ...members("StringConstructor", ["fromCharCode", "fromCodePoint", "raw"]),
 
   // -- Number / Math ----------------------------------------------------
-  ...members("Number", ["toExponential", "toFixed", "toLocaleString", "toPrecision", "toString", "valueOf"]),
+  ...members("Number", [
+    "toExponential",
+    "toFixed",
+    "toLocaleString",
+    "toPrecision",
+    "toString",
+    "valueOf",
+  ]),
   ...members("NumberConstructor", [
     "isFinite",
     "isInteger",
@@ -173,10 +269,40 @@ const PURE_BUILTINS: ReadonlySet<string> = new Set([
   // under `env`, so it is an effect, not the absence of one
   // (`src/stubs/builtin-effects.ts`).
   ...members("Math", [
-    "abs", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "cbrt",
-    "ceil", "clz32", "cos", "cosh", "exp", "expm1", "floor", "fround", "hypot",
-    "imul", "log", "log10", "log1p", "log2", "max", "min", "pow", "round",
-    "sign", "sin", "sinh", "sqrt", "tan", "tanh", "trunc",
+    "abs",
+    "acos",
+    "acosh",
+    "asin",
+    "asinh",
+    "atan",
+    "atan2",
+    "atanh",
+    "cbrt",
+    "ceil",
+    "clz32",
+    "cos",
+    "cosh",
+    "exp",
+    "expm1",
+    "floor",
+    "fround",
+    "hypot",
+    "imul",
+    "log",
+    "log10",
+    "log1p",
+    "log2",
+    "max",
+    "min",
+    "pow",
+    "round",
+    "sign",
+    "sin",
+    "sinh",
+    "sqrt",
+    "tan",
+    "tanh",
+    "trunc",
   ]),
   ...members("BigInt", ["toLocaleString", "toString", "valueOf"]),
 
@@ -244,10 +370,28 @@ const PURE_BUILTINS: ReadonlySet<string> = new Set([
   // `sort`, `reverse` and `copyWithin` write through the receiver and are in
   // the mutating table.
   ...members("Uint8Array", [
-    "at", "entries", "every", "filter", "find", "findIndex", "findLast",
-    "findLastIndex", "forEach", "includes", "indexOf", "join", "keys",
-    "lastIndexOf", "map", "reduce", "reduceRight", "slice", "some", "subarray",
-    "toString", "values",
+    "at",
+    "entries",
+    "every",
+    "filter",
+    "find",
+    "findIndex",
+    "findLast",
+    "findLastIndex",
+    "forEach",
+    "includes",
+    "indexOf",
+    "join",
+    "keys",
+    "lastIndexOf",
+    "map",
+    "reduce",
+    "reduceRight",
+    "slice",
+    "some",
+    "subarray",
+    "toString",
+    "values",
   ]),
 ]);
 
@@ -299,6 +443,46 @@ const PURE_GLOBAL_CALLS: ReadonlySet<string> = new Set([
   // Structured cloning is a deep copy of its argument.
   "structuredClone",
 ]);
+
+/**
+ * The allowlisted members that can *invoke* a function argument.
+ *
+ * A callable passed by reference only threatens the pure verdict where the
+ * callee might run it (DESIGN.md §4.2 rule 4). `Array.isArray(handler)` and
+ * `Number(handler)` inspect an argument and never call it, so refusing them
+ * over the argument's type would report a call that cannot happen.
+ *
+ * Enumerated from {@link PURE_BUILTINS} rather than derived: this is a claim
+ * about each listed member's semantics, of the same kind as listing it as
+ * effect-free in the first place, and a name missing from here would be a
+ * *widened* verdict rather than a narrowed one. Anything not allowlisted at
+ * all never reaches this question — it is `unknown` on its own name.
+ */
+const HIGHER_ORDER_BUILTINS: ReadonlySet<string> = new Set([
+  ...members("Array", ARRAY_CALLBACK_TAKERS),
+  ...members("ReadonlyArray", ARRAY_CALLBACK_TAKERS),
+  ...members("Uint8Array", ARRAY_CALLBACK_TAKERS),
+  ...members("ArrayConstructor", ["from", "fromAsync"]),
+  ...members("ObjectConstructor", ["groupBy"]),
+  // The replacer may be a function.
+  ...members("String", ["replace", "replaceAll"]),
+  ...members("Map", ["forEach"]),
+  ...members("ReadonlyMap", ["forEach"]),
+  ...members("Set", ["forEach"]),
+  ...members("ReadonlySet", ["forEach"]),
+  ...members("Headers", ["forEach"]),
+  ...members("URLSearchParams", ["forEach"]),
+  ...members("FormData", ["forEach"]),
+  ...members("Promise", ["then", "catch", "finally"]),
+]);
+
+/**
+ * Whether an allowlisted builtin can call a function it is handed. Only these
+ * have to refuse the pure verdict over an opaque callable argument.
+ */
+export function isHigherOrderBuiltin(qualifiedName: string): boolean {
+  return HIGHER_ORDER_BUILTINS.has(qualifiedName);
+}
 
 export function isKnownPureBuiltin(qualifiedName: string): boolean {
   return PURE_BUILTINS.has(qualifiedName);

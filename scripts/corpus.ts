@@ -87,22 +87,27 @@ function fetchTarget(target: CorpusTarget, dir: string): void {
  * carries a tsconfig of its own: overwriting one would be an edit to corpus
  * source, which the pinning exists to rule out.
  */
-function writeCorpusTsconfig(
-  manifest: CorpusManifest,
-  target: CorpusTarget,
-  dir: string,
-): void {
-  const tsconfigPath = path.join(dir, "tsconfig.json");
-  if (existsSync(tsconfigPath)) {
-    const existing = readFileSync(tsconfigPath, "utf8");
-    if (existing !== renderTsconfig(manifest, target)) {
-      throw new Error(
-        `${tsconfigPath} already exists in the corpus checkout; the corpus tsconfig would overwrite it`,
-      );
-    }
-    return;
+function writeCorpusTsconfig(manifest: CorpusManifest, target: CorpusTarget, dir: string): void {
+  // Whether a `tsconfig.json` belongs to the corpus is a question git can
+  // answer exactly: the pinned tree either contains one or it does not.
+  // Comparing file contents instead would make a reformatting of the manifest
+  // look like an edit to corpus source.
+  if (tracked(path.join(repoRoot, ".corpus", target.name), `${target.subdir}/tsconfig.json`)) {
+    throw new Error(
+      `corpus target ${target.name}: ${target.subdir}/tsconfig.json exists at the pinned commit; the corpus tsconfig would overwrite it`,
+    );
   }
-  writeFileSync(tsconfigPath, renderTsconfig(manifest, target));
+  writeFileSync(path.join(dir, "tsconfig.json"), renderTsconfig(manifest, target));
+}
+
+/** Whether the pinned commit tracks `relativePath`. */
+function tracked(repoDir: string, relativePath: string): boolean {
+  try {
+    git(repoDir, "cat-file", "-e", `HEAD:${relativePath}`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function renderTsconfig(manifest: CorpusManifest, target: CorpusTarget): string {
@@ -137,7 +142,9 @@ export function ensureCorpus(): readonly CheckedOutTarget[] {
       observedTree = treeOf(repoDir, target);
     }
     if (observedTree === undefined) {
-      throw new Error(`corpus target ${target.name}: could not read ${target.commit}:${target.subdir}`);
+      throw new Error(
+        `corpus target ${target.name}: could not read ${target.commit}:${target.subdir}`,
+      );
     }
     if (target.tree !== undefined && target.tree !== observedTree) {
       throw new Error(

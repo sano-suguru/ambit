@@ -35,16 +35,21 @@ import {
   parseCapabilitiesTag,
   parseCapability,
 } from "../core/index.ts";
+import { lookupBuiltinEffect } from "../stubs/builtin-effects.ts";
 import {
   isConstructorKey,
+  isHigherOrderConstructor,
   isKnownPureConstructor,
   lookupConstructorEffect,
 } from "../stubs/constructors.ts";
 import { lookupClientEffects } from "../stubs/data-clients.ts";
 import { lookupHttpCapability } from "../stubs/http-capabilities.ts";
 import { lookupStubEffect } from "../stubs/node-builtins.ts";
-import { lookupBuiltinEffect } from "../stubs/builtin-effects.ts";
-import { isKnownPureBuiltin, isKnownPureGlobalCall } from "../stubs/pure-builtins.ts";
+import {
+  isHigherOrderBuiltin,
+  isKnownPureBuiltin,
+  isKnownPureGlobalCall,
+} from "../stubs/pure-builtins.ts";
 import type { ResolvedConfig } from "./config.ts";
 
 /**
@@ -78,7 +83,7 @@ export function summarizeExtractedFiles(
         ...(fn.implicitConstructor ? { implicitConstructor: true as const } : {}),
         ...(fn.configOnly ? { configOnly: true as const } : {}),
         ...merged,
-        calls: fn.calls.map(toCall),
+        calls: fn.calls.flatMap(toCalls),
       });
     }
   }
@@ -405,6 +410,44 @@ export function parseEffectsTag(text: string, aliases?: EffectAliases): EffectSe
  */
 export type EffectAliases = ReadonlyMap<string, readonly KnownEffect[]> | undefined;
 
+/**
+ * One call site as the analysis representation sees it — usually one
+ * {@link Call}, and more than one where the site also hands a function
+ * reference to a callee that runs it (`arr.map(toCall)`).
+ *
+ * The extra entries are ordinary resolved calls: DESIGN.md §4.2 rule 4 says a
+ * higher-order call's callback effects are "inferred from the actual argument
+ * at the call site", and when that argument names a function this project
+ * extracted, the argument *is* the answer. Only a callee already known to
+ * invoke what it is handed produces them, so a call that merely inspects a
+ * function value gains no edge (`src/stubs/pure-builtins.ts`,
+ * `HIGHER_ORDER_BUILTINS`).
+ */
+function toCalls(site: CallSite): readonly Call[] {
+  const call = toCall(site);
+  if (!site.callbackTargets || !invokesItsCallableArguments(call)) return [call];
+  return [
+    call,
+    ...site.callbackTargets.map(
+      (callee): Call => ({ kind: "resolved", location: site.location, callee }),
+    ),
+  ];
+}
+
+/**
+ * Whether the callee this site resolved to is one that runs a function it is
+ * handed. Answered from the verdict rather than from the raw site, because
+ * only a call the tables *answered* has a name whose semantics are known: an
+ * unresolved call is already `unknown`, and attributing a callback's effects
+ * to the caller there would add effects without removing the uncertainty.
+ */
+function invokesItsCallableArguments(call: Call): boolean {
+  if (call.kind !== "known-pure" || call.qualifiedName === undefined) return false;
+  return isConstructorKey(call.qualifiedName)
+    ? isHigherOrderConstructor(call.qualifiedName)
+    : isHigherOrderBuiltin(call.qualifiedName);
+}
+
 function toCall(site: CallSite): Call {
   if (site.mutation) {
     return {
@@ -443,10 +486,12 @@ function toCall(site: CallSite): Call {
     // resolved the callee into TypeScript's default lib: the name alone is not
     // evidence that this `Number` is the builtin one
     // (`src/stubs/pure-builtins.ts`, `PURE_GLOBAL_CALLS`).
+    // Nothing in that table calls what it is handed (`Function` is refused
+    // there for exactly that reason), so an opaque callable argument does not
+    // bear on the verdict the way it does for `Array.map`.
     if (
       site.unresolvedReason === "builtin-method" &&
-      isKnownPureGlobalCall(site.calleeQualifiedName) &&
-      !site.callbackByReference
+      isKnownPureGlobalCall(site.calleeQualifiedName)
     ) {
       return {
         kind: "known-pure",
@@ -481,8 +526,13 @@ function toCall(site: CallSite): Call {
     }
     // A callback passed by reference is never walked, so it can't be
     // trusted as pure even when the method name itself is allowlisted
-    // (CallSite.callbackByReference's doc comment).
-    if (isKnownPureBuiltin(site.pureBuiltinName) && !site.callbackByReference) {
+    // (CallSite.callbackByReference's doc comment) — but only where the
+    // method can actually call it. `Array.isArray(handler)` inspects its
+    // argument; refusing it would report a call that cannot happen.
+    if (
+      isKnownPureBuiltin(site.pureBuiltinName) &&
+      !(site.callbackByReference && isHigherOrderBuiltin(site.pureBuiltinName))
+    ) {
       return { kind: "known-pure", location: site.location, qualifiedName: site.pureBuiltinName };
     }
     return {
@@ -525,7 +575,10 @@ function toConstructorCall(site: CallSite, qualifiedName: string): Call {
   // A callback passed by reference is never walked, so an allowlisted
   // constructor that runs one (`new Promise(namedExecutor)`) cannot be
   // trusted as effect-free (DESIGN.md §4.2 rule 4).
-  if (isKnownPureConstructor(qualifiedName, withoutArguments) && !site.callbackByReference) {
+  if (
+    isKnownPureConstructor(qualifiedName, withoutArguments) &&
+    !(site.callbackByReference && isHigherOrderConstructor(qualifiedName))
+  ) {
     return { kind: "known-pure", location: site.location, qualifiedName };
   }
   return {

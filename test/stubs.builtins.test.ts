@@ -7,7 +7,11 @@ import type { Call, FunctionSummary } from "../src/core/index.ts";
 import { lookupBuiltinEffect } from "../src/stubs/builtin-effects.ts";
 import { isKnownPureConstructor } from "../src/stubs/constructors.ts";
 import { isMutatingBuiltin } from "../src/stubs/mutating-builtins.ts";
-import { isKnownPureBuiltin, isKnownPureGlobalCall } from "../src/stubs/pure-builtins.ts";
+import {
+  isHigherOrderBuiltin,
+  isKnownPureBuiltin,
+  isKnownPureGlobalCall,
+} from "../src/stubs/pure-builtins.ts";
 import { extractFixture } from "./support/extract.ts";
 import { observedEffects } from "./support/summary.ts";
 
@@ -144,11 +148,21 @@ describe("end to end on test/fixtures/builtins", () => {
     expect(await unknownOf("compilesAString")).toBe(true);
   });
 
-  it("refuses an allowlisted method whose callback was passed by reference", async () => {
-    // `Array.map` is allowlisted; the verdict is still `unknown`, because the
-    // callback's body was never walked (DESIGN.md §4.2 rule 4).
+  it("infers a by-reference callback from the function it names (DESIGN.md §4.2 rule 4)", async () => {
     expect(isKnownPureBuiltin("ReadonlyArray.map")).toBe(true);
-    expect(await unknownOf("mapsByReference")).toBe(true);
+    expect(isHigherOrderBuiltin("ReadonlyArray.map")).toBe(true);
+    // The referenced function is pure, so the whole call is.
+    expect(await unknownOf("mapsAReferencedProjectFunction")).toBe(false);
+    // The same shape with an effectful reference stays unknown — through the
+    // reference's own body, not through a blanket refusal.
+    expect(await unknownOf("mapsAReferencedEffectfulFunction")).toBe(true);
+    // A reference this tree did not extract still falls to `unknown`.
+    expect(await unknownOf("mapsAnOpaqueCallback")).toBe(true);
+  });
+
+  it("does not let a callable argument cost a method that cannot call it", async () => {
+    expect(isHigherOrderBuiltin("ArrayConstructor.isArray")).toBe(false);
+    expect(await unknownOf("inspectsAFunctionValue")).toBe(false);
   });
 
   it("reports the clock and randomness as env against a pure declaration", async () => {

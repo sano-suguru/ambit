@@ -3,11 +3,7 @@
   "tsconfig": {
     "compilerOptions": {
       "target": "ES2023",
-      "lib": [
-        "ES2023",
-        "DOM",
-        "DOM.Iterable"
-      ],
+      "lib": ["ES2023", "DOM", "DOM.Iterable"],
       "module": "Preserve",
       "moduleResolution": "Bundler",
       "strict": true,
@@ -20,10 +16,7 @@
       "allowArbitraryExtensions": true,
       "resolveJsonModule": true
     },
-    "include": [
-      "**/*.ts",
-      "**/*.tsx"
-    ],
+    "include": ["**/*.ts", "**/*.tsx"],
     "exclude": [
       "**/node_modules/**",
       "**/*.test.ts",
@@ -78,9 +71,7 @@
       "compilerOptions": {
         "baseUrl": ".",
         "paths": {
-          "~/*": [
-            "./*"
-          ]
+          "~/*": ["./*"]
         }
       },
       "$comment": "The repository maps its own `~/*` imports onto `drizzle-orm/src/*` in a tsconfig outside the measured subtree. Reproducing that mapping is corpus setup, not analysis: without it every internal import fails to resolve and the target would measure module resolution rather than contract analysis.",

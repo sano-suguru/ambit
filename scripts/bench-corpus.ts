@@ -21,7 +21,12 @@
  */
 
 import process from "node:process";
-import { computeCoverage, legacyTsBackend, propagate, summarizeExtractedFiles } from "../src/checker/index.ts";
+import {
+  computeCoverage,
+  legacyTsBackend,
+  propagate,
+  summarizeExtractedFiles,
+} from "../src/checker/index.ts";
 import type { UnresolvedReason } from "../src/core/index.ts";
 import { type CheckedOutTarget, ensureCorpus } from "./corpus.ts";
 
@@ -77,7 +82,9 @@ async function measure(target: CheckedOutTarget): Promise<TargetResult> {
     tree: target.observedTree,
     filesAnalyzed: coverage.filesAnalyzed,
     functionsTotal: coverage.functionsExtracted,
-    functionsKnown: coverage.functionsExtracted - Math.round(coverage.functionUnknownRate * coverage.functionsExtracted),
+    functionsKnown:
+      coverage.functionsExtracted -
+      Math.round(coverage.functionUnknownRate * coverage.functionsExtracted),
     functionsUnknown: Math.round(coverage.functionUnknownRate * coverage.functionsExtracted),
     unknownRate: coverage.functionUnknownRate,
     boundaryRate: coverage.functionBoundaryRate,
@@ -123,16 +130,16 @@ if (asJson) {
   const reasonTotals = new Map<UnresolvedReason, number>();
   for (const result of results) {
     console.log(`## ${result.name} — ${result.what}`);
-    console.log(`   ${result.commit.slice(0, 12)} ${result.subdir} (tree ${result.tree.slice(0, 12)})`);
+    console.log(
+      `   ${result.commit.slice(0, 12)} ${result.subdir} (tree ${result.tree.slice(0, 12)})`,
+    );
     console.log(
       `   files=${result.filesAnalyzed} functions=${result.functionsTotal} known=${result.functionsKnown} unknown=${result.functionsUnknown}`,
     );
     console.log(
       `   unknown-rate=${percent(result.unknownRate)} boundary-rate=${percent(result.boundaryRate)}`,
     );
-    console.log(
-      `   call-sites=${result.callSitesTotal} unresolved=${result.callSitesUnresolved}`,
-    );
+    console.log(`   call-sites=${result.callSitesTotal} unresolved=${result.callSitesUnresolved}`);
     console.log(
       `   unresolved-by-reason: ${result.unresolvedByReason.map(([r, n]) => `${r}=${n}`).join(", ") || "none"}`,
     );
