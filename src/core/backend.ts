@@ -372,7 +372,7 @@ export interface ExtractedProject {
  *
  * Implementations live under `src/checker/backend/`. The only one is
  * `legacy-ts.ts`, adopted as the default by DESIGN.md §3.5
- * 「既定バックエンド（決定）」, and it must stay the only file that imports
+ * and ADR-0001, and it must stay the only file that imports
  * `typescript`. `test/backend.conformance.test.ts` states what any
  * implementation of this interface has to satisfy.
  */

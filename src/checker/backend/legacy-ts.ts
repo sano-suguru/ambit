@@ -26,7 +26,7 @@ import { isMutatingBuiltin } from "../../stubs/mutating-builtins.ts";
  * `TsBackend` implementation on the TypeScript Compiler API (DESIGN.md §3.4).
  *
  * **This is the adopted backend**, not a placeholder. M0.5's comparison ran and
- * chose it — DESIGN.md §3.5「既定バックエンド（決定）」, with the measurements
+ * chose it — DESIGN.md §3.5 and `docs/adr/0001-analysis-backend.md`, with the measurements
  * in `docs/status.md`. The native TypeScript 7 engine (Go) was faster on every
  * corpus and was still not adopted: its API is published entirely under
  * `unstable/`, it answers from a stale snapshot unless told which files

@@ -1,6 +1,6 @@
 # Implementation status against the milestones
 
-Where the code stands against `docs/DESIGN.md` §11's milestones. This file
+Where the code stands against `ROADMAP.md`'s milestones. This file
 records *implementation status*, not design — the specification itself is
 `docs/DESIGN.md`, and nothing here changes it.
 
@@ -8,9 +8,9 @@ Measured on 2026-09-09, Node.js v24.20.0, macOS (darwin arm64), Apple M1,
 8 cores, 16 GiB. Every number below was run, not estimated.
 
 **Verdict: not a release candidate.** M0.5 is now complete — all five gates
-ran, and the default backend is decided (DESIGN.md §3.5 "Default backend
-(decided)": the legacy TypeScript Compiler API). M1 still has no incremental
-path, and M2–M4 are partial. The details are per row.
+ran, and the default backend is decided (DESIGN.md §3.5, ADR-0001: the legacy
+TypeScript Compiler API). M1 still has no incremental path, and M2–M4 are
+partial. The details are per row.
 
 ## Baseline commands
 
@@ -172,7 +172,7 @@ the change added no AMB-E001.
 The remaining 64% unknown rate is dominated by `external-module` (264), which is almost
 entirely calls into the `typescript` compiler API from the connection layer —
 the one file that is meant to be replaceable. It is a real number, not a
-target that has been met: DESIGN.md §10's goal is 30% for an *adopting team*
+target that has been met: `ROADMAP.md`'s goal is 30% for an *adopting team*
 after three months, which no one has done.
 
 It had gone **up** from 63.2% (86/136) before local mutation was decided —
@@ -193,12 +193,12 @@ else was added to the allowlist.
 
 ## Adopting-team-equivalent code (`check test/fixtures/realistic-api --coverage`)
 
-DESIGN.md §10's `unknown`-rate target is about a team's own code, not about
+`ROADMAP.md`'s `unknown`-rate target is about a team's own code, not about
 Ambit's connection layer, so it is measured against
 `test/fixtures/realistic-api` — a Node backend of the shape a coding agent
 produces (HTTP handlers with `@entrypoint` contracts, a `pg` pool, a Prisma
 client, a `mysql2` pool, two LLM SDKs, a barrel file, pure domain logic). **This is not a team**,
-and it does not satisfy §10, which requires a real adopting team after three
+and it does not satisfy that target, which requires a real adopting team after three
 months. It is the fixture that makes the number measurable at all.
 
 | Figure | Before the client stubs | After the client stubs | After the runtime hooks |
@@ -355,7 +355,7 @@ Every number here was run on 2026-09-09, Node.js v24.20.0, macOS (darwin
 arm64), Apple M1, 8 cores, 16 GiB, from this repository. The procedure is
 `scripts/m05-backend-compare.ts`, `scripts/m05-update-correctness.ts`,
 `scripts/m05-corpus.ts` and `scripts/m05-probe/native-primitives.ts`; the
-decision they led to is DESIGN.md §3.5 "Default backend (decided)".
+decision they led to is DESIGN.md §3.5, recorded in ADR-0001.
 
 Two things in this section were corrected after first being written, and both
 corrections are kept in place rather than edited out: gate 2's cause (it is
@@ -369,10 +369,10 @@ which is what the repository was pinned to, and 6.0.3 was measured afterwards
 (see "The version within the adopted line" below) and adopted. And `typescript`
 7.0.2 — npm's `latest` — through `typescript/unstable/sync`, a JavaScript
 client talking to a Go engine in a child process. Oxc was not carried forward from
-Appendix A: it is a parser, and §3.5 gate 4 forbids comparing parsing against
+ADR-0001's appendix: it is a parser, and §3.5 gate 4 forbids comparing parsing against
 type-aware analysis. Nothing was measured for a backend that did not run.
 
-**Appendix A.2's blocker is gone.** It recorded the Go engine failing at
+**The preliminary evaluation's blocker is gone.** ADR-0001's appendix recorded the Go engine failing at
 `/proc/self/exe` before initializing. That was environment-specific: the same
 distributed 7.0.2 starts on this machine, opens a project, and answers symbol,
 type and JSDoc queries. Everything below is therefore a first measurement, not
@@ -410,7 +410,7 @@ Fixed: only the implementation is extracted (`bodyless-declaration` is a new
 `SkippedFunctionKind`), calls resolve to the implementation, an overload set
 with no implementation is `overload-without-body`, and a contract written on a
 bodyless signature is AMB-E003 instead of being silently dropped. The rule is
-DESIGN.md §4.1 "Overloads and bodyless declarations (decided)";
+DESIGN.md §4.1 "Overloads and bodyless declarations";
 `ExtractedFile.functions` now states id-uniqueness as a backend requirement,
 because `propagate`'s termination argument rests on it.
 
@@ -616,7 +616,7 @@ outside this package's dependency tree; `test/architecture.test.ts` asserts that
 
 The comparison above was framed as "legacy vs native" and took 5.9.3 as given.
 It was not given: `git log` shows it entering at the first commit
-(`2d98301 chore: project scaffolding`) and never revisited, and Appendix A
+(`2d98301 chore: project scaffolding`) and never revisited, and the preliminary evaluation
 records it as "installed under a comparison alias" — the *representative
 of the old API*,
 never a considered product choice. One side of a decision about which analyzer
@@ -672,7 +672,7 @@ releases.
 ### Decision
 
 **The JavaScript-implementation TypeScript Compiler API is the default for the
-initial release, at version 6.0.3.** DESIGN.md §3.5 "Default backend (decided)"
+initial release, at version 6.0.3.** DESIGN.md §3.5 and ADR-0001
 records it, with the reasoning and the conditions that would reopen it. In one
 line: adopting the native engine means a second backend on an API published
 entirely under `unstable/`, plus owning snapshot invalidation on pain of silent
@@ -693,7 +693,7 @@ it is a claim the tree no longer supports.
 
 | | |
 |---|---|
-| Spec section | §11 M0 |
+| Spec section | `ROADMAP.md` M0 |
 | Acceptance | review complete |
 | Implemented | `docs/DESIGN.md`, `docs/diagnostics/README.md` (15 codes), `AGENTS.md` |
 | Evidence | files in tree |
@@ -703,11 +703,11 @@ it is a claim the tree no longer supports.
 
 | | |
 |---|---|
-| Spec section | §3.5, Appendix A |
+| Spec section | §3.5, ADR-0001 |
 | Acceptance | publish §3.5 evidence, adopt a default backend |
-| Implemented | **All five gates ran.** Allowances fixed in DESIGN.md §3.5 *before* measuring. Gate 1: `test/backend.conformance.test.ts` (28 tests) against the `TsBackend` interface, plus a native primitive probe. Gate 2: both compilers on the same tsconfigs and the same tree. Gate 3: `scripts/m05-update-correctness.ts`. Gate 4: `scripts/m05-backend-compare.ts` + `scripts/m05-corpus.ts`, 5 interleaved runs per corpus, equal counts enforced. Gate 5: install size, platform coverage, failure modes, `bin` collision. **Default backend decided**: the legacy Compiler API (DESIGN.md §3.5 "Default backend (decided)"). Pre-publish, so §9 sends it to `docs/DESIGN.md` directly rather than to an RFC |
+| Implemented | **All five gates ran.** Allowances fixed in DESIGN.md §3.5 *before* measuring. Gate 1: `test/backend.conformance.test.ts` (28 tests) against the `TsBackend` interface, plus a native primitive probe. Gate 2: both compilers on the same tsconfigs and the same tree. Gate 3: `scripts/m05-update-correctness.ts`. Gate 4: `scripts/m05-backend-compare.ts` + `scripts/m05-corpus.ts`, 5 interleaved runs per corpus, equal counts enforced. Gate 5: install size, platform coverage, failure modes, `bin` collision. **Default backend decided**: the legacy Compiler API (DESIGN.md §3.5, recorded in `docs/adr/0001-analysis-backend.md`). Pre-publish, so §9 sends it to `docs/DESIGN.md` and an ADR directly rather than to an RFC |
 | Evidence | The "M0.5 — the backend comparison, measured" section above, including "The version within the adopted line" (why `typescript` is 6.0.3 and not the scaffolding default 5.9.3). Every figure was run; the one corpus where the two backends did not do equal work is labelled not comparable rather than turned into a ratio |
-| Outstanding | **Linux is not re-verified.** Appendix A's `/proc/self/exe` failure was environment-specific and the engine runs on darwin/arm64; no Linux run was made in this comparison, so nothing is claimed about it either way. Gate 1's native column checked `getFullyQualifiedName` reconstruction on **one** symbol shape, not on the external-package or project-`.d.ts` shapes. Gates 3 and 4 are worth re-running once §6.2's resident path exists, which is the second of §3.5's three reopening conditions — until then native's 1 ms re-query has nowhere in the product to appear. `conformance/` as a published, external suite (§9) still waits for the first publish; `test/backend.conformance.test.ts` is its stand-in |
+| Outstanding | **Linux is not re-verified.** ADR-0001's `/proc/self/exe` failure was environment-specific and the engine runs on darwin/arm64; no Linux run was made in this comparison, so nothing is claimed about it either way. Gate 1's native column checked `getFullyQualifiedName` reconstruction on **one** symbol shape, not on the external-package or project-`.d.ts` shapes. Gates 3 and 4 are worth re-running once §6.2's resident path exists, which is the second of §3.5's three reopening conditions — until then native's 1 ms re-query has nowhere in the product to appear. `conformance/` as a published, external suite (§9) still waits for the first publish; `test/backend.conformance.test.ts` is its stand-in |
 
 ### M1 — effects, unknown, coverage, JSON diagnostics, init, resident path
 
@@ -751,7 +751,7 @@ it is a claim the tree no longer supports.
 
 ### M5 — Phase 1 exit criteria
 
-Out of reach and out of scope for technical work: §10's exit condition is a
+Out of reach and out of scope for technical work: the Phase 1 exit condition is a
 real team showing a measured change in delivery speed and incident rate. No
 sample, self-test, or synthetic benchmark substitutes for it. Nothing in this
 repository claims progress against it.

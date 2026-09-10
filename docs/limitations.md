@@ -488,7 +488,7 @@ signature, `abstract` member, or `.ts`-file `declare`.
 
 This number is not a target that has been met, and it is dominated by
 `external-module` — almost entirely calls into the TypeScript compiler API from
-the one file meant to be replaceable. DESIGN.md §10's goal of 30% is for an
+the one file meant to be replaceable. `ROADMAP.md`'s goal of 30% is for an
 *adopting team*. `docs/status.md` records that figure separately, measured
 against `test/fixtures/realistic-api`, and the two must not be mixed.
 
@@ -655,7 +655,8 @@ Limits of what the adapters guarantee:
 
 ## Backend
 
-The current analysis backend (`src/checker/backend/legacy-ts.ts`) is a
-connection layer over the TypeScript compiler API, treated as replaceable
-until the validation gate in DESIGN.md §3.5 passes. No performance numbers
-are claimed for it.
+The analysis backend (`src/checker/backend/legacy-ts.ts`) is a connection layer
+over the TypeScript compiler API. It is the adopted default (DESIGN.md §3.5,
+ADR-0001), and it stays replaceable: the conditions that would reopen the choice
+are written down in §3.5, and no performance number is claimed for a backend
+that has not been run.

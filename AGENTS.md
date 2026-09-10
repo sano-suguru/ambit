@@ -93,8 +93,8 @@ record is one line: an issue, or a §12 bullet. Never an essay.
 `src/core/` and `src/stubs/` MUST NOT import `typescript`. The only file
 allowed to import it is `src/checker/backend/legacy-ts.ts` —
 `test/architecture.test.ts` enforces this boundary. `legacy-ts.ts` is the
-**adopted** product backend: `docs/DESIGN.md` §3.5 "Default backend (decided)"
-chose it over native TypeScript 7 on compatibility grounds, with the
+**adopted** product backend: `docs/DESIGN.md` §3.5 and
+`docs/adr/0001-analysis-backend.md` chose it over native TypeScript 7, with the
 measurements in `docs/status.md`. Changing the default now requires an RFC
 (§9), and the boundary above is what makes that reviewable — do not weaken it
 because the backend is settled.
@@ -213,22 +213,37 @@ directly — fixtures alone cannot catch a shape only the real codebase has.
 
 - Actual behavior → `src/`, `test/`
 - Product specification → `docs/DESIGN.md`
+- **Why** a design is the one in the specification → `docs/adr/`
 - Diagnostic codes → `docs/diagnostics/`
 - Agent working rules → this file
 - External-facing explanation → `README.md`
+- Framework integration guides → `docs/integrations/`
 - Implementation limitations in detail (README's overflow) →
   `docs/limitations.md`
 - Milestone-by-milestone implementation status, with measured numbers →
   `docs/status.md`
+- Milestones, success metrics, Phase 1 exit criterion → `ROADMAP.md`
 
 Do not write product specification into this file.
 
+`docs/DESIGN.md` carries the current design and the limits of what it
+guarantees — nothing else. The options that were considered, the measurements
+behind a choice, and what would have happened otherwise go in a `docs/adr/`
+record, which `docs/DESIGN.md` links to in one line. Test the split the same way
+as the specification/status one: a sentence that would still be true if all the
+code were discarded **and** that a reader has to know to use Ambit correctly
+belongs in `docs/DESIGN.md`; a sentence that only explains how the project
+arrived there belongs in the ADR. Never renumber a `docs/DESIGN.md` chapter —
+`src/` and `test/` cite them by number in the hundreds.
+
 RFC procedure (`docs/DESIGN.md` §9) applies from the first npm publish
-onward. Before that, edit `docs/DESIGN.md` and this file directly.
+onward. Before that, edit `docs/DESIGN.md` directly and write the record in
+`docs/adr/`.
 
 ## Language
 
-Write in English: `README.md`, `docs/DESIGN.md`, `docs/limitations.md`,
-diagnostic message text, `docs/diagnostics/`, this file. Write in Japanese:
-`docs/goals/`, RFCs, commit messages, issues. Keep `effects`, `capabilities`,
+Write in English: `README.md`, `docs/DESIGN.md`, `docs/adr/`,
+`docs/integrations/`, `docs/limitations.md`, `ROADMAP.md`, diagnostic message
+text, `docs/diagnostics/`, this file. Write in Japanese: `docs/goals/`, RFCs,
+commit messages, issues. Keep `effects`, `capabilities`,
 `budget`, `boundary`, and `unknown` in English in both.
