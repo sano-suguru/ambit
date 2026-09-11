@@ -349,6 +349,40 @@ function unresolvedClassificationOf(call: CallFacts): string {
     .join(" ");
 }
 
+/**
+ * `id` and location out of `${id} ${severity} ${location} ${message}` — a
+ * diagnostic's identity. Severity and message are content: if they differ, the
+ * pair is a `value-mismatch` that names the site, not a missing entry.
+ */
+const DIAGNOSTIC_KEY_FIELDS: readonly number[] = [0, 2];
+
+/** Location and wrapper name out of a runtime-wrapper line; capabilities, budget and handler are content. */
+const WRAPPER_KEY_FIELDS: readonly number[] = [0, 1];
+
+/** Split each space-joined line into (identity fields, everything else). */
+function keyedLines(
+  lines: readonly string[],
+  keyFields: readonly number[],
+): ReadonlyMap<string, string> {
+  const map = new Map<string, string>();
+  for (const line of lines) {
+    const fields = line.split(" ");
+    const key = keyFields.map((index) => fields[index] ?? "").join(" ");
+    const rest = fields.filter((_, index) => !keyFields.includes(index)).join(" ");
+    // A duplicate key would silently drop one of the two. Numbering makes the
+    // pair comparable instead, the same way call sites are keyed by ordinal.
+    let unique = key;
+    for (let n = 2; map.has(unique); n++) unique = `${key} #${n}`;
+    map.set(unique, rest);
+  }
+  return map;
+}
+
+/** The identity half of a line key, reported as the divergence's location. */
+function describeLineKey(key: string): { symbol?: SymbolId; location?: string } {
+  return { location: key };
+}
+
 function mapOf<T>(items: readonly T[], key: (item: T) => string, value: (item: T) => string) {
   const map = new Map<string, string>();
   for (const item of items) map.set(key(item), value(item));
@@ -521,35 +555,26 @@ export function compareFacts(input: CompareInput): ShadowReport {
   increases = authorityIncreases(diff).length;
 
   // --- diagnostics, wrappers, skipped, uncarried --------------------------
+  // Keyed on identity, valued on content. Keying a diagnostic or a wrapper on
+  // its *whole* rendered line made every difference read as one entry missing
+  // and one extra, with `present` on both sides and no symbol or location to
+  // read — 16 such pairs on `test/fixtures/wrappers` said nothing about what
+  // differed. Splitting the line puts the disagreement in the value, where a
+  // reader can see it, and makes `shadow-missing` mean what it says: the
+  // shadow backend produced no diagnostic there at all.
   const diagnostics = compareKeyed(
     "diagnostic",
-    mapOf(
-      authority.diagnostics,
-      (line) => line,
-      () => "present",
-    ),
-    mapOf(
-      shadow.diagnostics,
-      (line) => line,
-      () => "present",
-    ),
-    () => ({}),
+    keyedLines(authority.diagnostics, DIAGNOSTIC_KEY_FIELDS),
+    keyedLines(shadow.diagnostics, DIAGNOSTIC_KEY_FIELDS),
+    describeLineKey,
   );
   divergences.push(...diagnostics.divergences);
 
   const runtimeWrappers = compareKeyed(
     "runtime-wrapper",
-    mapOf(
-      authority.runtimeWrappers,
-      (line) => line,
-      () => "present",
-    ),
-    mapOf(
-      shadow.runtimeWrappers,
-      (line) => line,
-      () => "present",
-    ),
-    () => ({}),
+    keyedLines(authority.runtimeWrappers, WRAPPER_KEY_FIELDS),
+    keyedLines(shadow.runtimeWrappers, WRAPPER_KEY_FIELDS),
+    describeLineKey,
   );
   divergences.push(...runtimeWrappers.divergences);
 

@@ -37,6 +37,11 @@
 
 import { existsSync } from "node:fs";
 import path from "node:path";
+// A pure `<path> -> <package name>` function with no compiler in it, imported
+// rather than copied so both backends spell the rule once. A duplicate would
+// let a divergence mean "the two path parsers disagree", which is the one
+// thing this comparison must never be measuring.
+import { installedPackageNameOf } from "../../src/checker/backend/legacy-ts.ts";
 import type {
   CallSite,
   ExtractedFile,
@@ -75,13 +80,6 @@ export const NOT_PORTED: readonly string[] = [
   // factory returned). Only the namespace/default-import origin is ported, so
   // `pg.Pool.query` and `mysql2/promise.Pool.query` are named on the legacy
   // side and unnamed here.
-  "qualified-name:constructed-receiver",
-  "qualified-name:factory-receiver",
-  // `installedTypeQualifiedNameOf` / `packageTypeNameOf`: naming a receiver by
-  // the *package type* it is declared with, so `checker: ts.TypeChecker` gives
-  // `typescript.TypeChecker.getTypeAtLocation`. This is the largest single gap
-  // measured — 63 of the 133 divergences on `src`.
-  "qualified-name:installed-type-receiver",
   // `objectLiteralReceiverTarget` / `constructedInstanceMemberTarget`: a call
   // through a receiver whose value is certainly one object literal or one
   // constructed class instance. `objectLiteralMemberTarget` *is* ported.
@@ -89,7 +87,6 @@ export const NOT_PORTED: readonly string[] = [
   "resolution:instance-member",
   // `reExportHopsOf` / `deepestPackageHop`: naming a binding by the package it
   // was re-exported from rather than by the module the source imported.
-  "qualified-name:re-export-hop",
   // `loadProjectConfig`'s no-tsconfig fallback. The native API opens a project
   // by config path, so a root with no `tsconfig.json` throws here instead of
   // scanning for `.ts` files.
@@ -117,6 +114,69 @@ export const nativeTs7Backend: TsBackend = {
 
 /** @effects fs_read */
 async function extractProject(rootDir: string): Promise<ExtractedProject> {
+  return (await extractProjectTimed(rootDir, false)).project;
+}
+
+/**
+ * What one profiled extraction measured.
+ *
+ * Two independent sources, because neither alone answers the question the
+ * 2026-09-12 note left open — whether the native engine's shrinking advantage
+ * is compiler work or boundary crossings:
+ *
+ * - `totals` is the API's own accumulator (`API({ collectTiming: true })`).
+ *   `serverTimeMs` is the compiler's work, `transportOverheadMs` is round trip
+ *   minus that. This is the half that says *where the time went*.
+ * - `callsByMethod` is counted here, by wrapping the `Checker` and `Program`
+ *   in a counting proxy. This is the half that says *what was asked*, and it
+ *   has to be counted locally: the API keeps only a five-entry ring buffer of
+ *   recent requests (`RECENT_REQUEST_CAPACITY` in its `dist/api/timing.js`),
+ *   so its per-request log cannot produce a per-method profile of a run that
+ *   makes thousands.
+ *
+ * Comparing the two is itself a measurement: `totals.requestCount` below the
+ * summed call count is client-side caching, and the gap is how much of the
+ * query volume never crosses the boundary at all.
+ */
+export interface NativeTimingTotals {
+  readonly requestCount: number;
+  readonly roundTripMs: number;
+  readonly serverTimeMs: number;
+  readonly transportOverheadMs: number;
+  readonly bytesSent: number;
+  readonly bytesReceived: number;
+  readonly nodesMaterialized: number;
+  readonly sourceFilesFetched: number;
+  readonly nodesFetched: number;
+}
+
+export interface NativeExtractionProfile {
+  readonly totals: NativeTimingTotals;
+  /** `"checker.getTypeAtLocation"` → how many times the extraction called it. */
+  readonly callsByMethod: ReadonlyMap<string, number>;
+}
+
+export interface TimedExtraction {
+  readonly project: ExtractedProject;
+  /** `undefined` when profiling was not requested — never an empty profile, which would read as "nothing was asked". */
+  readonly profile: NativeExtractionProfile | undefined;
+}
+
+/**
+ * `extractProject` with the API's request accounting optionally turned on.
+ *
+ * Profiling is not free: the API records every request, and the counting proxy
+ * adds a property lookup per checker call. The wall-clock numbers in any
+ * parity report must therefore come from a run with it *off*, which is why
+ * `extractProject` above delegates with `false` rather than this being the
+ * default path.
+ *
+ * @effects fs_read
+ */
+export async function extractProjectTimed(
+  rootDir: string,
+  profile: boolean,
+): Promise<TimedExtraction> {
   const c = await loadCompiler();
   const { API } = c.api;
   const absoluteRoot = path.resolve(rootDir);
@@ -124,14 +184,72 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
     throw new Error(`project root not found or not a directory: ${absoluteRoot}`);
   }
   const configPath = findConfigFile(absoluteRoot);
-  const api = new API({ cwd: path.dirname(configPath) });
+  const api = new API({ cwd: path.dirname(configPath), collectTiming: profile });
   try {
     const project = api.updateSnapshot({ openProjects: [configPath] }).getProjects()[0];
     if (!project) throw new Error(`no project opened for ${configPath}`);
-    return new Extractor(c, project, absoluteRoot).run();
+    const callsByMethod = profile ? new Map<string, number>() : undefined;
+    const extracted = new Extractor(c, project, absoluteRoot, callsByMethod).run();
+    return {
+      project: extracted,
+      profile: callsByMethod ? { totals: totalsOf(api), callsByMethod } : undefined,
+    };
   } finally {
     api.close();
   }
+}
+
+/**
+ * The API's accumulated totals, refused rather than defaulted when collection
+ * is off: a profile whose zero requests mean "timing never ran" is the failure
+ * mode DESIGN.md §3.4 names for a check that never started.
+ */
+function totalsOf(api: Any): NativeTimingTotals {
+  const info = api.getTimingInfo?.();
+  if (!info?.enabled) {
+    throw new Error("collectTiming was requested but the API reports timing disabled");
+  }
+  const t = info.totals ?? {};
+  const n = (value: unknown): number => Number(value ?? 0);
+  return {
+    requestCount: n(t.requestCount),
+    roundTripMs: n(t.roundTripMs),
+    serverTimeMs: n(t.serverTimeMs),
+    transportOverheadMs: n(t.transportOverheadMs),
+    bytesSent: n(t.bytesSent),
+    bytesReceived: n(t.bytesReceived),
+    nodesMaterialized: n(t.nodesMaterialized),
+    sourceFilesFetched: n(t.sourceFilesFetched),
+    nodesFetched: n(t.nodesFetched),
+  };
+}
+
+/**
+ * `target` with every method call counted under `<label>.<method>`.
+ *
+ * A proxy rather than hand-written wrappers because the point is to profile
+ * what the extraction *actually* asks, including a method added later and
+ * forgotten here. Bound once per method so the identity comparisons the
+ * extractor makes on nodes are unaffected — the proxy sits on the checker and
+ * the program, never on anything it returns.
+ */
+function countingProxy(target: Any, label: string, counts: Map<string, number>): Any {
+  const bound = new Map<string, Any>();
+  return new Proxy(target, {
+    get(object: Any, property: string | symbol): Any {
+      const value = object[property];
+      if (typeof value !== "function" || typeof property !== "string") return value;
+      const existing = bound.get(property);
+      if (existing) return existing;
+      const key = `${label}.${property}`;
+      const wrapper = (...args: readonly unknown[]): unknown => {
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+        return value.apply(object, args);
+      };
+      bound.set(property, wrapper);
+      return wrapper;
+    },
+  });
 }
 
 /** The same upward search `ts.findConfigFile` does on the legacy side. */
@@ -148,6 +266,55 @@ function findConfigFile(from: string): string {
     }
     dir = parent;
   }
+}
+
+/** One `from "<specifier>"` an alias chain passes through, with the name exported there. */
+interface ReExportHop {
+  readonly specifier: string;
+  readonly name: string;
+}
+
+/**
+ * Which hop names the binding for stub-matching purposes: the deepest one with
+ * a *bare* specifier, and otherwise the first.
+ *
+ * Deepest is not simply right. A package's own types re-export internally
+ * (`export { helper } from "./internal.js"` inside `node_modules/pkg`), and
+ * the deepest hop there is a path inside the package, which means nothing
+ * outside it — `pkg.helper` is the name. A bare specifier always names a
+ * package or a Node.js builtin, which is what the bundled tables are keyed on.
+ */
+function deepestPackageHop(hops: readonly ReExportHop[]): ReExportHop | undefined {
+  for (let i = hops.length - 1; i >= 0; i--) {
+    const hop = hops[i];
+    if (hop && !hop.specifier.startsWith(".")) return hop;
+  }
+  return hops[0];
+}
+
+/** `x as T`, `x satisfies T` and `(x)` are the same expression for naming purposes. */
+function unwrapTypeOnlyExpression(is: Any, expression: Node): Node {
+  let current = expression;
+  while (
+    is.isSatisfiesExpression(current) ||
+    is.isAsExpression(current) ||
+    is.isParenthesizedExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+/**
+ * The module specifier of the `declare module "…"` a declaration sits inside,
+ * or `undefined` when it sits in none. A `namespace` (an unquoted module
+ * declaration) is not one and names nothing here.
+ */
+function ambientModuleNameOf(is: Any, declaration: Node): string | undefined {
+  for (let node: Node | undefined = declaration; node; node = node.parent) {
+    if (is.isModuleDeclaration(node) && is.isStringLiteral(node.name)) return node.name.text;
+  }
+  return undefined;
 }
 
 const CONTRACT_TAGS = ["effects", "capabilities", "budget", "entrypoint", "boundary"] as const;
@@ -217,6 +384,7 @@ class Extractor {
   private readonly ast: Any;
   private readonly is: Any;
   private readonly K: Any;
+  private readonly NodeFlags: Any;
   private readonly SymbolFlags: Any;
   private readonly program: Any;
   private readonly checker: Any;
@@ -224,15 +392,27 @@ class Extractor {
   private readonly project: Any;
   private readonly absoluteRoot: string;
 
-  constructor(c: { api: Any; ast: Any; is: Any }, project: Any, absoluteRoot: string) {
+  constructor(
+    c: { api: Any; ast: Any; is: Any },
+    project: Any,
+    absoluteRoot: string,
+    callCounts?: Map<string, number>,
+  ) {
     this.project = project;
     this.absoluteRoot = absoluteRoot;
     this.ast = c.ast;
     this.is = c.is;
     this.K = c.ast.SyntaxKind;
+    this.NodeFlags = c.ast.NodeFlags;
     this.SymbolFlags = c.api.SymbolFlags;
-    this.program = project.program;
-    this.checker = project.checker;
+    // The proxies wrap the two API objects and nothing they return, so node
+    // and symbol identity — which the extractor compares — is untouched.
+    this.program = callCounts
+      ? countingProxy(project.program, "program", callCounts)
+      : project.program;
+    this.checker = callCounts
+      ? countingProxy(project.checker, "checker", callCounts)
+      : project.checker;
   }
 
   run(): ExtractedProject {
@@ -719,19 +899,21 @@ class Extractor {
   private jsDocRangeOf(sourceFile: Node, decl: Node): { jsDocRange?: SourceLocation } {
     if (this.is.isSourceFile(decl)) return {};
     const target = this.jsDocTarget(decl);
-    // The two compilers do not attach JSDoc blocks alike. Where a declaration
-    // is preceded by a file-level block and its own, the legacy checker's
-    // `getJSDocCommentsAndTags` reports **one** block and `node.jsDoc` here
-    // reports **two**; `getLeadingCommentRanges` reports two as well, so the
-    // trivia is not a way around it. More than one block has no single right
-    // place for a fix to add to either way, so both sides fall back to a new
-    // block of its own — the ranges simply differ in which declarations reach
-    // that fallback. Measured: three `jsDocRange` divergences on `src`
-    // (`cli/github.ts#githubData`, `runtime/hono.ts#ambitHandler`,
-    // `stubs/pure-builtins.ts#members`), none on the fixture corpus.
+    // Two adjacent blocks above one declaration are not two owners of it, and
+    // that is the whole of the difference the previous port read as a compiler
+    // disagreement. `ts.getJSDocCommentsAndTags` runs `filterOwnedJSDocTags`,
+    // which keeps **only the last** block as a `JSDoc` node and reduces every
+    // earlier one to its `@overload` tags — so a declaration preceded by a
+    // prose block and then its own contract block reports one block on the
+    // legacy side and two in `node.jsDoc` here. Taking the last block is the
+    // same rule, not a guess: it is also the block whose tags
+    // `getJSDocTags` returns, which is why the two sides already agreed about
+    // the tags while disagreeing about where they were written.
+    //
+    // Verified against `node_modules/typescript/lib/typescript.js`
+    // (`getJSDocCommentsAndTags` / `filterOwnedJSDocTags`, 6.0.3).
     const blocks = [...(target.jsDoc ?? [])];
-    if (blocks.length !== 1) return {};
-    const block = blocks[0];
+    const block = blocks[blocks.length - 1];
     if (!block || block.getSourceFile() !== sourceFile) return {};
     // A JSDoc node's own text is trivia, so `getStart()` skips *past* the
     // comment and `getFullStart()` sits wherever the preceding trivia began —
@@ -1238,7 +1420,7 @@ class Extractor {
   private qualifiedNameOf(
     expr: Node,
     aliasResolved: boolean,
-    _factoryOriginAllowed: boolean,
+    factoryOriginAllowed: boolean,
   ): string | undefined {
     const is = this.is;
     if (is.isIdentifier(expr)) {
@@ -1249,32 +1431,300 @@ class Extractor {
       return expr.text;
     }
     if (is.isPropertyAccessExpression(expr)) {
-      // Only the namespace/default-import origin is ported — see NOT_PORTED.
-      const segments: string[] = [];
-      let current: Node = expr;
-      while (is.isPropertyAccessExpression(current)) {
-        segments.unshift(current.name.text);
-        current = current.expression;
-      }
-      if (!is.isIdentifier(current)) return undefined;
-      const origin = this.moduleSpecifierOf(current);
-      return origin ? `${origin}.${segments.join(".")}` : undefined;
+      return this.memberChainQualifiedNameOf(expr, factoryOriginAllowed);
     }
     return undefined;
   }
 
-  /** `import { readFileSync } from "node:fs"` → `node:fs.readFileSync`. */
-  private importedQualifiedNameOf(expr: Node): string | undefined {
+  /**
+   * `<origin>.<property path>` for a property access — the shadow half of
+   * `memberChainQualifiedNameOf`.
+   *
+   * Of the legacy origins, the namespace/default import is ported here and the
+   * constructed-class and factory-result ones are not (`NOT_PORTED`). What is
+   * ported below it is the *fallback*: naming the receiver by the package type
+   * it is declared with, which is the origin that reaches a client a module is
+   * handed rather than one it builds.
+   */
+  private memberChainQualifiedNameOf(
+    expr: Node,
+    factoryOriginAllowed: boolean,
+  ): string | undefined {
     const is = this.is;
-    const symbol = this.checker.getSymbolAtLocation(expr);
-    const declaration = symbol?.declarations?.[0]?.resolve(this.project);
-    if (!declaration || !is.isImportSpecifier(declaration)) return undefined;
-    const importDeclaration = declaration.parent?.parent?.parent;
+    const segments: string[] = [];
+    let current: Node = expr;
+    while (is.isPropertyAccessExpression(current)) {
+      segments.unshift(current.name.text);
+      current = current.expression;
+    }
+    const origin = is.isIdentifier(current)
+      ? (this.moduleSpecifierOf(current) ??
+        this.constructedClassQualifiedNameOf(current) ??
+        (factoryOriginAllowed ? this.factoryResultQualifiedNameOf(current) : undefined))
+      : undefined;
+    if (origin) return `${origin}.${segments.join(".")}`;
+    return factoryOriginAllowed ? this.installedTypeQualifiedNameOf(expr) : undefined;
+  }
+
+  /**
+   * `"pg.Pool"` for `const pool = new Pool(...)` with `Pool` imported from
+   * `"pg"` — the class a `const` was constructed from.
+   *
+   * `const` is the premise and the whole of it: it fixes the binding, not the
+   * object's properties, which is the same width DESIGN.md §4.2 rule 7 already
+   * states. A `let` may hold something else by the time the call runs.
+   */
+  private constructedClassQualifiedNameOf(receiver: Node): string | undefined {
+    const declaration = this.constInitializedVariableOf(receiver);
+    if (!declaration) return undefined;
+    const initializer = unwrapTypeOnlyExpression(this.is, declaration.initializer);
+    if (!this.is.isNewExpression(initializer)) return undefined;
+    return this.importedQualifiedNameOfExpression(initializer.expression);
+  }
+
+  /**
+   * `"mysql2/promise.Pool"` for `const pool = createPool(...)` — the type an
+   * imported *factory* handed back, and the same through `await`.
+   *
+   * Both halves are evidence rather than spelling: the specifier is the one
+   * the source wrote followed through re-exports, and it has to be bare
+   * because every bundled table is keyed on a package or a Node.js builtin;
+   * the type name is read off the call expression's own type, never off the
+   * variable's annotation, which §4.2 rule 7 forbids letting decide.
+   */
+  private factoryResultQualifiedNameOf(receiver: Node): string | undefined {
+    const is = this.is;
+    const declaration = this.constInitializedVariableOf(receiver);
+    if (!declaration) return undefined;
+
+    // The `await`ed form is the same fact one step later: the factory returns
+    // a promise of the client, and the client is what the binding holds.
+    const value = unwrapTypeOnlyExpression(is, declaration.initializer);
+    const call = is.isAwaitExpression(value)
+      ? unwrapTypeOnlyExpression(is, value.expression)
+      : value;
+    if (!is.isCallExpression(call)) return undefined;
+
+    const specifier = this.importedModuleSpecifierOf(call.expression);
+    if (specifier === undefined || specifier.startsWith(".")) return undefined;
+
+    const typeName = this.packageTypeNameOf(this.checker.getTypeAtLocation(value));
+    return typeName === undefined ? undefined : `${specifier}.${typeName}`;
+  }
+
+  /**
+   * The `const` variable declaration an identifier is bound by, with an
+   * initializer — the premise both receiver-origin rules above share.
+   */
+  private constInitializedVariableOf(receiver: Node): Node | undefined {
+    const is = this.is;
+    if (!is.isIdentifier(receiver)) return undefined;
+    const symbol = this.checker.getSymbolAtLocation(receiver);
+    if (!symbol) return undefined;
+    const resolved =
+      (symbol.flags & this.SymbolFlags.Alias) !== 0
+        ? this.checker.getAliasedSymbol(symbol)
+        : symbol;
+    const declaration = this.declarationsOf(resolved)[0];
+    if (!declaration || !is.isVariableDeclaration(declaration)) return undefined;
+    if ((declaration.parent?.flags & this.NodeFlags.Const) === 0) return undefined;
+    return declaration.initializer ? declaration : undefined;
+  }
+
+  /** `importedQualifiedNameOf` over an arbitrary expression, not only an identifier. */
+  private importedQualifiedNameOfExpression(expr: Node): string | undefined {
+    const is = this.is;
+    if (is.isIdentifier(expr)) {
+      const named = this.namedImportQualifiedNameOf(expr);
+      if (named) return named;
+      const defaultSpecifier = this.defaultImportSpecifierOf(expr);
+      // The module's default export has no name of its own to borrow — the
+      // local binding's spelling is the importer's choice, not the module's.
+      return defaultSpecifier === undefined ? undefined : `${defaultSpecifier}.default`;
+    }
+    if (is.isPropertyAccessExpression(expr)) {
+      const moduleSpecifier = this.moduleSpecifierOf(expr.expression);
+      return moduleSpecifier === undefined ? undefined : `${moduleSpecifier}.${expr.name.text}`;
+    }
+    return undefined;
+  }
+
+  private importedModuleSpecifierOf(expr: Node): string | undefined {
+    const is = this.is;
+    if (is.isIdentifier(expr)) {
+      const symbol = this.checker.getSymbolAtLocation(expr);
+      if (!symbol) return undefined;
+      const hop = deepestPackageHop(this.reExportHopsOf(symbol));
+      return hop?.specifier ?? this.defaultImportSpecifierOf(expr);
+    }
+    if (is.isPropertyAccessExpression(expr)) return this.moduleSpecifierOf(expr.expression);
+    return undefined;
+  }
+
+  private defaultImportSpecifierOf(expr: Node): string | undefined {
+    const is = this.is;
+    const declaration = this.declarationsOf(this.checker.getSymbolAtLocation(expr))[0];
+    if (!declaration || !is.isImportClause(declaration)) return undefined;
+    const importDeclaration = declaration.parent;
     if (!importDeclaration || !is.isImportDeclaration(importDeclaration)) return undefined;
     const specifier = importDeclaration.moduleSpecifier;
-    if (!specifier || !is.isStringLiteral(specifier)) return undefined;
-    const imported: string = declaration.propertyName?.text ?? declaration.name?.text ?? "";
-    return imported ? `${specifier.text}.${imported}` : undefined;
+    return specifier && is.isStringLiteral(specifier) ? specifier.text : undefined;
+  }
+
+  /**
+   * `"<package>.<type name>.<property path>"` for a member chain whose
+   * receiver no binding rule can follow — a class field, a parameter, or an
+   * earlier call's result.
+   *
+   * This is the port of `installedTypeQualifiedNameOf` /
+   * `installedTypeNameOf` / `packageTypeNameOf`, and it is the first gap
+   * closed because of what it sits on rather than because of its count: the
+   * chain `receiver origin -> qualified name -> stub lookup -> effect ->
+   * authority` is what turns `pool.query(...)` into a `db_read`, so a backend
+   * that cannot name the receiver cannot match a stub, and a stub it cannot
+   * match is an effect it does not report.
+   *
+   * The chain is walked toward its root and the **root-most** named receiver
+   * wins, exactly as on the legacy side, so a client reached through a
+   * delegate keeps the key the client tables use.
+   */
+  private installedTypeQualifiedNameOf(expr: Node): string | undefined {
+    const is = this.is;
+    const path: string[] = [];
+    let current: Node = expr;
+    let named: string | undefined;
+    while (is.isPropertyAccessExpression(current)) {
+      path.unshift(current.name.text);
+      const receiver = current.expression;
+      const origin = this.installedTypeNameOf(receiver);
+      if (origin !== undefined) named = [origin, ...path].join(".");
+      current = receiver;
+    }
+    return named;
+  }
+
+  /**
+   * `"<package>.<type name>"` for an expression whose type a package declares.
+   *
+   * Both halves have to come from the package: a declaration out of
+   * `node_modules` is named from the path it resolved through, and anything
+   * else only from a `declare module "…"` it sits inside. The split is the
+   * legacy one and load-bearing — `@types/node` writes its surface inside
+   * ambient modules, and reading the ambient name first would key
+   * `fs.Stats.isDirectory` beside the `node:fs.*` rows the import specifier
+   * already produces.
+   */
+  private installedTypeNameOf(expr: Node): string | undefined {
+    const type = this.checker.getTypeAtLocation(expr);
+    const typeName = this.packageTypeNameOf(type);
+    if (typeName === undefined) return undefined;
+
+    const declaration = this.declarationsOf(type.getSymbol?.())[0];
+    if (!declaration) return undefined;
+
+    const file = declaration.getSourceFile();
+    const packageName = this.program.isSourceFileFromExternalLibrary(file)
+      ? installedPackageNameOf(file.fileName)
+      : ambientModuleNameOf(this.is, declaration);
+    return packageName === undefined ? undefined : `${packageName}.${typeName}`;
+  }
+
+  /**
+   * The declared name of a type whose every declaration is a class or
+   * interface in a declaration file other than the compiler's own lib.
+   *
+   * `getSymbol()` rather than `getAliasSymbol()`: an alias is the spelling at
+   * the use site, and this name has to be the one the declaring module gave
+   * the type.
+   */
+  private packageTypeNameOf(type: Node): string | undefined {
+    const is = this.is;
+    const symbol = type?.getSymbol?.();
+    if (!symbol) return undefined;
+    const name: string | undefined = symbol.name;
+    // An anonymous object type is named `__type`; this refuses the whole
+    // `__`-prefixed internal namespace rather than relying on the declaration
+    // check below to catch that one case.
+    if (!name || name.startsWith("__")) return undefined;
+
+    const declarations = this.declarationsOf(symbol);
+    if (declarations.length === 0) return undefined;
+    for (const declaration of declarations) {
+      if (!is.isClassDeclaration(declaration) && !is.isInterfaceDeclaration(declaration)) {
+        return undefined;
+      }
+      const file = declaration.getSourceFile();
+      if (!file.isDeclarationFile || this.program.isSourceFileDefaultLibrary(file)) {
+        return undefined;
+      }
+    }
+    return name;
+  }
+
+  /**
+   * `import { readFileSync } from "node:fs"` → `node:fs.readFileSync`, through
+   * however many re-export hops sit between the binding and the declaration.
+   *
+   * The chain matters for a barrel: `import { readFileSync } from
+   * "./lib/index.ts"` with the barrel re-exporting `"node:fs"` has to name
+   * `node:fs.readFileSync`, or the bundled effect table misses it.
+   */
+  private importedQualifiedNameOf(expr: Node): string | undefined {
+    return this.importedQualifiedNameOfExpression(expr);
+  }
+
+  private namedImportQualifiedNameOf(expr: Node): string | undefined {
+    const symbol = this.checker.getSymbolAtLocation(expr);
+    if (!symbol) return undefined;
+    const hop = deepestPackageHop(this.reExportHopsOf(symbol));
+    return hop === undefined ? undefined : `${hop.specifier}.${hop.name}`;
+  }
+
+  /**
+   * Every `from "<specifier>"` between an identifier's binding and the
+   * declaration behind it, outermost first. Stops at the first declaration
+   * that is not an import/export specifier — that is where the binding is
+   * really declared — and on a cycle, which a malformed re-export can produce.
+   */
+  private reExportHopsOf(symbol: Node): readonly ReExportHop[] {
+    const hops: ReExportHop[] = [];
+    const seen = new Set<Node>();
+    let current: Node | undefined = symbol;
+
+    while (current && !seen.has(current)) {
+      seen.add(current);
+      const hop = this.reExportHopOf(this.declarationsOf(current)[0]);
+      if (hop) hops.push(hop);
+      // Only an alias has an immediate target; asking a non-alias asserts.
+      if ((current.flags & this.SymbolFlags.Alias) === 0) break;
+      current = this.checker.getImmediateAliasedSymbol(current);
+    }
+    return hops;
+  }
+
+  private reExportHopOf(declaration: Node | undefined): ReExportHop | undefined {
+    const is = this.is;
+    if (!declaration) return undefined;
+    if (is.isImportSpecifier(declaration)) {
+      const importDeclaration = declaration.parent?.parent?.parent;
+      if (!importDeclaration || !is.isImportDeclaration(importDeclaration)) return undefined;
+      const specifier = importDeclaration.moduleSpecifier;
+      if (!specifier || !is.isStringLiteral(specifier)) return undefined;
+      const name: string | undefined = declaration.propertyName?.text ?? declaration.name?.text;
+      return name ? { specifier: specifier.text, name } : undefined;
+    }
+    // `export { x } from "m"`. A local re-export (`export { x }`, no `from`)
+    // has no specifier of its own and contributes no hop — the chain walks
+    // past it to whatever declares `x`.
+    if (is.isExportSpecifier(declaration)) {
+      const exportDeclaration = declaration.parent?.parent;
+      if (!exportDeclaration || !is.isExportDeclaration(exportDeclaration)) return undefined;
+      const specifier = exportDeclaration.moduleSpecifier;
+      if (!specifier || !is.isStringLiteral(specifier)) return undefined;
+      const name: string | undefined = declaration.propertyName?.text ?? declaration.name?.text;
+      return name ? { specifier: specifier.text, name } : undefined;
+    }
+    return undefined;
   }
 
   /** `import * as fs from "node:fs"` / `import fs from "node:fs"` → `node:fs`. */
@@ -1670,34 +2120,74 @@ class Extractor {
     return capabilities;
   }
 
+  /**
+   * The budget a runtime wrapper's spec fixes, or `undefined` when the spec is
+   * not a literal this comparison can read.
+   *
+   * The keys are DESIGN.md §4.5's four — `timeMs`, `costUsd`, `llmCalls`,
+   * `onExceed` — and getting them wrong is not a cosmetic port slip: a wrapper
+   * whose budget reads as absent produces no AMB-E011 where the wrapper and
+   * the `@budget` tag drift apart, so the shadow side reported **four fewer
+   * error diagnostics** on `test/fixtures/wrappers` than the adopted one. That
+   * is authority enforcement disappearing, which is the direction DESIGN.md
+   * §3.4 forbids, and it was invisible until the wrapper comparison was keyed
+   * on identity instead of on its whole rendered line.
+   */
   private literalBudgetOf(spec: Node): WrapperBudget | undefined {
     const is = this.is;
-    if (!spec || !is.isObjectLiteralExpression(spec)) return undefined;
-    const value = this.specProperty(spec, "budget");
-    if (!value) {
-      // A spec that writes no budget at all fixes it as absent.
-      return { kind: "absent" };
-    }
-    if (!is.isObjectLiteralExpression(value)) return undefined;
-    const budget: { calls?: number; ms?: number; onExceed?: string } = {};
-    for (const property of value.properties) {
-      if (!is.isPropertyAssignment(property)) return undefined;
-      if (!property.name || !is.isIdentifier(property.name)) return undefined;
-      const key = property.name.text;
-      const initializer = property.initializer;
-      if (key === "calls" || key === "ms") {
-        const numeric = this.numericLiteralOf(initializer);
-        if (numeric === undefined) return undefined;
-        budget[key] = numeric;
-      } else if (key === "onExceed") {
-        if (!is.isStringLiteral(initializer)) return undefined;
-        if (!isOnExceed(initializer.text)) return undefined;
-        budget.onExceed = initializer.text;
-      } else {
+    if (!spec) return undefined;
+    const literal = unwrapTypeOnlyExpression(is, spec);
+    if (!is.isObjectLiteralExpression(literal)) return undefined;
+    if (literal.properties.some((member: Node) => is.isSpreadAssignment(member))) return undefined;
+
+    const property = literal.properties.find(
+      (member: Node) =>
+        is.isPropertyAssignment(member) &&
+        member.name &&
+        is.isIdentifier(member.name) &&
+        member.name.text === "budget",
+    );
+    // A spec that writes no budget at all fixes it as absent.
+    if (!property) return { kind: "absent" };
+
+    const object = unwrapTypeOnlyExpression(is, property.initializer);
+    if (!is.isObjectLiteralExpression(object)) return undefined;
+    if (object.properties.some((member: Node) => is.isSpreadAssignment(member))) return undefined;
+
+    let timeMs: number | undefined;
+    let costUsd: number | undefined;
+    let llmCalls: number | undefined;
+    let onExceed: string | undefined;
+
+    for (const member of object.properties) {
+      if (!is.isPropertyAssignment(member) || !member.name || !is.isIdentifier(member.name)) {
         return undefined;
       }
+      const value = unwrapTypeOnlyExpression(is, member.initializer);
+      if (member.name.text === "onExceed") {
+        if (!is.isStringLiteral(value) && !is.isNoSubstitutionTemplateLiteral(value)) {
+          return undefined;
+        }
+        if (!isOnExceed(value.text)) return undefined;
+        onExceed = value.text;
+        continue;
+      }
+      const numeric = this.numericLiteralOf(value);
+      if (numeric === undefined) return undefined;
+      if (member.name.text === "timeMs") timeMs = numeric;
+      else if (member.name.text === "costUsd") costUsd = numeric;
+      else if (member.name.text === "llmCalls") llmCalls = numeric;
+      // A key outside §4.5's four is not a budget this comparison understands.
+      else return undefined;
     }
-    return { kind: "literal", ...budget } as WrapperBudget;
+
+    return {
+      kind: "literal",
+      ...(timeMs === undefined ? {} : { timeMs }),
+      ...(costUsd === undefined ? {} : { costUsd }),
+      ...(llmCalls === undefined ? {} : { llmCalls }),
+      ...(onExceed === undefined ? {} : { onExceed }),
+    } as WrapperBudget;
   }
 
   private numericLiteralOf(node: Node): number | undefined {
