@@ -82,10 +82,10 @@ files=3 functions=3 declared=1
 exit=1
 ```
 
-No file here contains both the declaration and the `fetch`: `rates.ts` fetches a
-rate, which is what a rates module does, and nothing in it mentions `pure`. The
-violation exists only in the path between the three, which is why a rule that
-reads one node, one function, or one file at a time has nothing to fire on.
+No file here contains both the declaration and the `fetch`, and each is locally
+unremarkable — a rates module fetching a rate. The violation exists only in the
+path between the three, which is why a rule that reads one file at a time has
+nothing to fire on.
 
 Now the second edit — the one Ambit itself offers as a fix candidate, in the
 `--format json` output an agent reads (`"kind":"widen"`):
@@ -128,12 +128,12 @@ grants nothing.
 exit=1
 ```
 
-That is a real run against this repository, with `test/fixtures/accident`'s
-declaration widened in the working tree. The path is the one `check` printed,
-and the last line is what to paste into `ambit.approvals.md` if the increase is
-the correct change. Only increases are gated — narrowing a contract is never
-taxed — and an approval that was already in the base grants nothing, so the
-record has to be made in the change that makes the increase.
+That is a real run, with `test/fixtures/accident`'s declaration widened in the
+working tree. The path is the one `check` printed, and the last line is what to
+paste into `ambit.approvals.md` if the increase is the correct change. Only
+increases are gated — narrowing is never taxed — and an approval that was
+already in the base grants nothing, so the record is made in the change that
+makes the increase.
 
 TypeScript accepts both edits: the types line up either way. It tells you
 whether a value has the type you expect, not whether a function is allowed to do
@@ -159,10 +159,9 @@ values you construct — so the code is written in that style throughout — Amb
 static contracts are JSDoc comments on ordinary TypeScript: adding them changes
 no runtime behavior, and removing Ambit is a small diff.
 
-A sandbox is the other axis, not a competitor: it decides what a process may do
-while it runs, and knows nothing about which function asked. Ambit's own runtime
-hooks are the narrow overlap, and they are opt-in per entrypoint — *Static
-check, runtime block*, below.
+A sandbox is the other axis: it decides what a process may do while it runs, and
+knows nothing about which function asked. Ambit's runtime hooks are the narrow
+overlap, opt-in per entrypoint — *Static check, runtime block*, below.
 
 ## What Ambit controls
 
@@ -242,14 +241,12 @@ fails it.
 
 **The capability list and the budget are written once, in the registration.**
 A literal `spec` whose `handler` names a declaration in the same file *is* that
-handler's `@capabilities` and `@budget`, so the checker reads the same values
-the runtime will enforce — and the contract stays a value in the module, which
-survives a build that strips comments. `@effects` and `@entrypoint` stay in the
-JSDoc, because the runtime never reads them; writing the tags as well is still
-allowed and still checked, and `AMB-E010` / `AMB-E011` fail the check if the two
-halves disagree. (`docs/DESIGN.md` §4.1 "Where declarations live" has the full
-rule; §4.4 "The range this does not reach" covers what happens when a `spec`
-cannot supply the declaration.)
+handler's `@capabilities` and `@budget`, so the checker reads the values the
+runtime will enforce, and the contract survives a build that strips comments.
+`@effects` and `@entrypoint` stay in the JSDoc, because the runtime never reads
+them. Writing the tags as well is allowed and still checked — `AMB-E010` /
+`AMB-E011` fail on a disagreement. `docs/DESIGN.md` §4.1 has the rule, and §4.4
+the two registrations it cannot read.
 
 At run time `withAmbit` puts that capability set on the context, and four hooks
 check operations against it — `installFetchHook()`, `installFsHook()`,
@@ -259,33 +256,19 @@ every decision is recorded on the context's audit trail, and `timeMs` is
 measured against the wall clock. Each install returns the function that
 restores the original, so removing Ambit is one call.
 
-A grant names `http:<method>:<host>`, `fs:read:` / `fs:write:` with the path
-resolved to an absolute path at the call, `proc:spawn:` with argv[0] as
-written, or `db:read:` / `db:write:` with the database the connection names.
+A grant names `http:<method>:<host>`, `fs:read:` / `fs:write:`, `proc:spawn:`,
+or `db:read:` / `db:write:`. What each target is taken from at the call, and why
+a shell spawn names the shell rather than the program inside the command string,
+is `docs/DESIGN.md` §4.4 "Target formats".
 
 ### Framework adapters
 
-On Hono, the adapter registers the same handler instead of a hand-written
-`withAmbit`:
-
-```ts
-import { Hono } from "hono";
-import { ambitHandler } from "ambit-ts/runtime/hono";
-
-const app = new Hono();
-
-app.get("/rates", ambitHandler(
-  { capabilities: ["http:get:api.example.com"], budget: { timeMs: 500 } },
-  refreshRates,
-  (c) => [c.req.query("currency") ?? "USD"] as const,
-));
-```
-
-Next.js App Router is supported for Node.js **Route Handlers** in
-`app/**/route.ts`, through `ambitRoute`. Server Actions, `middleware.ts`, the
-Pages Router, and any route on the Edge runtime are **not enforced** — see
-[docs/integrations/nextjs.md](docs/integrations/nextjs.md) for the registration,
-the `instrumentation.ts` hook install, and the coverage table.
+Two exist, and both carry the contract in the registration instead of a
+hand-written `withAmbit`: `ambitHandler` on Hono
+([docs/integrations/hono.md](docs/integrations/hono.md)), and `ambitRoute` on
+Next.js App Router, for Node.js **Route Handlers** in `app/**/route.ts` only —
+Server Actions, `middleware.ts`, the Pages Router and the Edge runtime are
+**not enforced** ([docs/integrations/nextjs.md](docs/integrations/nextjs.md)).
 
 Express, BullMQ and the rest have no adapter. A route registered without one
 establishes no context, and `setUnscopedPolicy("allow" | "warn" | "deny")`
@@ -326,36 +309,12 @@ exit=1
 visible as a `::notice` carrying the reason that was given, rather than
 disappearing — the point of the ledger is that no increase passes unseen.
 
-A new symbol has no base to compare against, so the authority it holds is an
-increase in full, and a capability is compared by containment rather than by
-text: `http:get:*` narrowing to `http:get:api.example.com` is not an increase,
-and the reverse is. Here both kinds land on one added function:
-
-```console
-$ node src/cli/main.ts diff HEAD src; echo "exit=$?"
-base HEAD (58d9a0b) vs the working tree, over src
-
-2 authorities increased without approval:
-
-  core/authority-diff.ts#leakedHelper (core/authority-diff.ts:418)  [new symbol]
-    + network
-      operation: fetch (core/authority-diff.ts:419)
-    - `core/authority-diff.ts#leakedHelper` `effect:network` — <why this increase is correct>
-
-  core/authority-diff.ts#leakedHelper (core/authority-diff.ts:418)  [new symbol]
-    + capability http:get:exfil.example.com
-    - `core/authority-diff.ts#leakedHelper` `capability:http:get:exfil.example.com` — <why this increase is correct>
-
-Add each line above to ambit.approvals.md, with the reason, and
-commit it in the same change (DESIGN.md §6.3). An approval already in the base
-grants nothing.
-
-339 symbols unchanged, out of 340 symbols compared.
-exit=1
-```
-
-That is a real run against this repository, with one function added to
-`src/core/authority-diff.ts` that fetches from `exfil.example.com`.
+Three rules decide what counts. A **new symbol** has no base to compare
+against, so the authority it holds is an increase in full — added code is not
+exempt for having no history. A **capability** is compared by containment, not
+by text: `http:get:*` narrowing to `http:get:api.example.com` is not an
+increase, and the reverse is. And each authority is approved **separately**, so
+a function that gains both an effect and a capability needs two lines.
 
 A change can also make Ambit see *less* than it did — a call through a client no
 stub table covers, added to a function that was already `unknown`. That is not
@@ -379,13 +338,12 @@ $ node src/cli/main.ts check src --format json
 $ node src/cli/main.ts check src --format json    # re-check
 ```
 
-The patch Ambit offers widens the contract to what the code actually does — the
-second edit in *The accident*, above. It is marked
-`consistentWithContract: false` and carries the callers it would affect, so the
-agent, or the human reading its output, can tell "the contract was wrong" from
-"the code was wrong". Ambit does not invent the other patch, the one that keeps
-the contract and rewrites the code; `ambit diff` is what makes sure the widening
-one is not applied in silence.
+The patch widens the contract to what the code actually does — the second edit
+in *The accident*, above. It is marked `consistentWithContract: false` and
+carries the callers it would affect, so the reader can tell "the contract was
+wrong" from "the code was wrong". Ambit does not invent the other patch, the one
+that keeps the contract and rewrites the code; `ambit diff` is what keeps the
+widening one from being applied in silence.
 
 ## What Ambit does not guarantee
 
