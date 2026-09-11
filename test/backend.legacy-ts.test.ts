@@ -375,6 +375,37 @@ describe("legacyTsBackend.extractProject (self-hosting)", () => {
       }),
     );
   });
+
+  it("names a call through a parameter from the package the type resolved through", async () => {
+    // `checker.getSymbolAtLocation(...)` — the receiver is a parameter, so no
+    // origin rule reaches it, and `typescript` is a real installed package
+    // rather than a fixture's `declare module`. Only a self-hosting assertion
+    // covers that half of the rule: every fixture declares its own types.
+    const { files } = await extractFixture(SRC_ROOT);
+    const named = files
+      .find((f) => f.filePath === "checker/backend/legacy-ts.ts")
+      ?.functions.find(
+        (fn) => fn.id === "checker/backend/legacy-ts.ts#constructedClassQualifiedNameOf",
+      );
+    expect(named?.calls.map((c) => c.calleeQualifiedName)).toContain(
+      "typescript.TypeChecker.getSymbolAtLocation",
+    );
+  });
+
+  it("leaves a receiver `@types/node` declares unnamed", async () => {
+    // `fs.statSync(root).isDirectory()` — `@types/node` writes its surface
+    // inside `declare module "fs"`, so reading that ambient name would key
+    // `fs.Stats.isDirectory` beside the `node:fs.*` rows the import specifier
+    // already produces. The builtins have one spelling, not two.
+    const { files } = await extractFixture(SRC_ROOT);
+    const extract = files
+      .find((f) => f.filePath === "checker/backend/legacy-ts.ts")
+      ?.functions.find((fn) => fn.id === "checker/backend/legacy-ts.ts#extractProject");
+    // Asserted against the call that is there, so a rename cannot make the
+    // negative vacuously true.
+    expect(extract?.calls.map((c) => c.calleeQualifiedName)).toContain("node:fs.statSync");
+    expect(extract?.calls.some((c) => c.calleeQualifiedName?.startsWith("fs."))).toBe(false);
+  });
 });
 
 describe("legacyTsBackend.extractProject (cross-module alias resolution)", () => {
@@ -614,20 +645,30 @@ describe("legacyTsBackend.extractProject (factory-created client receivers)", ()
     expect(call?.unresolvedReason).toBe("ambient-declaration");
   });
 
-  it("names nothing for a `let` receiver, an anonymous return type, or a project-local factory", async () => {
+  it("names nothing when nothing the packages declare covers the receiver", async () => {
     const { files } = await extractFixture(FACTORY_ROOT);
     for (const id of [
-      "mutable-binding.ts#readsThroughMutableBinding",
       "anonymous-result.ts#callsAnonymousResult",
       "project-factory.ts#callsProjectFactoryResult",
-      // A project-local wrapper around the package's own factory: the
-      // specifier is a path, and no bundled table is keyed on one.
-      "wrapper-client.ts#readsThroughProjectWrapper",
     ]) {
       // Asserted against the call that is there, not against an empty list: a
       // mistyped id would make "no name" vacuously true.
       expect(callsOf(files, id)).toHaveLength(1);
       expect(nameOf(files, id)).toEqual([undefined]);
+    }
+  });
+
+  it("falls back to the receiver's declared type where the factory rule names nothing", async () => {
+    // A `let` binding and a project-local wrapper both defeat the factory
+    // rule — one because the binding may be reassigned, the other because its
+    // specifier is a path. Neither changes which package declares what the
+    // receiver holds, and that is what names these two.
+    const { files } = await extractFixture(FACTORY_ROOT);
+    for (const id of [
+      "mutable-binding.ts#readsThroughMutableBinding",
+      "wrapper-client.ts#readsThroughProjectWrapper",
+    ]) {
+      expect(nameOf(files, id)).toEqual(["widget-store.Store.get"]);
     }
   });
 
@@ -637,6 +678,83 @@ describe("legacyTsBackend.extractProject (factory-created client receivers)", ()
     // call proven effect-free into an unresolved one.
     const { files } = await extractFixture(FACTORY_ROOT);
     const call = callsOf(files, "default-lib-result.ts#readsThroughDefaultLibResult")[0];
+    expect(call?.calleeQualifiedName).toBeUndefined();
+    expect(call?.pureBuiltinName).toBe("Map.get");
+  });
+});
+
+describe("legacyTsBackend.extractProject (receivers a package type names)", () => {
+  const HELD_ROOT = path.join(import.meta.dirname, "fixtures", "held-receiver");
+
+  function callsOf(
+    files: Awaited<ReturnType<typeof legacyTsBackend.extractProject>>["files"],
+    id: string,
+  ) {
+    for (const file of files) {
+      const fn = file.functions.find((f) => f.id === id);
+      if (fn) return fn.calls;
+    }
+    return [];
+  }
+
+  function nameOf(
+    files: Awaited<ReturnType<typeof legacyTsBackend.extractProject>>["files"],
+    id: string,
+  ) {
+    return callsOf(files, id).map((c) => c.calleeQualifiedName);
+  }
+
+  it("names a client held in a class field, injected, or passed as a parameter", async () => {
+    // None of these is a binding the origin rules can follow, and all three
+    // are the ordinary way server code holds a client. Before this rule every
+    // one of them was unnamed, so no bundled table could fire on it.
+    const { files } = await extractFixture(HELD_ROOT);
+    for (const id of [
+      "class-field.ts#FieldHolder.read",
+      "injected.ts#InjectedHolder.read",
+      "parameter.ts#readsThroughParameter",
+    ]) {
+      expect(nameOf(files, id)).toContain("widget-store.Client.read");
+    }
+  });
+
+  it("names a call whose receiver is an earlier call in a fluent chain", async () => {
+    // `client.table("widgets").where("stale").del()` — the receiver of `del`
+    // is no binding at all, which is where a query builder puts every verb
+    // that fixes the direction of the statement.
+    const { files } = await extractFixture(HELD_ROOT);
+    expect(nameOf(files, "fluent-chain.ts#ChainHolder.purge")).toEqual([
+      "widget-store.Query.del",
+      "widget-store.Query.where",
+      "widget-store.Client.table",
+    ]);
+  });
+
+  it("keys a delegate call on the client, not on the delegate's own type", async () => {
+    // The root-most named receiver wins, so the key has the shape the client
+    // table already uses for `@prisma/client.PrismaClient.user.findMany`.
+    const { files } = await extractFixture(HELD_ROOT);
+    expect(nameOf(files, "delegate.ts#DelegateHolder.list")).toContain(
+      "widget-store.Hub.users.findMany",
+    );
+  });
+
+  it("names nothing for a receiver the project's own source declares", async () => {
+    // A project-local interface has no package to key on, and its
+    // implementations are bodies DESIGN.md §4.2 rule 7 decides through the
+    // receiver's value instead.
+    const { files } = await extractFixture(HELD_ROOT);
+    expect(callsOf(files, "project-interface.ts#readsThroughProjectInterface")).toHaveLength(1);
+    expect(nameOf(files, "project-interface.ts#readsThroughProjectInterface")).toEqual([undefined]);
+  });
+
+  it("leaves a receiver the compiler's own lib declares on the pure-builtin path", async () => {
+    // `hub.entries().get("k")` — naming this `widget-store.Map.get` would turn
+    // a call proven effect-free into an unresolved one.
+    const { files } = await extractFixture(HELD_ROOT);
+    const call = callsOf(files, "default-lib-receiver.ts#readsDefaultLibResult").find(
+      (c) => c.pureBuiltinName !== undefined,
+    );
     expect(call?.calleeQualifiedName).toBeUndefined();
     expect(call?.pureBuiltinName).toBe("Map.get");
   });

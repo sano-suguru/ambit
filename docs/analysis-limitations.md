@@ -98,10 +98,13 @@ the property path written at the call site — `pg.Pool.query`,
 come from the project's own source, so a locally written `declare module "pg"`
 and an installed `pg` produce the same key.
 
-Two limits follow from that:
+Three limits follow from that:
 
-- The receiver must be a `const`, and its initializer one of the two ways a
-  package hands out a client:
+- The receiver must be one a package's own types describe. Three rules name
+  one, tried in that order — two that follow the receiver's *origin*, and one
+  that reads its *type* when no origin can be followed. The origin rules take a
+  `const` whose initializer is one of the two ways a package hands out a
+  client:
   - **`new <ImportedClass>(…)`**, followed through imports and re-exports. The
     type's name here is the identifier the source wrote.
   - **a call of an imported function** — `createPool(…)`, and the same through
@@ -116,9 +119,32 @@ Two limits follow from that:
     returning `Map` on the pure-builtin path below rather than turning a call
     proven effect-free into an unresolved one.
 
-  A client held in a class field, bound with `let`, or returned by a method on
-  another client (`pool.getConnection()`) is still not matched and reports
-  `unknown`.
+  Where neither applies — a class field, a parameter, a `let`, the result of an
+  earlier call in a chain — the receiver's **declared type** names it instead,
+  as `<package>.<type name>.<property path>`. Every declaration of that type
+  has to be a class or interface a package declares: inside a `declare module
+  "…"`, which names its own module, or in a `.d.ts` that came from
+  `node_modules`, named by the directory it resolved through — the name the
+  source would have had to import it under, so an aliased install is named by
+  its alias exactly as the origin rules name it (`@types/<pkg>` answers as
+  `<pkg>`; `@types/node` is refused, because Node's builtins are already keyed
+  from the import specifier). The chain is
+  walked toward its root and the root-most named receiver wins, so a delegate
+  keeps the client's own key shape —
+  `this.prisma.user.findMany()` is `@prisma/client.PrismaClient.user.findMany`.
+
+  A type is weaker evidence than an origin, and the difference is stated rather
+  than hidden: it says which package API the call site was type-checked
+  against, not which object will answer. A subclass may override the method
+  named here — the same gap DESIGN.md §4.2 rule 7 already states for method
+  resolution on class instances, and no wider.
+
+  What this rule does **not** name: a receiver whose type this project
+  declares (its own interface — §4.2 rule 7 decides those through the value),
+  one the compiler's own lib declares (which would take the call off the
+  pure-builtin path), an anonymous object type, and an interface merged with a
+  namespace — `knex`'s own `Knex` root is one, so `db.select(…)` is unnamed
+  while the `from(…)` that follows it is named.
 - **A name is not a verdict.** A receiver these rules name is looked up in the
   table and, on a miss, stays `unresolved` exactly as an unnamed one does —
   what changes is that it now appears in `--coverage`'s
@@ -255,12 +281,12 @@ if that function declares a contract. It is counted under `unresolved-symbol` in
 `--coverage` — or under the more specific reason the callee's own declaration
 gives (`builtin-method`, `external-module`, `ambient-declaration`). It is
 counted *without a name* unless one could be built, and a name is only built
-for a bare identifier, or a property access whose receiver traces back to an
-import, or to a `const` constructed from an imported class, or to a `const`
-holding an imported factory's result (see "The database and LLM client table"
-above for both `const` forms and their conditions). A call through a
-parameter, a class field, or a `let` gets no name and appears nowhere but the
-reason counts. See Reading `--coverage` below.
+for a bare identifier, for a property access whose receiver traces back to an
+import or to a `const` constructed from an imported class or holding an
+imported factory's result, or — failing all of those — for one whose receiver's
+declared type a package declares (see "The database and LLM client table" above
+for all three forms and their conditions). A receiver no package type describes
+gets no name and appears nowhere but the reason counts. See Reading `--coverage` below.
 
 ### Higher-order functions
 

@@ -2218,14 +2218,141 @@ function memberChainQualifiedNameOf(
     path.unshift(current.name.text);
     current = current.expression;
   }
-  if (!ts.isIdentifier(current)) return undefined;
 
-  const origin =
-    moduleSpecifierOf(checker, current) ??
-    constructedClassQualifiedNameOf(checker, current) ??
-    (factoryOriginAllowed ? factoryResultQualifiedNameOf(checker, program, current) : undefined);
-  if (!origin) return undefined;
-  return [origin, ...path].join(".");
+  const origin = ts.isIdentifier(current)
+    ? (moduleSpecifierOf(checker, current) ??
+      constructedClassQualifiedNameOf(checker, current) ??
+      (factoryOriginAllowed ? factoryResultQualifiedNameOf(checker, program, current) : undefined))
+    : undefined;
+  if (origin) return [origin, ...path].join(".");
+
+  return factoryOriginAllowed ? installedTypeQualifiedNameOf(checker, program, expr) : undefined;
+}
+
+/**
+ * `"<package>.<type name>.<property path>"` for a member chain whose receiver
+ * is held by something no binding rule above can follow — a class field, a
+ * parameter, or the result of an earlier call in a fluent chain.
+ *
+ * The three origins above all name the receiver from *where the value came
+ * from*, which requires a binding the analysis can see: a module-scope import,
+ * a `const` holding `new <ImportedClass>`, a `const` holding an imported
+ * factory's result. That covers a client a module constructs for itself and
+ * nothing else. Measured on a third-party backend (Unleash, `src/lib`,
+ * 3523 functions): its database calls are written through an injected
+ * `this.db`, or through a parameter, and not one of them was named — so the
+ * bundled `pg`, `mysql2` and Prisma rules could not have fired on any of them
+ * either. A client a
+ * class is *handed* is the ordinary shape in server code, and DESIGN.md §3.4's
+ * rule cuts against leaving it silent.
+ *
+ * What this rule reads is the receiver's **type**, which is a different fact
+ * from the ones above and is kept to what a type can honestly settle:
+ *
+ * - it names the *package's* API, never a project declaration. Every
+ *   declaration of the type must be a class or interface in a `.d.ts` that
+ *   came from an installed package ({@link installedPackageNameOf}), so a
+ *   project-local interface — Unleash's own `ITagStore`, Ambit's own
+ *   `TsBackend` — yields nothing and §4.2 rule 7 still decides those through
+ *   the receiver's value;
+ * - it is a name, not a verdict, exactly as the three origins above are. A
+ *   package no bundled table covers gets its name here and still reports
+ *   `unknown`;
+ * - it reads the receiver's type where §4.2 rule 7 refuses to read a
+ *   receiver's *annotation*. The two answer different questions:
+ *   {@link factoryResultQualifiedNameOf}'s comment declines the annotation
+ *   because a body could be resolved from the value instead, and here there is
+ *   no body — the declaration is a package's `.d.ts`, and which package API the
+ *   call was type-checked against is the only fact available;
+ * - it is withheld wherever `factoryOriginAllowed` is false — the callee's own
+ *   declaration is the compiler's lib — for the reason that flag already
+ *   exists: a package interface may extend a default-lib type, and a name here
+ *   would take `arr.map(…)` off the `pureBuiltinName` path that is the only
+ *   one able to prove it effect-free.
+ *
+ * The chain is walked toward its root and the **root-most** named receiver
+ * wins, so a client reached through a delegate keeps the key shape the client
+ * tables already use: `this.prisma.user.findMany()` is
+ * `@prisma/client.PrismaClient.user.findMany`, not
+ * `@prisma/client.UserDelegate.findMany`.
+ *
+ * Unlike the receiver's *value*, a type is not evidence about the object's
+ * identity: a subclass may override the method named here. That is the same
+ * gap DESIGN.md §4.2 rule 7 already states for method resolution on class
+ * instances, and no wider — what a type does settle is which package API the
+ * call site was type-checked against.
+ */
+function installedTypeQualifiedNameOf(
+  checker: ts.TypeChecker,
+  program: ts.Program,
+  expr: ts.PropertyAccessExpression,
+): string | undefined {
+  const path: string[] = [];
+  let current: ts.Expression = expr;
+  let named: string | undefined;
+  while (ts.isPropertyAccessExpression(current)) {
+    path.unshift(current.name.text);
+    const receiver = current.expression;
+    const origin = installedTypeNameOf(checker, program, receiver);
+    if (origin !== undefined) named = [origin, ...path].join(".");
+    current = receiver;
+  }
+  return named;
+}
+
+/**
+ * `"<package>.<type name>"` for an expression whose type a package declares,
+ * and `undefined` for every other expression.
+ *
+ * Both halves have to come from the package rather than from the call site.
+ * The type name is the one the declaring module gave the type
+ * ({@link packageTypeNameOf}). The package name has two sources, and which one
+ * applies is decided by where the declaration came from rather than by which
+ * answers first:
+ *
+ * - a declaration that came from `node_modules`
+ *   (`isSourceFileFromExternalLibrary`, the same predicate behind the
+ *   `external-module` reason) is named from the path it resolved through
+ *   ({@link installedPackageNameOf}), *including* when it sits inside a
+ *   `declare module "…"`. `@types/node` writes its whole surface that way, so
+ *   reading the ambient name first would key `fs.Stats.isDirectory` beside the
+ *   `node:fs.*` rows the import specifier already produces — the split that
+ *   {@link installedPackageNameOf} refuses `@types/node` to prevent;
+ * - otherwise the only honest source is a `declare module "…"` the declaration
+ *   sits inside, which names its own module, so a hand-written declaration
+ *   produces the key an installed package would — the property the client
+ *   table already relies on. A `.d.ts` the project wrote outside one passes
+ *   {@link packageTypeNameOf} and still names no package.
+ */
+function installedTypeNameOf(
+  checker: ts.TypeChecker,
+  program: ts.Program,
+  expr: ts.Expression,
+): string | undefined {
+  const type = checker.getTypeAtLocation(expr);
+  const typeName = packageTypeNameOf(program, type);
+  if (typeName === undefined) return undefined;
+
+  const declaration = type.getSymbol()?.declarations?.[0];
+  if (!declaration) return undefined;
+
+  const file = declaration.getSourceFile();
+  const packageName = program.isSourceFileFromExternalLibrary(file)
+    ? installedPackageNameOf(file.fileName)
+    : ambientModuleNameOf(declaration);
+  return packageName === undefined ? undefined : `${packageName}.${typeName}`;
+}
+
+/**
+ * The module specifier of the `declare module "…"` a declaration sits inside,
+ * or `undefined` when it sits in none. A `namespace` (an unquoted module
+ * declaration) is not one and names nothing here.
+ */
+function ambientModuleNameOf(declaration: ts.Declaration): string | undefined {
+  for (let node: ts.Node | undefined = declaration; node; node = node.parent) {
+    if (ts.isModuleDeclaration(node) && ts.isStringLiteral(node.name)) return node.name.text;
+  }
+  return undefined;
 }
 
 /**
@@ -2334,6 +2461,50 @@ function packageTypeNameOf(program: ts.Program, type: ts.Type): string | undefin
     if (!file.isDeclarationFile || program.isSourceFileDefaultLibrary(file)) return undefined;
   }
   return name;
+}
+
+/**
+ * The name of the installed package that ships `declarationFile`, read off the
+ * resolved path: the segment after the last `node_modules/`, plus the one
+ * before it when the package is scoped.
+ *
+ * This is the one place a qualified name comes from a path rather than from
+ * the project's own source, and the path is used because it *is* what the
+ * source would have written: a package is importable under the directory name
+ * it resolves through, which is what makes `import … from "knex"` find
+ * `node_modules/knex`. An aliased install (`npm i pgx@npm:pg`) is therefore
+ * named `pgx` here — the same answer {@link moduleSpecifierOf} already gives
+ * for a receiver whose origin *is* an import, and the reason to prefer this
+ * over the `name` in the package's own `package.json`, which would disagree
+ * with the rest of the rules in exactly that case. It also keeps the whole
+ * naming path free of the filesystem.
+ *
+ * `@types/<pkg>` is answered as `<pkg>`: the types are a stand-in for the
+ * package, and a table keyed on `@types/pg.Pool.query` would match only
+ * projects whose `pg` happens to be untyped. `@types/node` is refused
+ * outright — Node's builtins are already keyed from the import specifier
+ * (`node:fs.readFileSync`), and a second spelling for the same operations
+ * would decide nothing and split the table.
+ *
+ * `undefined` for a declaration that did not resolve through a `node_modules`
+ * directory at all: it names no package, and a guess would be a coincidence.
+ */
+function installedPackageNameOf(declarationFile: string): string | undefined {
+  const segments = declarationFile.split("/");
+  const marker = segments.lastIndexOf("node_modules");
+  if (marker === -1) return undefined;
+
+  const first = segments[marker + 1];
+  if (first === undefined || first === "") return undefined;
+  const second = segments[marker + 2];
+  if (first.startsWith("@") && (second === undefined || second === "")) return undefined;
+  const name = first.startsWith("@") ? `${first}/${second}` : first;
+  if (!name.startsWith("@types/")) return name;
+
+  const typed = name.slice("@types/".length);
+  // `@types/node` covers the builtins, which the import specifier already
+  // keys — see above.
+  return typed === "node" || typed === "" ? undefined : typed;
 }
 
 /**
