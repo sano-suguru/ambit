@@ -85,6 +85,15 @@ const CLIENT_METHOD_RULES: readonly ClientMethodRule[] = [
   // root the chain starts from (`this.db.select(…)`) — is an interface merged
   // with a namespace and therefore not named at all; the `from` that follows
   // such a `select` is, which is why `from` is here.
+  //
+  // `from` was the one row worth measuring rather than reasoning about, since
+  // a builder's table clause is not by itself a direction. Over the same
+  // backend: 166 `knex.QueryBuilder.from` sites, of which 4 sit anywhere near
+  // a write verb, and 3 of those are `select(…).from(…)` subqueries *inside* a
+  // delete's `whereNotIn` — reads, correctly. The remaining one is a `from`
+  // belonging to the delete itself, in a function that reads in the same
+  // statement through those subqueries, so the row adds no effect that
+  // function does not have.
   { pattern: "knex.QueryBuilder.select", effects: ["db_read"] },
   { pattern: "knex.QueryBuilder.from", effects: ["db_read"] },
   { pattern: "knex.QueryBuilder.first", effects: ["db_read"] },

@@ -119,6 +119,15 @@ names that measurement surfaced. Only the verbs that fix a direction:
 `where` / `join` / `orderBy` appear in read and write chains alike and stay
 `unknown` rather than being guessed at.
 
+`from` is the one row that is a table clause rather than a verb, so it was
+measured instead of argued: **166** `knex.QueryBuilder.from` sites in `src/lib`,
+of which **4** sit anywhere near a write verb. Three of those four are
+`select(…).from(…)` subqueries *inside* a delete's `whereNotIn` — reads, and
+correctly named as such. The fourth is a `from` belonging to the delete itself,
+in a function that reads in the same statement through those subqueries, so the
+row contributes no effect that function does not already hold. 165 of 166 are
+plain reads.
+
 ## After
 
 ```sh
@@ -185,8 +194,15 @@ Recorded, deliberately not addressed in the same change:
   follows it is named.
 - **Approval-line count.** One edit costs one line per (symbol × effect): E3's
   single edit needs six.
+- **`installedPackageNameOf` assumes a `node_modules` layout.** Yarn PnP, and
+  any other resolver that does not lay packages out in directories, names
+  nothing — the same answer the rule gives for a receiver it cannot place,
+  not a wrong one. The path parsing itself is unit-tested against a flat
+  install, pnpm's virtual store, a nested `node_modules`, a scope, `@types`,
+  and a Windows separator.
 - **A symbol already `unknown` can gain anything.** `diff` reports a *gained*
   `unknown` and never fails on it, and a symbol that was already `unknown` does
   not even gain one. In a tree at 71%, that is most of the surface. This is the
   finding that outlived the fix, and `docs/status.md`'s bottleneck section
-  carries it.
+  carries it, and it is filed as the next decision in
+  [`docs/open-questions.md`](../open-questions.md).

@@ -1,6 +1,6 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { legacyTsBackend } from "../src/checker/backend/legacy-ts.ts";
+import { installedPackageNameOf, type legacyTsBackend } from "../src/checker/backend/legacy-ts.ts";
 import { extractFixture } from "./support/extract.ts";
 
 const FIXTURE_ROOT = path.join(import.meta.dirname, "fixtures", "backend-smoke");
@@ -757,5 +757,54 @@ describe("legacyTsBackend.extractProject (receivers a package type names)", () =
     );
     expect(call?.calleeQualifiedName).toBeUndefined();
     expect(call?.pureBuiltinName).toBe("Map.get");
+  });
+});
+
+describe("installedPackageNameOf", () => {
+  it("names the package a declaration resolved through", () => {
+    // The layout underneath never enters the name: a flat install, pnpm's
+    // virtual store and a nested `node_modules` all answer `knex`.
+    expect(installedPackageNameOf("/p/node_modules/knex/types/index.d.ts")).toBe("knex");
+    expect(
+      installedPackageNameOf("/p/node_modules/.pnpm/knex@3.3.0/node_modules/knex/types/index.d.ts"),
+    ).toBe("knex");
+    expect(installedPackageNameOf("/p/node_modules/a/node_modules/knex/index.d.ts")).toBe("knex");
+    expect(installedPackageNameOf("/p/node_modules/@prisma/client/index.d.ts")).toBe(
+      "@prisma/client",
+    );
+  });
+
+  it("answers a `@types` package as the package it stands in for", () => {
+    // A table keyed on `@types/pg.Pool.query` would match only the projects
+    // whose `pg` happens to be untyped.
+    expect(installedPackageNameOf("/p/node_modules/@types/pg/index.d.ts")).toBe("pg");
+  });
+
+  it("refuses `@types/node`", () => {
+    // Node's builtins are already keyed from the import specifier
+    // (`node:fs.readFileSync`); a second spelling would split the table.
+    expect(installedPackageNameOf("/p/node_modules/@types/node/fs.d.ts")).toBeUndefined();
+  });
+
+  it("names nothing outside `node_modules`", () => {
+    // A project's own `.d.ts`, and any resolver that does not lay packages
+    // out under `node_modules` (Yarn PnP): no package to name, so none is
+    // guessed at.
+    expect(installedPackageNameOf("/p/src/types/globals.d.ts")).toBeUndefined();
+    expect(installedPackageNameOf("/p/.yarn/cache/knex-npm-3.3.0.zip/knex/index.d.ts")).toBe(
+      undefined,
+    );
+  });
+
+  it("survives a Windows separator", () => {
+    // `SourceFile.fileName` is normalized to forward slashes on every
+    // platform; this asserts the parsing does not depend on that holding.
+    expect(installedPackageNameOf("C:\\p\\node_modules\\knex\\types\\index.d.ts")).toBe("knex");
+    expect(installedPackageNameOf("C:\\p\\node_modules\\@types\\node\\fs.d.ts")).toBeUndefined();
+  });
+
+  it("names nothing for a truncated path", () => {
+    expect(installedPackageNameOf("/p/node_modules")).toBeUndefined();
+    expect(installedPackageNameOf("/p/node_modules/@scope")).toBeUndefined();
   });
 });

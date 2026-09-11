@@ -32,7 +32,7 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | `unknown` rate, adopting-team-equivalent fixture (`realistic-api`) | 1.9% (1/53) | no target (see below) |
 | `unknown` rate, Ambit's own source (`check src`) | 38.5% (126/327) | — |
 | Authority Ambit sees in a third-party backend's data layer ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)) | 940 stubbed call sites, up from 120 | — |
-| Tests | 506 passing, 31 files | green |
+| Tests | 512 passing, 31 files | green |
 | `tsc --noEmit` / `biome ci .` | pass / pass | pass |
 | `check src` latency, 40 files | ~1.1 s | §3.5's 3 s allowance |
 | Incremental / resident analysis | no | yes (§6.2) |
@@ -57,7 +57,7 @@ where it is measurable, as a Phase 1 exit metric in `ROADMAP.md`.
 ### Baseline commands
 
 ```sh
-pnpm test                                                    # 506 tests, 31 files — pass
+pnpm test                                                    # 512 tests, 31 files — pass
 pnpm exec tsc --noEmit                                       # pass
 ./node_modules/.bin/biome ci .                               # pass
 node src/cli/main.ts check src --coverage                    # exit 0

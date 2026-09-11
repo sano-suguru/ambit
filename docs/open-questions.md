@@ -20,6 +20,23 @@ exit: when it fires, the question is decided, the answer goes in the
 
 ## Analysis
 
+- **What `ambit diff` should say about a symbol that was already `unknown`.**
+  The comparison reports a *gained* `unknown` and never fails on it, and a
+  symbol already `unknown` in the base does not even gain one — so a concrete
+  authority added inside it (`db_write` from a `del()` beside calls the
+  analysis cannot resolve) reads as no change. Measured on a third-party
+  backend at a 71% `unknown` rate, that is most of the surface
+  ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)). The
+  question is what the honest signal is, and it is a question rather than a
+  defect because every candidate answer changes what an approval *means*:
+  failing on newly *observed* authority would report increases the base may
+  well have had, so it is not the `authority increase` §6.3 defines and would
+  need a name, a diagnostic and an approval form of its own. Saying nothing is
+  the one answer already ruled out — §3.4 forbids reading an unanalyzed path as
+  "nothing wrong".
+  *Trigger:* already fired. This is the next decision, and it is recorded here
+  rather than fixed because the fix is a change to §6.3's model, not to the
+  analysis.
 - **Type assertions and non-null assertions.** `as any` and `!` are not treated
   identically. The rule for when the type survives but the contract-level callee
   is not determined is unsettled.

@@ -2488,9 +2488,21 @@ function packageTypeNameOf(program: ts.Program, type: ts.Type): string | undefin
  *
  * `undefined` for a declaration that did not resolve through a `node_modules`
  * directory at all: it names no package, and a guess would be a coincidence.
+ * Yarn PnP and any other resolver that does not lay packages out under
+ * `node_modules` therefore names nothing here, which is the same answer the
+ * rule gives for a receiver it cannot place — not a wrong one.
+ *
+ * Exported for `test/backend.legacy-ts.test.ts`: the path shapes this has to
+ * survive (pnpm's virtual store, a scope, a nested `node_modules`, a
+ * `@types` package, a Windows separator) are a property of the string, and
+ * reaching them all through a compiled fixture would need one installed
+ * package per case.
  */
-function installedPackageNameOf(declarationFile: string): string | undefined {
-  const segments = declarationFile.split("/");
+export function installedPackageNameOf(declarationFile: string): string | undefined {
+  // TypeScript normalizes `SourceFile.fileName` to forward slashes on every
+  // platform. Splitting on both is defence against that invariant changing,
+  // not a dependency on it: a backslash cannot occur inside a package name.
+  const segments = declarationFile.split(/[\\/]/);
   const marker = segments.lastIndexOf("node_modules");
   if (marker === -1) return undefined;
 
