@@ -42,14 +42,26 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | Runtime hooks | 4 (`fetch`, `node:fs`, `node:child_process`, `pg`) | — |
 | Framework adapters | 2 (Hono, Next.js App Router) | — |
 
-**None of the three `unknown` rows has a target, and that is deliberate.**
+**None of the four `unknown` rows has a target, and that is deliberate.**
 `ROADMAP.md`'s 30% KPI is about **an adopting team's own code, with its own
 `node_modules`, three months in.** No row here is that population: the corpus is
 five repositories measured with no dependencies installed, `realistic-api` is a
-fixture written in this repository, and `src` is Ambit's own connection layer.
-Driving any of them to 30% would not satisfy the KPI. They are read as movement,
-not as progress against it — the fixture's 1.9% least of all, since it says only
-that the analysis handles the shapes it was given.
+fixture written in this repository, `src` is Ambit's own connection layer, and
+immich is a third-party backend nobody here has adopted. Driving any of them to
+30% would not satisfy the KPI. They are read as movement, not as progress
+against it — the fixture's 1.9% least of all, since it says only that the
+analysis handles the shapes it was given.
+
+Two third-party runs now say something the rows themselves do not: **the
+`unknown` rate and the usefulness of `diff` move independently.** immich reads
+79.5%, higher than Unleash's 71.0%, and on it an unmodified tree produces no
+standing noise in either mode, known authority is reported with the whole call
+path, and an operation through an uncovered dependency is named under §6.4. Both
+runs also found that closing hundreds of call sites moved the rate not at all.
+What the gate is worth has tracked *standing noise on an unchanged tree* and
+*the precision of the delta*, not the absolute rate. Recorded as an observation
+from two subjects. It is **not** a decision: `ROADMAP.md`'s KPI is about a
+population neither run measured, and nothing here changes it.
 
 The second row replaced "serious incidents prevented". An incident that did not
 happen is a counterfactual and cannot be observed; an authority increase that an

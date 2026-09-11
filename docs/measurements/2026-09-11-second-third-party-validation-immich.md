@@ -617,7 +617,17 @@ run is separable within those bands.
 - **§6.4 entries carry no call path.** E2 names `TagRepository.getAll`; the
   reader has to find `TagController.getAllTags` themselves. Recurs on both
   subjects, for every uncovered dependency. This is the runner-up and is not
-  implemented here.
+  implemented here. On review it was also narrowed: *propagating* the gain to
+  callers is the wrong shape, because an unresolved operation is not authority
+  and every caller would then be marked as holding something its own body does
+  not. A witness path attached to the body-local entry is the form worth
+  deciding on. Filed in `docs/open-questions.md`, with the trigger being a
+  third subject that was **not** chosen to ask this question.
+- **`diff` compares the base commit's source against the working tree's
+  dependencies.** This change extends that to a workspace, it does not
+  introduce it. It is what keeps environment out of a contract report, and it
+  is also why authority introduced by a *dependency upgrade* has no answer
+  here. Filed in `docs/open-questions.md`; nothing in this run decides it.
 - **No table covers `kysely`, `ioredis` or `bullmq`.** Deliberate: rows are
   admitted on measurement, and one repository using a package is not a
   measurement of the package. What this run *did* establish is that kysely's
