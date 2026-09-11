@@ -251,32 +251,71 @@ shapes is classified `not-yet-ported` rather than counted as a disagreement.
 
 ## Next steps, in order
 
+The ordering is by what each step would *resolve*, not by size. Two things move
+ahead of tidy-up work: the gap that sits on Ambit's own value chain, and the
+corpus that would tell us whether any of these numbers survive contact with
+code nobody here wrote.
+
 1. **Port `installedTypeQualifiedNameOf` / `packageTypeNameOf`** (the
-   receiver's declared package type). 63 of the 137 divergences on `src` — the
-   largest single gap by a wide margin, and not a cosmetic one: a
-   receiver-origin name is what turns `pool.query(...)` into `pg.Pool.query`
-   and therefore into a `db_read` stub match. `KNOWN_DIVERGENCES` already
-   carries a rule for `kind=stub` vs `kind=unresolved`, which is that failure
-   mode. On this tree it does not reach the authority set; on a repository with
-   an ORM it would.
-2. Port the constructed-receiver and factory-receiver origins.
-3. Port `re-export-hop` (2 high-risk divergences on `cross-module`).
-4. **Run the shadow backend in CI**, as a nightly or opt-in job rather than in
+   receiver's declared package type). 63 of the 137 divergences on `src`, and
+   the reason it comes first is not the count: a receiver-origin name is what
+   turns `pool.query(...)` into `pg.Pool.query`, which is what a stub table can
+   key on, which is what makes the call a `db_read`. The chain
+   `receiver origin → qualified name → stub lookup → effect → authority` is
+   Ambit's product, so a gap on it outranks a position or JSDoc-attachment
+   difference. `KNOWN_DIVERGENCES` already carries a `kind=stub` vs
+   `kind=unresolved` rule, which is that failure mode written down.
+2. Port the constructed-receiver, factory-receiver and `re-export-hop` origins —
+   the same chain, fewer occurrences here.
+3. **Run the shadow backend in CI**, as a nightly or opt-in job rather than in
    `pnpm test`: install the native compiler, run `backend-conformance` and
-   `src`, check the high-risk count against the last run, upload the JSON. What
-   `pnpm test` protects today is the *comparator*; nothing protects the shadow
-   backend from regressing, which is the gap that turns this from telemetry
-   back into a one-off snapshot.
+   `src`, compare the high-risk count with the previous run, upload the JSON.
+   What `pnpm test` protects today is the *comparator*; nothing protects the
+   shadow backend from regressing, and without that this note is a snapshot
+   rather than telemetry.
+4. **Run the shadow analysis on real third-party repositories** — the same move
+   `docs/measurements/2026-09-11-*` made for `ambit diff`, and it belongs this
+   early for a reason. `src` is a poor witness for the ecosystem: one coding
+   style, one set of dependencies, one tsconfig, one module pattern, and the
+   very shapes the backend was written against. A repository built on Next.js,
+   Express, Hono, NestJS, Prisma, Drizzle, tRPC, Zod, or a vendor SDK can
+   produce divergence shapes nothing here has seen. Until that runs, 99.x% on
+   `src` is **self-hosting parity**, not ecosystem parity, and only the second
+   one says anything about adoption.
 5. **Replace the substring classifier with structured data.** The backend
    should report *why* it could not do something — an `unsupportedFeature:
    "installed-type-receiver"` on the call site — and `compare.ts` should
    classify on that field. Classification should read data, not parse rendered
    text.
-6. Make the call-site key more semantic than `(symbol, location, ordinal)`:
-   the syntactic kind and the callee's textual shape would survive a source
-   order that differs between backends, which the ordinal does not and the
-   identity self-check cannot catch.
-7. Widen the corpus to real third-party repositories, the way
-   `docs/measurements/2026-09-11-*` did for `ambit diff`.
+6. Make the call-site key more semantic than `(symbol, location, ordinal)`: the
+   syntactic kind and the callee's textual shape would survive a source order
+   that differs between backends, which the ordinal does not and the identity
+   self-check cannot catch.
 
-Only after 1–7 is there anything to say about TS7 as an authoritative backend.
+Only after these is there anything to say about TS7 as an authoritative backend,
+and the thing to say would be about **ecosystem parity**, not about `src`.
+
+## The one measurement that would settle the performance question
+
+The note above records that the native engine's advantage is 1.7–1.9x here
+rather than ADR-0001's 3–4x, that the pure-JavaScript downstream is not the
+cause, and that the query-count reading is a hypothesis. One run would decide
+it, and it is worth doing alongside step 1 because the two touch the same code:
+
+- **legacy side** — count `getTypeAtLocation`, `getResolvedSignature`,
+  `getSymbolAtLocation` and alias-resolution calls over one `extractProject`.
+- **native side** — `API({ collectTiming: true })` already reports
+  `requestCount`, `bytesSent`, `bytesReceived`, `serverTimeMs` and
+  `transportOverheadMs`; `scripts/m05-probe/native.ts` prints them today.
+
+If the native engine is fast inside and the cost is crossing the API boundary
+thousands of times, the conclusion is **not** that Ambit needs a faster
+compiler. It is that the extraction asks the wrong shape of question: a call
+site currently costs a symbol lookup, a type, a signature, a declaration
+resolution and a parent walk, each a separate crossing. A coarser request —
+one `analyzeCallSite` returning symbol, declaration, signature, receiver type
+and origin together — would then be worth more than any engine change, and more
+than a rewrite in another language.
+
+That is a hypothesis with an obvious experiment attached, and nothing in this
+note is evidence for it yet.
