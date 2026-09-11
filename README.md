@@ -94,10 +94,10 @@ check, runtime block* below.
 Which tag is enforced where, tag by tag, is in
 [docs/status.md](docs/status.md#contract-tag-support-at-a-glance).
 
-Effects are inferred from bundled tables covering `fetch`/`undici`, the
-`node:fs`, `node:http`/`https`/`net`, and `node:child_process` builtins, and
-five clients (`pg`, `mysql2`, `@prisma/client`, `openai`,
-`@anthropic-ai/sdk`). Everything else resolves to `unknown` — never to `pure` —
+Effects are inferred from bundled tables covering `fetch`/`undici`/`ky`, the
+`node:fs`, `node:http`/`https`/`net`, and `node:child_process` builtins (with
+or without the `node:` prefix), and six clients (`pg`, `mysql2`, `knex`,
+`@prisma/client`, `openai`, `@anthropic-ai/sdk`). Everything else resolves to `unknown` — never to `pure` —
 and `--strict` turns those warnings into errors.
 
 For code you cannot edit — third party, generated, or not yours yet — declare

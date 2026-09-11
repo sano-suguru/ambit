@@ -67,8 +67,17 @@ Effects are inferred from four bundled tables.
 
 ### The stub table (`src/stubs/node-builtins.ts`)
 
-52 entries — `fetch`, `undici`'s `fetch`, plus Node.js builtins — producing
-`network`, `fs_read`, `fs_write`, and `process`.
+59 entries — `fetch`, `undici`'s `fetch`, `ky`, plus Node.js builtins —
+producing `network`, `fs_read`, `fs_write`, and `process`.
+
+`ky` is keyed on its default export, since that is what the package exports and
+a default export has no name of its own: `ky.default` for the bare call and
+`ky.get` / `ky.post` / `ky.put` / `ky.patch` / `ky.delete` / `ky.head` for the
+request methods. `create` and `extend` return a new instance and send nothing,
+so they have no row and stay `unknown`. A `KyInstance` *handed* to a function —
+a class field, a parameter — has no row either: measurement surfaced the
+default-export shape only, and the table admits the names measurement surfaces
+(`src/stubs/data-clients.ts`).
 
 Matching is import-shape sensitive. Lookup keys are built from the *module
 specifier text* plus the imported property/export name, so:
@@ -77,6 +86,13 @@ specifier text* plus the imported property/export name, so:
 - `import fs from "node:fs"; fs.writeFileSync(...)` is recognized
 - `import { writeFileSync } from "node:fs"; writeFileSync(...)` is recognized
   (a local `as` alias doesn't affect matching — the imported name is used)
+- the same three written without the `node:` prefix (`from "fs"`) are
+  recognized, and produce the same verdict: the specifier is normalized to the
+  prefixed spelling at lookup, for the builtins the bundled tables have a row
+  for. Nothing else is normalized, so a builtin no table answers (`os`, `path`)
+  keeps the spelling its source wrote in the coverage histogram. The *reported*
+  operation is also the spelling the source wrote — `fs.writeFileSync`, not
+  `node:fs.writeFileSync`
 - a binding re-exported through one or more barrel files is followed to the
   module that owns it, so `import { readFileSync } from "./lib/index.ts"` is
   still `node:fs.readFileSync`
@@ -89,7 +105,7 @@ nothing outside it. A binding reached by destructuring a *value*
 
 ### The database and LLM client table (`src/stubs/data-clients.ts`)
 
-39 rules covering `pg`, `mysql2`, `@prisma/client`, `openai`, and
+49 rules covering `pg`, `mysql2`, `knex`, `@prisma/client`, `openai`, and
 `@anthropic-ai/sdk`, producing `db_read`, `db_write`, and `llm`.
 Keys are the module specifier the client came from, the client type's name, and
 the property path written at the call site — `pg.Pool.query`,

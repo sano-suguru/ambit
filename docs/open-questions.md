@@ -33,7 +33,7 @@ exit: when it fires, the question is decided, the answer goes in the
   - base already `unknown`, head `unknown` with **more** unresolved operations
     in it — nothing, because what a symbol carries is a boolean, not the set of
     operations behind it. An outbound call through a client no table covers
-    (`ky`) lands here.
+    (`axios`, `got`) lands here.
 
   The question is what the honest signal is, and it is a question rather than a
   defect because the answer changes what an approval *means*: an unresolvable

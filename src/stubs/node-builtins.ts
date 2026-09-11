@@ -24,6 +24,23 @@ const STUB_EFFECTS: ReadonlyMap<string, KnownEffect> = new Map([
   ["fetch", "network"],
   ["globalThis.fetch", "network"],
   ["undici.fetch", "network"],
+  // ky — the same operation as `fetch`, through the client measurement
+  // surfaced in the third-party backend this table is measured against
+  // (Unleash, `src/lib`: `ky(…)`, `ky.get(…)`, `ky.post(…)`, all three
+  // through the default export). Read off `ky@1.14.3`'s own types: the
+  // module's default export is a `KyInstance`, whose call signature is
+  // `<T>(url: Input, options?: Options)` — named `ky.default` here, since a
+  // default export has no name of its own — and whose `get` / `post` / `put` /
+  // `patch` / `delete` / `head` are the documented request methods. Each one
+  // sends; `create` and `extend` return a new instance and send nothing, so
+  // they have no row and stay `unknown` rather than being called effect-free.
+  ["ky.default", "network"],
+  ["ky.get", "network"],
+  ["ky.post", "network"],
+  ["ky.put", "network"],
+  ["ky.patch", "network"],
+  ["ky.delete", "network"],
+  ["ky.head", "network"],
   ["node:http.request", "network"],
   ["node:http.get", "network"],
   ["node:https.request", "network"],
@@ -75,6 +92,52 @@ const STUB_EFFECTS: ReadonlyMap<string, KnownEffect> = new Map([
   ["node:child_process.fork", "process"],
 ]);
 
+/**
+ * The Node.js builtin modules the bundled tables key on, spelled without the
+ * `node:` prefix.
+ *
+ * Both spellings name the same module: Node resolves a bare builtin specifier
+ * to the builtin before it looks at `node_modules`, so `from "fs"` and `from
+ * "node:fs"` cannot be different modules. The tables are keyed on the prefixed
+ * spelling, and the name a call arrives with is the specifier the *source*
+ * wrote — so before {@link withNodePrefix}, the same edit failed the check
+ * written one way and passed written the other (measured, E3b:
+ * `docs/measurements/2026-09-11-third-party-diff-validation.md`). The prefix is
+ * a spelling, not a fact about the operation, so it is normalized at lookup
+ * rather than duplicated as a second set of rows.
+ *
+ * Only the builtins a bundled table actually has a row for are listed: a
+ * specifier no table answers needs no canonical form, and a name built from
+ * one keeps the spelling its source wrote in the coverage histogram. Which
+ * builtins those are is checked rather than remembered —
+ * `test/stubs.node-builtins.test.ts` fails if any table grows a `node:` row
+ * this set does not cover.
+ */
+const PREFIXABLE_BUILTIN_SPECIFIERS: ReadonlySet<string> = new Set([
+  "child_process",
+  "fs",
+  "fs/promises",
+  "http",
+  "https",
+  "net",
+  "tls",
+  "worker_threads",
+]);
+
+/**
+ * `qualifiedName` with the `node:` prefix its module specifier may have been
+ * written without, and unchanged for every other name.
+ *
+ * The specifier is the part before the first `"."` — `fs/promises.readFile`
+ * included, whose specifier carries a `/` but no `.`.
+ */
+export function withNodePrefix(qualifiedName: string): string {
+  const separator = qualifiedName.indexOf(".");
+  if (separator < 0) return qualifiedName;
+  const specifier = qualifiedName.slice(0, separator);
+  return PREFIXABLE_BUILTIN_SPECIFIERS.has(specifier) ? `node:${qualifiedName}` : qualifiedName;
+}
+
 export function lookupStubEffect(qualifiedName: string): KnownEffect | undefined {
-  return STUB_EFFECTS.get(qualifiedName);
+  return STUB_EFFECTS.get(withNodePrefix(qualifiedName));
 }

@@ -67,7 +67,8 @@ new module called from `TagService.getTags`, two hops below the HTTP controller.
 | E3b | the same two calls imported as `from 'fs'` / `'child_process'` | **exit 0 — missed** | **exit 0 — still missed** |
 | E4 | `await this.db(TABLE).where({…}).del()` inside an existing *read* method | **exit 0 — missed, silently** | **exit 1**, 1 entry, `operation: knex.QueryBuilder.del` |
 
-E4 is the one that matters. The edit adds a destructive database write to a
+E2 and E3b were closed the same day, in a follow-up change; the section at the
+end of this file carries that run. E4 is the one that matters. The edit adds a destructive database write to a
 method named `getAll`, and the comparison printed *3,523 symbols unchanged, out
 of 3,523 symbols compared* — not even the "could not resolve" note, because the
 symbol was already `unknown` before the edit and stayed `unknown` after it.
@@ -178,17 +179,11 @@ installs no dependencies, so no receiver there has a package type to read.
 
 Recorded, deliberately not addressed in the same change:
 
-- **Node builtins imported without the `node:` prefix (E3b).** The stub table
-  is keyed `node:fs.writeFileSync`, and the name a call gets is the specifier
-  the source wrote — so the same edit that fails the build as `node:fs` passes
-  as `fs`. This repository writes the un-prefixed form throughout (`fs`,
-  `crypto`, `events`, `path` all appear in its unresolved histogram), which
-  makes it the spelling an agent copying the file's neighbours would use. A
-  handful of alias rows would close it.
-- **`ky` (E2).** Named `ky.post` and covered by no table, so outbound HTTP
-  through this repository's own client is invisible. The same holds for `axios`
-  and `got`. A row would fix `ky`; the general problem is that HTTP clients are
-  as unbounded as DB clients.
+- **HTTP clients other than `fetch`, `undici` and `ky`.** `axios` and `got`
+  are named at the call site and covered by no table, so outbound HTTP through
+  either is invisible. The general problem is that HTTP clients are as
+  unbounded as DB clients; what decides a row is measurement, not popularity,
+  and neither has been measured against a backend that uses it.
 - **`knex`'s own root.** `Knex` is an interface merged with a namespace, which
   the naming rule refuses, so `db.select(…)` is unnamed while the `from(…)` that
   follows it is named.
@@ -211,7 +206,9 @@ Recorded, deliberately not addressed in the same change:
   `unknown`: printed as `unknownGained`, exit 0 by §6's exit table. Base already
   `unknown`, head `unknown` with more unresolved operations inside it: nothing
   at all, because a symbol carries a boolean rather than the set of operations
-  behind it. E2 and E3b are both the second shape.
+  behind it. E2 and E3b were both the second shape when they were measured; the
+  follow-up below gave both an operation the tables name, so what is left in
+  this shape is an operation no table names at all (`axios`, `got`).
 
   **The noise of the missing signal was measured**, since that is what decides
   whether it can be a gate. Per-symbol multisets of unresolved call identities
@@ -229,3 +226,78 @@ Recorded, deliberately not addressed in the same change:
   restatement. Not implemented here: it is a change to §6.3's model and to §6's
   exit table, which is §9.2 surface. Filed with these numbers in
   [`docs/open-questions.md`](../open-questions.md).
+
+## Follow-up, same day: E2 and E3b closed
+
+The two misses above that were operations no bundled table named. Same
+checkout (`Unleash/unleash@044461b`, cloned again and installed the same way),
+same commands, same machine.
+
+**The change.** Seven `ky` rows in `src/stubs/node-builtins.ts` with the
+matching capability rules beside them, and one lookup rule: a builtin's module
+specifier is read under both of its spellings, because `from "fs"` and `from
+"node:fs"` cannot be different modules — Node resolves a bare builtin specifier
+to the builtin before it looks at `node_modules`. The normalization covers the
+builtins a bundled table has a row for and nothing else, so a specifier no
+table answers (`os`, `path`, `crypto`) keeps the spelling its source wrote in
+the coverage histogram, and the *reported* operation is still the source's own
+spelling (`operation: fs.writeFileSync`).
+
+The ky rows were read off `ky@1.14.3`'s own types and source, not assumed:
+`KyInstance`'s call signature is `(url, options)`, and `ky[method]` merges
+`{method}` **last** (`validateAndMerge(defaults, options, {method})`), so
+`ky.post(url, {method: "get"})` still POSTs — the request-method rows therefore
+ignore the options object, while the bare call reads it as `fetch` does.
+`create` and `extend` return an instance and send nothing, so they have no row
+and stay `unknown`. `axios` and `got` were left out: no measurement has
+surfaced them, which is the same rule every other row in these tables was
+admitted under.
+
+**Coverage on the untouched tree.**
+
+| | before this follow-up | after |
+|---|---:|---:|
+| stub call sites | 940 | **953** |
+| unresolved call sites | 6,439 | **6,426** |
+| `external-module` | 3,403 | **3,390** |
+| `unknown` rate | 71.0% (2,500/3,523) | **71.0% (2,500/3,523)** |
+| `diff HEAD src/lib` on the untouched tree | no increase | **no increase** |
+
+Thirteen call sites, and again no movement in the `unknown` rate: a function
+stays `unknown` while any one call in it is unresolved, and these thirteen sit
+in functions that have other unresolved calls. What changed is that the
+authority is visible as authority, which is what `diff` compares.
+
+**The two experiments, re-run.** Each applied alone to the clean tree, measured
+with `diff HEAD src/lib`, then reverted.
+
+| | change | before | after |
+|---|---|---|---|
+| E2 | `ky.post(…)` in a new module called from `TagService.getTags` | exit 0 — missed | **exit 1**, 4 entries |
+| E3b | `writeFileSync` + `execSync` imported `from 'fs'` / `'child_process'` | exit 0 — missed | **exit 1**, 6 entries |
+
+E3b now reports exactly what E3 reported for the prefixed spelling: six entries
+(3 symbols × 2 effects), up to `TagController.getTags`, naming
+`operation: fs.writeFileSync` and `operation: child_process.execSync` — the
+source's spelling, at the leaf that introduced it. E2 reports the effect and the capability
+on the new symbol and on the caller, with `operation: ky.post` and
+`+ capability http:post:telemetry.example.com` read off the literal URL. The
+bare call was measured as well, since it is the shape this repository's
+`addon.ts` uses: `ky(url, {method: 'POST'})` reports
+`operation: ky.default` with the same capability, the method read from the
+options object. Both names are pinned in-repo by
+`test/fixtures/http-clients`, which declares `ky` locally rather than
+installing it — a `declare module` and an installed package produce the same
+key.
+
+Regression checks: `pnpm test` 524 passing, `tsc --noEmit` pass, `biome ci .`
+pass, `check src --coverage` exit 0 with `pure` 569 → 573 and `stub` unchanged
+at 19 (the two new functions in `src/stubs/` account for the rise; nothing
+proven effect-free was taken off that path). `node scripts/bench-corpus.ts` was run on
+both builds and its output is byte-identical, down to the `unresolved-by-reason`
+breakdown: median **52.6%**, and per target hono 52.6%, trpc-server 59.7%,
+elysia 51.7%, got 54.6%, drizzle-orm 39.0%. The corpus is not silent on the
+spelling — eleven un-prefixed builtin imports occur across three of its targets
+(`http` 8, `net` 2, `fs` 1) — but they are type-only imports or reach members
+no table has a row for (`createServer`, `EventEmitter`), so not one call site
+changed classification. No target there uses `ky`.

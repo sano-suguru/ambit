@@ -1,4 +1,5 @@
 import type { KnownEffect } from "../core/index.ts";
+import { withNodePrefix } from "./node-builtins.ts";
 
 /**
  * Effect table for `new X(...)`, keyed in its own namespace: every key is the
@@ -117,9 +118,22 @@ export function lookupConstructorEffect(
   qualifiedName: string,
   withoutArguments: boolean,
 ): KnownEffect | undefined {
-  const always = CONSTRUCTOR_EFFECTS.get(qualifiedName);
+  const key = canonicalConstructorKey(qualifiedName);
+  const always = CONSTRUCTOR_EFFECTS.get(key);
   if (always) return always;
-  return withoutArguments ? NULLARY_ONLY_EFFECTS.get(qualifiedName) : undefined;
+  return withoutArguments ? NULLARY_ONLY_EFFECTS.get(key) : undefined;
+}
+
+/**
+ * The key with the `node:` prefix its module specifier may have been written
+ * without — `new net.Socket` and `new node:net.Socket` are one operation
+ * (`src/stubs/node-builtins.ts`, `withNodePrefix`). The constructor prefix is
+ * taken off first: it is this table's namespace, not part of the name the
+ * source produced.
+ */
+function canonicalConstructorKey(qualifiedName: string): string {
+  if (!isConstructorKey(qualifiedName)) return qualifiedName;
+  return constructorStubKey(withNodePrefix(qualifiedName.slice(CONSTRUCTOR_KEY_PREFIX.length)));
 }
 
 /**
@@ -129,8 +143,9 @@ export function lookupConstructorEffect(
  */
 export function isKnownPureConstructor(qualifiedName: string, withoutArguments: boolean): boolean {
   if (lookupConstructorEffect(qualifiedName, withoutArguments) !== undefined) return false;
-  if (NULLARY_ONLY_EFFECTS.has(qualifiedName)) return true;
-  return PURE_CONSTRUCTORS.has(qualifiedName);
+  const key = canonicalConstructorKey(qualifiedName);
+  if (NULLARY_ONLY_EFFECTS.has(key)) return true;
+  return PURE_CONSTRUCTORS.has(key);
 }
 
 /**
