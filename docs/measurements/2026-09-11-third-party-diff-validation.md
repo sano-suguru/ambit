@@ -200,9 +200,32 @@ Recorded, deliberately not addressed in the same change:
   not a wrong one. The path parsing itself is unit-tested against a flat
   install, pnpm's virtual store, a nested `node_modules`, a scope, `@types`,
   and a Windows separator.
-- **A symbol already `unknown` can gain anything.** `diff` reports a *gained*
-  `unknown` and never fails on it, and a symbol that was already `unknown` does
-  not even gain one. In a tree at 71%, that is most of the surface. This is the
-  finding that outlived the fix, and `docs/status.md`'s bottleneck section
-  carries it, and it is filed as the next decision in
+- **A gain the analysis cannot resolve has no line.** Stated carefully, because
+  the obvious wider claim is false: a *known* effect added inside an `unknown`
+  symbol **does** fail. E4 after the fix is the proof — `TagStore.getAll` is
+  `unknown` on both sides (its `this.timer(…)` and `this.db.select(…)` calls
+  never resolve) and the added `del()` still exits 1. What is compared is the
+  effect set, and being `unknown` beside it changes neither side.
+
+  What has no line is the *unresolvable* gain, in two shapes. Base known, head
+  `unknown`: printed as `unknownGained`, exit 0 by §6's exit table. Base already
+  `unknown`, head `unknown` with more unresolved operations inside it: nothing
+  at all, because a symbol carries a boolean rather than the set of operations
+  behind it. E2 and E3b are both the second shape.
+
+  **The noise of the missing signal was measured**, since that is what decides
+  whether it can be a gate. Per-symbol multisets of unresolved call identities
+  were compared across three ranges of this repository's own history:
+
+  | range | files changed in `src/lib` | symbols that gained an unresolved operation |
+  |---|---:|---:|
+  | `957c2e4^..957c2e4` (one PR) | 3 | 1 |
+  | `8550a1f^..8550a1f` (one PR) | 8 | 2 |
+  | `HEAD~20..HEAD` (20 commits) | 12 | 3 |
+
+  It fires proportionally to the change rather than to the 71% `unknown`
+  surface, and on `HEAD~20..HEAD` the three symbols are **disjoint** from the
+  three `unknownGained` already names — so it is additional signal, not a
+  restatement. Not implemented here: it is a change to §6.3's model and to §6's
+  exit table, which is §9.2 surface. Filed with these numbers in
   [`docs/open-questions.md`](../open-questions.md).

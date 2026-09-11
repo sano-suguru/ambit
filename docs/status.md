@@ -94,10 +94,10 @@ Each of these was measured, and the run is archived.
   the controller. A knex `del()` added inside an existing read method was
   **missed** — and fixing the cause (naming a receiver from the package type
   that describes it) took that repository's stubbed call sites from 120 to 940
-  and turned the miss into exit 1 naming the operation. Two misses survive: `ky`,
-  the HTTP client that repository actually uses, and the same `fs` /
-  `child_process` edit written without the `node:` prefix — the spelling that
-  repository uses throughout. The run is
+  and turned the miss into exit 1 naming the operation. Two misses survive, both of them
+  operations no table names: `ky`, the HTTP client that repository actually
+  uses, and the same `fs` / `child_process` edit written without the `node:`
+  prefix — the spelling that repository uses throughout. The run is
   [2026-09-11](measurements/2026-09-11-third-party-diff-validation.md).
 - **The gate is real and it has cost something.** `ambit diff HEAD~1 src` runs
   as a **gating** CI step with `continue-on-error` removed. The change that
@@ -157,11 +157,16 @@ The 2026-09-11 third-party run narrowed the question without closing it. On a
 real backend with its dependencies installed, the unresolved-name histogram is
 no longer anonymous — it names `knex.QueryBuilder.*` (448 sites at the top),
 `express.Response.*`, `supertest.Test.*` — so *which* names matter is now
-answerable there. What it also showed is that the histogram is the wrong place
-to look for the gate: `unknown` does not move when a symbol that was already
-`unknown` gains authority, and `ambit diff` reports a gained `unknown` without
-ever failing on it. A symbol already `unknown` in the base can gain any amount
-of unresolved authority and the comparison stays silent.
+answerable there. What it also showed is that `unknown` and the gate are less
+coupled than the rate suggests: a *known* effect added inside an `unknown`
+symbol fails the comparison already, because what is compared is the effect set
+and being `unknown` beside it changes neither side. What has no line at all is
+the gain the analysis cannot resolve — an outbound call through a client no
+table covers. Where the symbol was known before, that prints as `unknownGained`
+and exits 0; where it was already `unknown`, nothing prints, because a symbol
+carries a boolean rather than the set of operations behind it. That is the next
+decision, and it is filed with its measured noise in
+[`docs/open-questions.md`](open-questions.md).
 
 ## Next measurement
 
