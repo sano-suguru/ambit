@@ -30,9 +30,11 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | Authority increases an external team rejected or explicitly approved | 0 | > 0 |
 | `unknown` rate, real third-party code (corpus median, 4,200 functions) | 52.6% | lower — no target (see below) |
 | `unknown` rate, adopting-team-equivalent fixture (`realistic-api`) | 1.9% (1/53) | no target (see below) |
-| `unknown` rate, Ambit's own source (`check src`) | 38.5% (126/327) | — |
+| `unknown` rate, Ambit's own source (`check src`) | 37.8% (128/339) | — |
 | Authority Ambit sees in a third-party backend's data layer ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)) | 940 stubbed call sites, up from 120 | — |
-| Tests | 512 passing, 31 files | green |
+| Third-party backends `ambit diff` is silent on when nothing changed | **2** — Unleash ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)), immich ([2026-09-11](measurements/2026-09-11-second-third-party-validation-immich.md)) | — |
+| `unknown` rate, second third-party backend (immich `server/src`, 3,061 functions) | 79.5% (2,432/3,061) | no target (see below) |
+| Tests | 549 passing, 33 files | green |
 | `tsc --noEmit` / `biome ci .` | pass / pass | pass |
 | `check src` latency, 40 files | ~1.1 s | §3.5's 3 s allowance |
 | Incremental / resident analysis | no | yes (§6.2) |
@@ -104,6 +106,26 @@ Each of these was measured, and the run is archived.
   controller, and that repository's stubbed call sites went 940 → **953** with
   `diff HEAD` still silent on the untouched tree. The run is
   [2026-09-11](measurements/2026-09-11-third-party-diff-validation.md).
+- **The lessons from the first third-party backend generalize to a second
+  one, and that run found the blocker the first could not.**
+  `immich-app/immich@2a62622` — NestJS 12, ESM, kysely, bullmq on ioredis, a
+  pnpm-workspace monorepo, 460 analyzed files, 3,061 functions — was cloned
+  untouched and put through the same workflow. Every name in its top-ten
+  unresolved histogram is a receiver named from its declared type, which is the
+  rule the Unleash run added, and `fetch`, `node:fs` / `node:child_process` and
+  their un-prefixed spellings are each reported with the whole call path
+  through two NestJS indirections to the controller. Nothing from the first run
+  was contradicted. What was new is that `diff` compared **two different
+  environments**: only `<git root>/node_modules` was linked into the base
+  checkout, and a pnpm workspace keeps a package's dependencies beside the
+  package, so an **unmodified** tree reported 257 authority increases, 1,182
+  unresolvable gains and exit 1 in both modes. Linking every directory from the
+  repository root down to the checked one takes that to **no increase, exit 0
+  in both modes**, all twelve injected-change outputs byte-identical to a
+  single-package control, and `HEAD~20` over 443 changed files to no authority
+  increase and 35 unresolvable gains. Unleash re-measured on the same checkout
+  is unchanged. The run is
+  [2026-09-11](measurements/2026-09-11-second-third-party-validation-immich.md).
 - **The gate is real and it has cost something.** `ambit diff HEAD~1 src` runs
   as a **gating** CI step with `continue-on-error` removed. The change that
   introduced the approval ledger was itself a legitimate authority increase:

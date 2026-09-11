@@ -72,7 +72,7 @@ export async function runDiff(ref: string, dir: string): Promise<DiffResult> {
   // temporary worktree is neither.
   const renames = await renamedFiles(repoRoot, baseCommit, subdir);
 
-  const worktree = await addWorktree(repoRoot, baseCommit);
+  const worktree = await addWorktree(repoRoot, baseCommit, subdir);
   try {
     // The same subpath on both sides: a symbol id is relative to the
     // directory that was checked (DESIGN.md §5.3), so comparing `src` against

@@ -41,6 +41,22 @@ report.
   ([ADR-0011](docs/adr/0011-reporting-why-a-contract-cannot-be-proposed.md)),
   and it does not change what `AMB-I001` proposes or when.
 
+### Fixed
+
+- **`ambit diff` compared two different environments when the checked
+  package's `node_modules` was not at the repository root.** Only
+  `<repository root>/node_modules` was linked into the base checkout, so for a
+  package inside a workspace — pnpm workspaces do not hoist — the base side
+  resolved none of the dependencies the working tree resolves, and the
+  difference came out as authority. Every directory from the repository root
+  down to the checked one is now linked. Measured on
+  `immich-app/immich@2a62622`: `diff HEAD server/src` on an **unmodified** tree
+  went from 257 unapproved authority increases, 1,182 unresolvable gains and
+  exit 1 in both modes, to no increase and exit 0 in both
+  ([2026-09-11](docs/measurements/2026-09-11-second-third-party-validation-immich.md)).
+  This changes `diff`'s exit code on a valid invocation, which is §9.2 surface.
+
+
 ## [0.1.0] — unreleased
 
 The first release, so this records the surface it establishes rather than a

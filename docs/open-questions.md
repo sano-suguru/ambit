@@ -74,8 +74,17 @@ exit: when it fires, the question is decided, the answer goes in the
   *Trigger:* an adopter turning `--strict` off rather than fixing what it
   reports.
 - **Monorepos.** Multiple tsconfigs, project references, config discovery,
-  `unknown` at project boundaries, and update propagation.
-  *Trigger:* an adopter with a monorepo.
+  `unknown` at project boundaries, and update propagation. One part of this is
+  now decided and out: `ambit diff <ref> <subdir>` links the working tree's
+  `node_modules` from the repository root down to the checked directory, so a
+  package inside a workspace compares against the same environment it runs in
+  (§6, measured on
+  [immich](measurements/2026-09-11-second-third-party-validation-immich.md)).
+  What is left is the workspace **root** as the checked directory — which
+  tsconfig is found there, which `node_modules` below it the base side needs,
+  and how project boundaries are reported.
+  *Trigger:* already fired for the subdirectory case, which is closed above.
+  For the rest, an adopter running `ambit diff` at a workspace root.
 
 ## Runtime
 

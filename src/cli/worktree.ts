@@ -60,9 +60,24 @@ export async function repositoryRoot(dir: string): Promise<string> {
  * than by their contracts. A symlink is enough — nothing writes to it — and
  * `git worktree` never tracks it.
  *
+ * The repository root is not the only place a `node_modules` can be. `subdir`
+ * is the directory being compared, relative to `repoRoot`; every directory
+ * from the root down to it is linked the same way, because a package inside a
+ * workspace keeps its dependencies beside itself. pnpm workspaces guarantee
+ * that layout — they do not hoist to the workspace root — so for a package
+ * checked there the root link alone gives the base side *no* dependencies at
+ * all. Measured on `immich-app/immich@2a62622`: without the chain, comparing
+ * `server/src` against an unmodified tree reported 257 authority increases and
+ * 1,182 unresolvable gains, all of them the two sides' environments differing
+ * (`docs/measurements/2026-09-11-second-third-party-validation-immich.md`).
+ *
  * @effects process, fs_read, fs_write
  */
-export async function addWorktree(repoRoot: string, ref: string): Promise<BaseWorktree> {
+export async function addWorktree(
+  repoRoot: string,
+  ref: string,
+  subdir = "",
+): Promise<BaseWorktree> {
   const root = await mkdtemp(path.join(os.tmpdir(), "ambit-diff-"));
   try {
     await git(repoRoot, "worktree", "add", "--detach", root, ref);
@@ -73,11 +88,41 @@ export async function addWorktree(repoRoot: string, ref: string): Promise<BaseWo
     throw error;
   }
 
-  const installed = path.join(repoRoot, "node_modules");
-  if (existsSync(installed)) {
-    await symlink(installed, path.join(root, "node_modules"), "dir");
+  for (const relative of ancestry(subdir)) {
+    const installed = path.join(repoRoot, relative, "node_modules");
+    const link = path.join(root, relative, "node_modules");
+    // The base ref need not contain the directory the working tree checks —
+    // a package added since then has nothing to link into.
+    if (!existsSync(installed) || !existsSync(path.join(root, relative))) continue;
+    if (existsSync(link)) continue;
+    await symlink(installed, link, "dir");
   }
   return { root, repoRoot };
+}
+
+/**
+ * `subdir` and every directory above it, repository root first, each relative
+ * to that root. The root itself is `""`, which `path.join` drops.
+ *
+ * `path.dirname` is what walks it, so a separator the platform writes some
+ * other way is still read: the caller's `subdir` comes from `path.relative`.
+ *
+ * Undeclared, like `installedPackageNameOf`: `node:path` has no stub rows, so
+ * a `@effects pure` here would be a declaration the analysis cannot check and
+ * would report as `AMB-W001` rather than as purity.
+ */
+function ancestry(subdir: string): readonly string[] {
+  const chain: string[] = [""];
+  let current = path.normalize(subdir);
+  const parts: string[] = [];
+  while (current !== "" && current !== "." && current !== path.sep) {
+    parts.unshift(current);
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  chain.push(...parts);
+  return chain;
 }
 
 /**

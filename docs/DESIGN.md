@@ -547,7 +547,7 @@ What is implemented today is [`docs/status.md`](status.md).
 
 - The base ref is materialized into a temporary directory with `git worktree`, placed in the OS temporary directory, never inside the tree being checked, and cleaned up unconditionally.
 - The same subdirectory on both sides goes through the same analysis. Symbol IDs contain a path relative to the checked directory (§5.3), so if the target shifts, every symbol looks new.
-- If the working tree has `node_modules`, it is symlinked into the base side, so that a difference in environment rather than in contracts is not reported as a diff.
+- The working tree's `node_modules` is symlinked into the base side, so that a difference in environment rather than in contracts is not reported as a diff. Every directory from the repository root down to the checked directory is linked, not the root alone: a package inside a workspace keeps its dependencies beside itself, and linking only the root leaves the base side resolving nothing.
 - A file git reports as renamed carries its symbols with it: the base side's ids are re-expressed under the new path before the comparison. Only git's own rename detection is used; no other guess about identity is made. What this does *not* cover is in §6.3.
 - The comparison itself is a pure function of the two sets of `kind: "authority"` records and the rename map, and touches git not at all.
 - An increase must be approved to pass (§6.3).
