@@ -27,8 +27,8 @@ Requires Node.js 24.
 ```sh
 npm i -D ambit-ts
 npx ambit init src       # propose `@effects` for the functions that have none
-npx ambit check src      # check the code against what they now declare
-npx ambit diff HEAD src  # and what the change to them allows that HEAD did not
+npx ambit check src      # check the code against what it now declares
+npx ambit diff HEAD src  # review the authority this change adds since HEAD
 ```
 
 The contracts are JSDoc, so `npm remove ambit-ts` leaves ordinary TypeScript
