@@ -124,26 +124,49 @@ Authority increased in 1 symbol:
 Seven things `diff` does not see, or sees differently from how a reader might
 expect:
 
-- **Authority added inside a handler registered as an argument, at the top
-  level of a file, is not reported at all.** A route written as
+- **Authority added inside a handler registered as an argument is reported
+  against the file, not against the handler.** A route written as
   `router.post("documents.create", auth(), async (ctx) => { … })` registers an
-  arrow function in argument position. Such a function carries no contract of
-  its own (see "Function extraction" in
-  [`docs/analysis-limitations.md`](analysis-limitations.md)), and its calls are
-  attributed to the nearest *enclosing extracted* function — of which, at the
-  top level of a module, there is none. So a `fetch(…)` added inside the
-  handler body produces **no** line: not an authority increase, not a §6.4
-  report, not a warning, and exit 0 in both `diff` and `diff --strict`.
-  Measured on `outline/outline@35dd15b9`, whose 226 routes are all written this
-  way, against the same `fetch` one hop deeper, which is reported with the full
-  call path
-  ([2026-09-11](measurements/2026-09-11-third-third-party-validation-outline.md),
-  E6/E1). The workaround is in the checked repository and is one line per
-  route: bind the handler to a name — `const createDocument = async (ctx) => {
-  … }` — and it becomes an ordinary symbol whose authority `diff` reports
-  (E7). This is the largest open gap in `diff`'s coverage; what a stable
-  declaration path for an anonymous argument-position function should be is
-  recorded in [`docs/open-questions.md`](open-questions.md).
+  arrow function that has no name and, at the top level of a module, no
+  enclosing extracted function whose body contains it. Every such function in
+  one file is analyzed under one entry, `routes/documents.ts#<inline
+  callbacks>` (DESIGN.md §4.1 (a)), and its authority is compared as a
+  multiset over those bodies (§6.3) — so a `fetch(…)` added inside one handler
+  is an increase even when a sibling handler in the same file already reaches
+  the network. What a reader does **not** get is which handler: the entry's
+  own position is the start of the file, and the witness path names *a* body
+  holding the authority, which on a count increase need not be the one that
+  changed. The `operation:` line is the position of a real call to the
+  operation; the git diff is what says which handler gained it.
+
+  Three consequences worth knowing before adopting:
+
+  - **Authority moving from one handler to another is not an increase**, and
+    cannot be one: `router.post("/admin", …)` losing `network` while
+    `router.post("/public", …)` gains it leaves the total at one, and the two
+    sequences are the two a plain reorder produces. The same holds for an
+    operation the analysis could not read moving between them. It is not
+    silent — §6.4's third shape reports that the bodies cannot be matched, and
+    `--strict` fails on it — but the report says "something moved", not "this
+    handler gained it", and no approval line is about it. A plain reorder is
+    reported the same way, because it is the other reading of the same
+    evidence.
+  - **A handler that gains an authority it already held is silent** — adding a
+    second `fetch` to a handler that already reaches the network. This is not
+    a property of the owner: authority is a set per body, so a *named*
+    function reports nothing for it either (measured on
+    `outline/outline@35dd15b9`, where extracting the same handler to a named
+    `const` first also reports nothing —
+    [2026-09-11](measurements/2026-09-11-inline-callback-owner.md), E6c).
+  - **`ambit diff --strict` now fails on edits it used to pass**, because
+    bodies that were never walked are now analyzed and most of them reach
+    calls no stub table covers. On all three third-party subjects, adding one
+    `expect(…)` line to a test file takes `--strict` from exit 0 to exit 1 as
+    a §6.4 report. Default `ambit diff` is unaffected (exit 0).
+
+  Binding the handler to a name — `const createDocument = async (ctx) => { …
+  }` — still buys the finer report, one line per route, and is the workaround
+  where the file-level answer is not enough.
 
 - **A function whose file git does not report as renamed reads as a deletion
   plus a new symbol.** A symbol id is `<path relative to the checked

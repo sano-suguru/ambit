@@ -1,10 +1,12 @@
 import type {
+  AuthorityBody,
   AuthorityPath,
   AuthorityRecord,
   AuthorityRef,
   UnresolvedOperation,
 } from "./authority.ts";
 import {
+  authorityBodies,
   capabilityRef,
   effectiveCapabilities,
   effectiveEffects,
@@ -15,7 +17,6 @@ import {
   unresolvedOperationKey,
 } from "./authority.ts";
 import { capabilityCovers, parseCapability } from "./capability.ts";
-import type { KnownEffect } from "./effects.ts";
 import type { SymbolId } from "./symbol-id.ts";
 
 /**
@@ -41,6 +42,12 @@ export interface SymbolAuthorityDiff {
   readonly added: readonly AuthorityRef[];
   /** Authority the old side had that the new side does not. */
   readonly removed: readonly AuthorityRef[];
+  /**
+   * Authority the new side holds that is not in {@link added}. For a symbol
+   * owning several bodies an authority can be here *and* in {@link removed} —
+   * fewer bodies hold it than did, and some still do — so a consumer that
+   * renders both must not read this as "nothing happened to it".
+   */
   readonly unchanged: readonly AuthorityRef[];
   /**
    * The analysis reached something it could not resolve on the new side but
@@ -64,6 +71,20 @@ export interface SymbolAuthorityDiff {
    * definition, and it is {@link unknownGained} that says so.
    */
   readonly unresolvedGained: readonly UnresolvedOperation[];
+  /**
+   * The analysis cannot say **which** of this symbol's bodies holds what it
+   * holds, and the two sides' bodies cannot be matched — DESIGN.md §6.4's
+   * third shape.
+   *
+   * Only ever true for a symbol that owns several bodies, which today is only
+   * §4.1 (a)'s inline-callback owner. Those bodies are anonymous, so
+   * "authority moved from one handler to another" and "the handlers were
+   * reordered" are the same two sequences; one is a change of who may act and
+   * the other is nothing at all, and no evidence in the source separates them.
+   * Reported rather than guessed at (P4), and never counted as an increase:
+   * the total did not grow, so there is nothing for an approval to be about.
+   */
+  readonly attributionUnmatched: boolean;
   /** The new side's record, for rendering the path of an increase. Absent for a deleted symbol. */
   readonly head?: AuthorityRecord;
   /** The old side's record. Absent for a new symbol. */
@@ -189,6 +210,7 @@ function compareSymbol(
       unknownGained: false,
       unknownLost: isUnknown(base),
       unresolvedGained: [],
+      attributionUnmatched: false,
       base,
     };
   }
@@ -202,23 +224,18 @@ function compareSymbol(
       unknownGained: isUnknown(head),
       unknownLost: false,
       unresolvedGained: [],
+      attributionUnmatched: false,
       head,
     };
   }
 
-  const addedEffects = missingEffects(effectiveEffects(base), effectiveEffects(head));
-  const removedEffects = missingEffects(effectiveEffects(head), effectiveEffects(base));
-  const addedCapabilities = uncoveredCapabilities(
-    effectiveCapabilities(base),
-    effectiveCapabilities(head),
-  );
-  const removedCapabilities = uncoveredCapabilities(
-    effectiveCapabilities(head),
-    effectiveCapabilities(base),
-  );
+  const baseBodies = authorityBodies(base);
+  const headBodies = authorityBodies(head);
 
-  const added = [...addedEffects.map(effectRef), ...addedCapabilities.map(capabilityRef)];
-  const removed = [...removedEffects.map(effectRef), ...removedCapabilities.map(capabilityRef)];
+  const added = grewIn(headBodies, baseBodies, head);
+  const removed = grewIn(baseBodies, headBodies, base);
+  const unknownGained = unknownBodies(headBodies) > unknownBodies(baseBodies);
+  const unresolvedGained = gainedUnresolved(base.unresolved, head.unresolved);
   const addedNames = new Set(added.map(formatAuthorityRef));
   const unchanged = authorityOf(head).filter((ref) => !addedNames.has(formatAuthorityRef(ref)));
 
@@ -229,9 +246,10 @@ function compareSymbol(
     added,
     removed,
     unchanged,
-    unknownGained: isUnknown(head) && !isUnknown(base),
-    unknownLost: isUnknown(base) && !isUnknown(head),
-    unresolvedGained: gainedUnresolved(base.unresolved, head.unresolved),
+    unknownGained,
+    unknownLost: unknownBodies(baseBodies) > unknownBodies(headBodies),
+    unresolvedGained,
+    attributionUnmatched: attributionUnmatchedBetween(baseBodies, headBodies),
     head,
     base,
   };
@@ -261,6 +279,170 @@ function gainedUnresolved(
   return sortUnresolvedOperations(gained);
 }
 
+/**
+ * The authority more of `bodies` hold than of `against` — the multiset
+ * difference DESIGN.md §6.3 compares, in the one direction.
+ *
+ * The refs considered, and the order they come out in, are `owner`'s own
+ * effective authority: effects in the standard order, then capabilities
+ * sorted, exactly as a record carries them. Only the *counts* are new.
+ *
+ * For a record with one body this is the old set comparison verbatim. An
+ * effect is in `added` when the head body holds it and the base body does not
+ * (1 > 0); a capability when nothing on the base side covers it (1 > 0),
+ * which is what makes narrowing `http:get:*` to one host not an increase and
+ * widening it back one. For an owner of several bodies the same arithmetic
+ * says a second body gaining what a first already had is an increase — the
+ * thing a merged owner would otherwise report as nothing.
+ */
+function grewIn(
+  bodies: readonly AuthorityBody[],
+  against: readonly AuthorityBody[],
+  owner: AuthorityRecord,
+): readonly AuthorityRef[] {
+  const refs = [
+    ...effectiveEffects(owner).map(effectRef),
+    ...effectiveCapabilities(owner).map((capability) => capabilityRef(capability)),
+  ];
+  return refs.filter((ref) => holdersOf(bodies, ref) > holdersOf(against, ref));
+}
+
+/**
+ * How many of `bodies` hold `ref`.
+ *
+ * Containment for a capability, equality for an effect. `<resource>:<action>:<target>`
+ * has a glob in `target` (DESIGN.md §4.4), and the rule that governs
+ * caller-to-callee narrowing governs this comparison too: a body granted
+ * `http:get:*` is a holder of `http:get:api.example.com`, so narrowing the
+ * first to the second is not an increase, while widening it back is — nothing
+ * in `[api.example.com]` covers `*`. Effects have no such ordering.
+ *
+ * A token neither side can parse falls back to exact text. It came from a
+ * dump this codebase wrote, so this is unreachable in practice; treating an
+ * unparseable token as covered would be the one wrong answer, since it would
+ * hide an increase.
+ */
+function holdersOf(bodies: readonly AuthorityBody[], ref: AuthorityRef): number {
+  if (ref.kind === "effect") {
+    return bodies.filter((body) => (body.effects as readonly string[]).includes(ref.name)).length;
+  }
+  const required = parseCapability(ref.name);
+  return bodies.filter((body) =>
+    body.capabilities.some((text) => {
+      const grant = parseCapability(text);
+      return grant && required ? capabilityCovers(grant, required) : text === ref.name;
+    }),
+  ).length;
+}
+
+/**
+ * Whether something moved between the two sides' bodies without the
+ * comparison being able to say what moved where (DESIGN.md §6.4's third
+ * shape).
+ *
+ * The bodies are anonymous, so the only correspondence there is evidence for
+ * is source order, and source order slides: inserting one registration moves
+ * every one below it. What survives that is the two ends. The common prefix
+ * and the common suffix of the two sequences are matched index for index, and
+ * what is left in the middle is the region no evidence aligns.
+ *
+ * **The criterion is per *fact*, not per body.** Inside that region, each
+ * thing a body can hold — an effect, a capability, being `unknown`, one
+ * unresolvable operation at one count — is read as a presence sequence over
+ * the bodies. A fact held by as many bodies as before, in a different
+ * arrangement, moved: nothing grew, and which handler took it from which is
+ * exactly what cannot be said. A fact held by a different *number* of bodies
+ * did not move, it was added or removed, and `added` / `removed` / §6.4's
+ * first two shapes are what report that — so this does not repeat them.
+ *
+ * Per fact rather than per body because authority moves without bodies
+ * moving: `[{network}, {db_write}]` becoming `[{network, db_write}, {}]`
+ * leaves both counts at one and leaves no body unchanged, yet `db_write`
+ * changed hands. Matching whole bodies misses it; matching `db_write`'s own
+ * `[false, true]` against `[true, false]` does not.
+ *
+ * A plain reorder fires too, and must: it reaches the comparison as the same
+ * evidence a transfer does. Over-reporting there is the direction §3.4
+ * requires, and the cost is a line, not an approval.
+ *
+ * An unresolvable operation's *count* is part of its fact, so a body holding
+ * `expect x3` and one holding `expect x5` are two facts, and one of them
+ * becoming `expect x4` is a change in what exists rather than in where it is.
+ *
+ * A capability is not a fact a body either has or has not, but one it either
+ * permits or does not (§4.4): a body granted `http:get:*` holds
+ * `http:get:api.example.com` as surely as one granted that host does. The
+ * candidates are every capability token either side names, and presence is
+ * {@link holdersOf}'s containment, not string equality — the same rule
+ * `added` / `removed` use, so the two cannot disagree about what a body holds.
+ * Without it, `admin: http:get:*` becoming `public: http:get:api.example.com`
+ * reads as one token disappearing and another appearing, and the fact that a
+ * public route can now reach a host only an admin route could is reported
+ * nowhere.
+ */
+function attributionUnmatchedBetween(
+  base: readonly AuthorityBody[],
+  head: readonly AuthorityBody[],
+): boolean {
+  // One body per side is an ordinary function: what it holds *is* what the
+  // symbol holds, `added` / `removed` already say everything, and there is no
+  // attribution question to have.
+  if (base.length <= 1 && head.length <= 1) return false;
+
+  const candidates = [...new Set([...base, ...head].flatMap((body) => body.capabilities))].map(
+    capabilityRef,
+  );
+
+  const factsOf = (body: AuthorityBody) =>
+    new Set<string>([
+      ...body.effects.map((effect) => `effect:${effect}`),
+      ...candidates
+        .filter((ref) => holdersOf([body], ref) > 0)
+        .map((ref) => `capability:${ref.name}`),
+      ...(body.unknown ? ["unknown"] : []),
+      ...body.unresolved.map(
+        (operation) => `operation:${unresolvedOperationKey(operation)} x${operation.count}`,
+      ),
+    ]);
+
+  const baseFacts = base.map(factsOf);
+  const headFacts = head.map(factsOf);
+  const equal = (a: number, b: number) =>
+    baseFacts[a]?.size === headFacts[b]?.size &&
+    [...(baseFacts[a] ?? [])].every((fact) => headFacts[b]?.has(fact));
+
+  let start = 0;
+  while (start < base.length && start < head.length && equal(start, start)) start++;
+
+  let end = 0;
+  while (
+    end < base.length - start &&
+    end < head.length - start &&
+    equal(base.length - 1 - end, head.length - 1 - end)
+  ) {
+    end++;
+  }
+
+  const baseWindow = baseFacts.slice(start, base.length - end);
+  const headWindow = headFacts.slice(start, head.length - end);
+  const facts = new Set([...baseWindow, ...headWindow].flatMap((set) => [...set]));
+
+  return [...facts].some((fact) => {
+    const before = baseWindow.map((set) => set.has(fact));
+    const after = headWindow.map((set) => set.has(fact));
+    const held = before.filter(Boolean).length;
+    // Held by nobody here, or by a different number of bodies: whatever
+    // happened to it, it is not a relocation, and another section names it.
+    if (held === 0 || held !== after.filter(Boolean).length) return false;
+    return before.length !== after.length || before.some((had, i) => had !== after[i]);
+  });
+}
+
+/** How many of `bodies` the analysis did not reach the end of (DESIGN.md §6.4's first shape). */
+function unknownBodies(bodies: readonly AuthorityBody[]): number {
+  return bodies.filter((body) => body.unknown).length;
+}
+
 function authorityOf(record: AuthorityRecord): readonly AuthorityRef[] {
   return [
     ...effectiveEffects(record).map(effectRef),
@@ -270,42 +452,6 @@ function authorityOf(record: AuthorityRecord): readonly AuthorityRef[] {
 
 function isUnknown(record: AuthorityRecord): boolean {
   return record.effects.unknown || record.capabilities.unknown;
-}
-
-/** Effects in `candidate` that `reference` does not contain. Plain set difference. */
-function missingEffects(
-  reference: readonly KnownEffect[],
-  candidate: readonly KnownEffect[],
-): readonly KnownEffect[] {
-  const have = new Set(reference);
-  return candidate.filter((effect) => !have.has(effect));
-}
-
-/**
- * Capabilities in `candidate` that nothing in `reference` permits.
- *
- * Containment, not string equality, because `<resource>:<action>:<target>`
- * has a glob in `target` (DESIGN.md §4.4) and the same rule that governs
- * caller-to-callee narrowing governs this comparison. Narrowing
- * `http:get:*` to `http:get:api.example.com` is therefore not an increase,
- * while widening it back is: nothing in `[api.example.com]` covers `*`.
- *
- * A token neither side can parse falls back to exact text. It came from a
- * dump this codebase wrote, so this is unreachable in practice; treating an
- * unparseable token as covered would be the one wrong answer, since it would
- * hide an increase.
- */
-function uncoveredCapabilities(
-  reference: readonly string[],
-  candidate: readonly string[],
-): readonly string[] {
-  const grants = reference.map((text) => ({ text, parsed: parseCapability(text) }));
-  return candidate.filter((text) => {
-    const required = parseCapability(text);
-    return !grants.some((grant) =>
-      grant.parsed && required ? capabilityCovers(grant.parsed, required) : grant.text === text,
-    );
-  });
 }
 
 /**
@@ -363,6 +509,7 @@ export function unchangedSymbols(diff: AuthorityDiff): readonly SymbolAuthorityD
       entry.added.length === 0 &&
       entry.removed.length === 0 &&
       !entry.unknownGained &&
+      !entry.attributionUnmatched &&
       entry.unresolvedGained.length === 0,
   );
 }
@@ -389,12 +536,30 @@ export function unresolvedGains(diff: AuthorityDiff): readonly SymbolAuthorityDi
 }
 
 /**
- * Whether the comparison widened what the analysis cannot see, in either of
- * §6.4's two shapes — what `ambit diff --strict` exits 1 on and what the
+ * Symbols whose bodies the two sides cannot be matched across, so the
+ * analysis cannot say which of them holds what (DESIGN.md §6.4, third shape).
+ *
+ * Reported always, and a failure only under `ambit diff --strict`, for the
+ * same reason as the other two shapes: nothing was granted, so no approval
+ * line is about it. What closes it is in the checked repository — binding the
+ * handler to a name gives it a symbol, and a symbol is compared against
+ * itself.
+ */
+export function attributionUnmatched(diff: AuthorityDiff): readonly SymbolAuthorityDiff[] {
+  return diff.symbols.filter((entry) => entry.attributionUnmatched);
+}
+
+/**
+ * Whether the comparison widened what the analysis cannot see, in any of
+ * §6.4's three shapes — what `ambit diff --strict` exits 1 on and what the
  * default run reports at exit 0.
  */
 export function hasUnresolvedWidening(diff: AuthorityDiff): boolean {
-  return unknownGained(diff).length > 0 || unresolvedGains(diff).length > 0;
+  return (
+    unknownGained(diff).length > 0 ||
+    unresolvedGains(diff).length > 0 ||
+    attributionUnmatched(diff).length > 0
+  );
 }
 
 export function hasAuthorityIncrease(diff: AuthorityDiff): boolean {

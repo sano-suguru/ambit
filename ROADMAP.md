@@ -17,7 +17,7 @@ Unproven. Zero external adopters.
 
 ## Current bottleneck
 
-**`unknown` on real third-party code.** The corpus median is 52.6% — more than
+**`unknown` on real third-party code.** The corpus median is 52.9% — more than
 half of all functions on real code depend on a path the analysis did not reach.
 A gate that cannot see half the tree is a gate an adopter will not trust.
 
@@ -35,7 +35,7 @@ it is preparation for it:
 
 | To prove | What would show it | Where it stands |
 |---|---|---|
-| The analysis sees enough of a real codebase to be worth gating | Corpus median `unknown` materially below 52.6% — enough that an external pilot is credible. **This is a pre-adoption heuristic with no target number, not the KPI below** | 52.6% — [`docs/status.md`](docs/status.md) |
+| The analysis sees enough of a real codebase to be worth gating | Corpus median `unknown` materially below 52.9% — enough that an external pilot is credible. **This is a pre-adoption heuristic with no target number, not the KPI below** | 52.9% — [`docs/status.md`](docs/status.md) |
 | The gate does not block honest work | An adopter's approval ledger stays under a handful of lines per pull request in steady state | Measured only on this repository: five lines for the change that introduced it |
 | Contracts survive a real build | An adopter's bundled, minified production build enforces what its source declared | Verified in `test/e2e.*` only; no external build |
 | The cost of backing out is real | An adopter removes Ambit and their code still type-checks and runs | `test/e2e.install.test.ts` proves it for a scratch project, not for an application |

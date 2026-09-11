@@ -198,6 +198,16 @@ A `static` member carries the marker in its segment — `Class.static method`, a
 
 These last two have a declaration path, but **writing JSDoc on them is still not adopted** (AMB-E003). Members with computed, string, or numeric keys cannot be named even in config. The resulting asymmetry — config's namespace is wider than JSDoc's — is an open question, not a distinction derived from principle ([`docs/open-questions.md`](open-questions.md)).
 
+**The inline-callback owner.** A function expression written directly as an argument — `router.post("documents.create", auth(), async (ctx) => { … })`, the idiomatic registration in Koa, Express, Fastify and Hono — has no name and, at module scope, no enclosing declaration whose body contains it. Every such function in one file is analyzed under one entry, whose declaration path is the single segment `<inline callbacks>`: `routes/documents.ts#<inline callbacks>`. The angle brackets are not decoration — no identifier can contain one, so the segment cannot collide with a path a declaration produces.
+
+This is a third tier beside the two above: **analyzed and compared, declarable by nobody.** A contract comment on one of the callbacks is inert and reported as `AMB-E003`, exactly as on an accessor; a config key naming the owner declares nothing either, and is reported as a key that matched no symbol. Both refusals are the same rule — one sentence must not stand for several functions at once, which would widen the guarantee surface by notation alone (P4). `ambit init` proposes nothing for it, in JSDoc or in config, because there is no edit that would attach the inferred set to what produced it.
+
+Why one entry per file and not one per callback: an anonymous sibling has no name to be told apart by, and every synthetic name that would tell two apart is either a position (which §6.4 forbids a key from holding) or an ordinal (which renames every sibling below an inserted one). What replaces the name is arithmetic — §6.3 compares the owner's authority as a multiset over the bodies it owns — so a body gaining authority is visible without the body ever being named. `ambit init --config` and `ambit.approvals.md` therefore see a single, position-free id that survives re-indenting, moving the registration, and adding or deleting a neighbouring one.
+
+**What this does not buy is per-handler identity, and the limit is not an implementation gap.** Two anonymous bodies swapping authority and two anonymous bodies being reordered are the same pair of sequences; nothing in the source separates them. So the owner answers "did this file's inline handlers gain authority" and not "which of them holds it". The second question is not answered wrongly — §6.4's third shape reports that it cannot be answered — but it is not answered.
+
+The owner's own `location` is the start of the file, because the bodies it stands for are scattered through it. What locates an increase is the authority path's `operation` (§5.1), which is the position of the call itself.
+
 **(b) Globs in the `file` part, and the priority when several entries hit the same symbol**
 
 The `file` part interprets `*` (any string not crossing `/`) and `**` (zero or more directory levels). The `symbol` part is not globbed.
@@ -500,6 +510,7 @@ The primary consumer of diagnostics is the AI agent. Human-facing display is a r
 - `observed` / `required` are post-propagation. `unknown` is not an authority but a separate claim — "the analysis did not reach" — so it is an independent boolean on each of `effects` and `capabilities` (§4.3).
 - `unresolved` is the multiset of operations **in this function's own body** the analysis could not resolve: `{reason, count}`, plus `operation` where the call has a qualified name and omitted where it has none. It is body-local, never propagated, and empty for a `@boundary` function, whose body is not analyzed by declaration (§4.6). It is what makes the second shape in §6.4 comparable; `effects.unknown` stays the boolean claim about the propagated result and is not derived from it — a function is `unknown` when a *callee* is, with nothing unresolved in its own body.
 - `paths` is attached only to authority actually reached; `via` and `operation` are built by the same computation as `AMB-E001`. No path is attached to authority merely declared (§5.3).
+- `bodies` is present only on an entry that owns more than one — today the inline-callback owner (§4.1 (a)) — and carries, per owned body, what that body alone holds: its effects and capabilities, whether it is `unknown`, and its own share of `unresolved`. Its union is the record's own `observed` / `required`, so nothing here widens what the symbol holds; what it carries is *how many* of the bodies hold each authority and in what order, which is what §6.3 compares and what §6.4's third shape is computed from. Absent means one body, holding the record's own effective authority.
 - Records are in symbol ID order and the arrays within them are sorted, so analyzing the same tree twice produces identical output.
 - The position is between the diagnostic lines and the `kind: "summary"` line, so consumers that read the last record as `summary` are not broken. `init` does not emit these.
 
@@ -606,6 +617,32 @@ For agents and editors, a resident check path holds the analysis engine's state 
 pull request: a change that legitimately adds authority has to be able to say
 so, or the gate blocks honest work and is switched off.
 
+**What "grew" means.** Authority is compared as a **multiset over the bodies a
+symbol owns**: an authority is added when more of them hold it than did, and
+removed when fewer do. Almost every symbol owns one body, where the count is 0
+or 1 and this is the plain set comparison it has always been — an effect the
+head holds and the base does not, a capability nothing on the base side covers
+(§4.4's containment, not string equality, so narrowing `http:get:*` to one host
+is not an increase and widening it back is). The only symbol that owns several
+is §4.1 (a)'s inline-callback owner, and stating the rule over a set of bodies
+is what keeps it from merging them: a second registered handler gaining what a
+first already had is an increase, which a set over the same bodies would have
+reported as nothing. §6.4's first shape is counted the same way, over the
+bodies the analysis stopped reaching the end of.
+
+What the count cannot see is authority **moving** between two of those bodies:
+one handler losing `network` and another gaining it leaves the total at one,
+and the two sequences are the same two sequences a plain reorder produces. Two
+named functions would report that as one increase and one decrease; anonymous
+bodies have nothing to report it against. §6.4's third shape is where it goes
+instead — not as an increase, because nothing was granted, but never as
+silence. The same applies to what §6.4's first two shapes count.
+
+The count decides *that* something grew; it is not carried into what the
+increase is. `added` names the authority once however many bodies gained it, so
+one approval line covers it — the ledger still counts `(symbol id, authority)`
+pairs, and one increase is one pair.
+
 Any approval mechanism has to meet four criteria, recorded here so that a later
 reconsideration has something in the specification to test itself against:
 
@@ -696,12 +733,14 @@ made the analysis see *less* than it did.
 `unknown` is the unresolved extent of a guarantee, not a permission (§4.3), so
 none of what follows is an authority increase, and none of it is approved by a
 ledger line. What it must not be is silence — reporting an unanalyzed path as
-"nothing increased here" is exactly what §3.4 forbids.
+"nothing increased here" is exactly what §3.4 forbids. Three shapes land here:
+two where the analysis saw less than it did, and one where it saw the same
+amount and cannot say where it sits.
 
 A *known* effect added inside an `unknown` symbol is not this case at all. What
 `ambit diff` compares is the effective effect set, and being `unknown` beside it
 changes neither side, so such an addition is an ordinary authority increase and
-fails as one. Only the **unresolvable** gain is left, in two shapes:
+fails as one. What is left is the three shapes above, written out:
 
 1. **The symbol became unresolved.** It was resolved on the base side and is
    `unknown` on the head side — including a symbol that is new and `unknown`.
@@ -709,6 +748,43 @@ fails as one. Only the **unresolvable** gain is left, in two shapes:
 2. **The unresolved extent widened.** The symbol is `unknown` on both sides, and
    its own body holds **more** unresolvable operations than it did. An outbound
    call through a client no stub table covers lands here.
+3. **What the bodies hold moved between them, and they cannot be matched.** A
+   symbol that owns several bodies (§4.1 (a)'s inline-callback owner) holds the
+   same things on both sides, but not in the same places, and the bodies have
+   no names to be matched by. `router.post("/admin", …)` losing `network` while
+   `router.post("/public", …)` gains it reaches the comparison as the same two
+   sequences a reorder produces, and one reading is a public route that can now
+   reach the network. The same holds for an operation the analysis *could not
+   read*: an opaque `delete` moving from an admin route to a public one leaves
+   the multiset of shape 2 exactly where it was. Nothing grew, so this is not an
+   increase and no approval is about it. It is reported because the alternative
+   is to pick one of the two readings and call the safe one true (P4).
+
+   What is compared is the bodies in source order, with the common prefix and
+   the common suffix matched index for index; what is left in the middle is the
+   region no evidence aligns. Inside it the comparison is **per fact, not per
+   body**: each thing a body can hold — an effect, a capability, being
+   `unknown`, one unresolvable operation at one count — is read as a presence
+   sequence over the bodies. A fact held by as many bodies as before, arranged
+   differently, moved, and this fires. A fact held by a different *number* of
+   bodies did not move; it was added or removed, and `added` / `removed` /
+   shapes 1 and 2 report it, so this does not repeat them.
+
+   Per fact rather than per body because authority moves without bodies
+   moving: `[{network}, {db_write}]` becoming `[{network, db_write}, {}]`
+   leaves both counts at one and leaves no body unchanged, yet `db_write`
+   changed hands. Two bodies that are both `unknown` are likewise told apart by
+   their own operations and not by the boolean. A capability's presence is
+   §4.4's containment and not string equality, the same rule `added` and
+   `removed` use: a body granted `http:get:*` holds `http:get:api.example.com`,
+   so `admin: http:get:*` becoming `public: http:get:api.example.com` is a
+   narrowing that also changed hands, and both halves are reported. A plain
+   reorder fires too, and must — it is the other reading of the same
+   evidence.
+
+   What closes this shape is in the checked repository, like the other two:
+   binding the handler to a name gives it a symbol, and a symbol is compared
+   against itself.
 
 Shape 2 needs the record to carry more than a boolean, and §5.1's `unresolved`
 is that: per analyzed function, the operations **in its own body** the analysis
@@ -725,20 +801,20 @@ counts, so a second call to the same unresolvable operation is a second
 operation. A symbol compared under a renamed path is compared against its own
 base record (§6), so moving a file reports nothing either.
 
-**The exit code is opt-in.** Both shapes are reported at exit 0 by default and
-fail with exit 1 under `ambit diff --strict`, together. The default is 0 because
+**The exit code is opt-in.** All three shapes are reported at exit 0 by default
+and fail with exit 1 under `ambit diff --strict`, together. The default is 0 because
 the alternative is incoherent: shape 1 is the strictly worse event — analysis
 that used to reach a symbol no longer does — and a default that failed on shape 2
 while shape 1 passed would read as a classification rather than a rule. The flag
-is opt-in because closing either shape is not something every repository can do
+is opt-in because closing a shape is not something every repository can do
 on demand; §4.3 gives three ways — a verifiable declaration, a stub, or
 explicit isolation behind `@boundary` — and all three are in-code, reviewable,
 and not always available to the repository that hit the report.
 
 `diff --strict` is defined here and not by `check --strict`, which promotes only
 §4.2 rule 3's warning about a *declared* function containing `unknown`. `diff
---strict` has no such precondition: it fails on the two shapes above whether or
-not anything was declared. `ambit.config.ts`'s per-directory `strict` (§4.1) is
+--strict` has no such precondition: it fails on the three shapes above whether
+or not anything was declared. `ambit.config.ts`'s per-directory `strict` (§4.1) is
 a `check` setting and `ambit diff` does not read it.
 
 **What it does not claim.** That the operation is dangerous, or that the symbol

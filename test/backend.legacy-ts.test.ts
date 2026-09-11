@@ -406,6 +406,29 @@ describe("legacyTsBackend.extractProject (self-hosting)", () => {
     expect(extract?.calls.map((c) => c.calleeQualifiedName)).toContain("node:fs.statSync");
     expect(extract?.calls.some((c) => c.calleeQualifiedName?.startsWith("fs."))).toBe(false);
   });
+
+  it("owns Ambit's own top-level `.then(...)` / `.catch(...)` callbacks", async () => {
+    // `cli/main.ts` ends with `main(...).then(cb).catch(cb)` at module scope —
+    // two function expressions in argument position with no extracted
+    // ancestor, which is the shape DESIGN.md §4.1 (a)'s owner exists for.
+    // Real code rather than a fixture, so the rule is asserted where it
+    // actually has to hold.
+    const { files } = await extractFixture(SRC_ROOT);
+    const owner = files
+      .find((f) => f.filePath === "cli/main.ts")
+      ?.functions.find((fn) => fn.id === "cli/main.ts#<inline callbacks>");
+    expect(owner?.undeclarable).toBe(true);
+    expect(owner?.bodies).toHaveLength(2);
+    expect(owner?.bodies?.flat()).toEqual(owner?.calls);
+  });
+
+  it("gives a file whose callbacks all have an extracted ancestor no owner", async () => {
+    const { files } = await extractFixture(SRC_ROOT);
+    const ids = files.flatMap((f) => f.functions.map((fn) => fn.id));
+    // `checker/propagate.ts` is nothing but declarations, and its callbacks
+    // are all inside one.
+    expect(ids).not.toContain("checker/propagate.ts#<inline callbacks>");
+  });
 });
 
 describe("legacyTsBackend.extractProject (cross-module alias resolution)", () => {

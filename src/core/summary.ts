@@ -273,6 +273,8 @@ export interface FunctionSummary {
   readonly implicitConstructor?: true;
   /** Only `ambit.config.ts` can declare this symbol — see {@link ExtractedFunction.configOnly}. */
   readonly configOnly?: true;
+  /** Nothing can declare this symbol — see {@link ExtractedFunction.undeclarable}. */
+  readonly undeclarable?: true;
   /**
    * Which side supplied each declared tag, when anything did. Absent for a
    * function nothing declared anything for. `--coverage` counts the `effects`
@@ -289,4 +291,10 @@ export interface FunctionSummary {
   /** `@entrypoint` (DESIGN.md §4.1): where the runtime establishes a context. */
   readonly entrypoint: boolean;
   readonly calls: readonly Call[];
+  /**
+   * {@link calls} partitioned by body, one group per owned body — see
+   * {@link ExtractedFunction.bodies}. Absent for every ordinary function,
+   * whose one body is the whole of {@link calls}.
+   */
+  readonly bodies?: readonly (readonly Call[])[];
 }

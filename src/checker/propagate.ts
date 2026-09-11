@@ -58,6 +58,27 @@ export interface PropagatedFunction {
    * call that does not exist.
    */
   readonly capabilityUnknownWitness?: SymbolId;
+  /**
+   * The same two lattices computed over each owned body on its own, for a
+   * symbol that owns more than one (`FunctionSummary.bodies` — today the
+   * inline-callback owner, DESIGN.md §4.1 (a)). Absent wherever one body
+   * holds the whole symbol, which includes an owner of exactly one: there the
+   * symbol's own sets already say what that body holds, and a one-element
+   * split would be the same statement written twice.
+   *
+   * Their union is {@link observed} / {@link required}, so nothing here
+   * changes what the symbol holds. What it carries is *how many* of the
+   * bodies hold each authority, which is what `ambit diff` compares (§6.3):
+   * without it, a second body gaining an effect a first already had would be
+   * a merge into silence — the one outcome §6.4 forbids.
+   */
+  readonly bodies?: readonly BodyAuthority[];
+}
+
+/** One owned body's own authority — see {@link PropagatedFunction.bodies}. */
+export interface BodyAuthority {
+  readonly observed: EffectSet;
+  readonly required: CapabilitySet;
 }
 
 /**
@@ -100,6 +121,23 @@ export function propagate(
       }
       state.set(summary.id, next);
     }
+  }
+
+  // One pass after the fixed point, never inside it: a body is not a callee,
+  // so nothing propagates *from* one of these and the union already reached
+  // above is what every caller sees. Splitting it per body only records which
+  // of them each authority came from, against the final state.
+  for (const summary of summaries) {
+    if (!summary.bodies || summary.bodies.length < 2) continue;
+    const propagated = state.get(summary.id);
+    if (!propagated) continue;
+    state.set(summary.id, {
+      ...propagated,
+      bodies: summary.bodies.map((calls) => {
+        const derived = deriveState({ ...summary, calls }, byId, state);
+        return { observed: derived.observed, required: derived.required };
+      }),
+    });
   }
 
   return state;

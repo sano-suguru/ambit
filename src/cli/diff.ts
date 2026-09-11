@@ -7,6 +7,7 @@ import type {
   MalformedApprovalLine,
 } from "../core/index.ts";
 import {
+  attributionUnmatched,
   authorityDecreases,
   deletedSymbols,
   diffAuthority,
@@ -148,6 +149,7 @@ export function formatDiffText(result: DiffResult, options: DiffOptions = {}): s
   const moved = movedSymbols(diff);
   const unknown = unknownGained(diff);
   const unresolved = unresolvedGains(diff);
+  const unmatched = attributionUnmatched(diff);
   const strict = options.strict === true;
   const where = result.subdir === "" ? "the repository root" : result.subdir;
 
@@ -247,13 +249,39 @@ export function formatDiffText(result: DiffResult, options: DiffOptions = {}): s
     );
   }
 
-  if (strict && (unknown.length > 0 || unresolved.length > 0)) {
-    // Named for what is actually above it. Only one of §6.4's two shapes
-    // firing is the common case, and "the two sections above" would send the
-    // reader looking for a section that is not there.
-    const sections = unknown.length > 0 && unresolved.length > 0 ? "two sections" : "section";
+  // §6.4's third shape. The symbol owns several bodies and they have no names,
+  // so a handler that gained something and a handler that merely moved are the
+  // same two sequences. Nothing increased; what the analysis cannot do is say
+  // where what it sees now sits — authority, or an operation it could not read
+  // — and saying nothing here would be the silence §3.4 forbids.
+  if (unmatched.length > 0) {
     lines.push(
-      `--strict: the ${sections} above ${sections === "section" ? "fails" : "fail"} this comparison (DESIGN.md §6.4).`,
+      `${count(unmatched.length, "symbol")} holds several anonymous bodies, and what each of them holds moved:`,
+      "",
+      ...unmatched.flatMap((entry) => [
+        `  ${entry.symbol}${entry.head ? ` (${entry.head.location.file}:${entry.head.location.line})` : ""}`,
+        "    ? which body holds what changed, and the bodies cannot be matched",
+        "",
+      ]),
+      "Nothing grew, so this is not an increase and no approval covers it. What it",
+      "means is that an authority, or an operation the analysis could not read, may",
+      "now sit in a different handler — read the file's diff. Binding a handler to a",
+      "name gives it a symbol of its own, which is compared against itself",
+      "(§4.1 (a), §6.4).",
+      "",
+    );
+  }
+
+  if (strict && (unknown.length > 0 || unresolved.length > 0 || unmatched.length > 0)) {
+    // Named for what is actually above it. Only one of §6.4's three shapes
+    // firing is the common case, and "the sections above" would send the
+    // reader looking for a section that is not there.
+    const firing = [unknown.length, unresolved.length, unmatched.length].filter(
+      (n) => n > 0,
+    ).length;
+    const sections = firing === 1 ? "section" : firing === 2 ? "two sections" : "three sections";
+    lines.push(
+      `--strict: the ${sections} above ${firing === 1 ? "fails" : "fail"} this comparison (DESIGN.md §6.4).`,
       "Without --strict they are reported and the comparison passes.",
       "",
     );
@@ -374,7 +402,7 @@ export function formatDiffGithub(result: DiffResult, options: DiffOptions = {}):
 }
 
 /**
- * §6.4's two shapes as annotations, under `--strict` only.
+ * §6.4's three shapes as annotations, under `--strict` only.
  *
  * Withheld without the flag deliberately, and the default output is
  * byte-identical to what it was before §6.4 existed. Both shapes are common on
@@ -414,6 +442,21 @@ function wideningAnnotations(result: DiffResult): string {
         `${displayName(head.symbol)} gained ${count(entry.unresolvedGained.length, "operation")} the analysis could not resolve since ${result.ref}`,
         ...entry.unresolvedGained.map((operation) => `? ${formatUnresolvedOperation(operation)}`),
         "a stub, a verifiable declaration, or @boundary closes it (§4.3, §6.4)",
+      ],
+    });
+  }
+  for (const entry of attributionUnmatched(result.diff)) {
+    const head = entry.head;
+    if (!head) continue;
+    out += githubAnnotation({
+      severity: "error",
+      file: workspacePath(result.dir, head.location.file),
+      line: head.location.line,
+      col: head.location.col,
+      title: "ambit diff",
+      body: [
+        `what this file's anonymous bodies hold moved between them since ${result.ref}, and they cannot be matched`,
+        "nothing grew, so this is not an increase; naming a handler closes it (§4.1 (a), §6.4)",
       ],
     });
   }

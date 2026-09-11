@@ -65,60 +65,59 @@ exit: when it fires, the question is decided, the answer goes in the
   declaration path, yet is not adopted. Resolving it requires first deciding how
   to fix JSDoc's attribution uniquely.
   *Trigger:* an `AMB-E003` on a shape a config key also cannot name.
-- **How an anonymous argument-position function enters the comparison.** `router.post("documents.create", auth(), async (ctx) => { … })` — the
-  idiomatic registration in Koa, Express, Fastify and Hono — puts the handler
-  body in a function with no name and no extracted ancestor, so it carries no
-  contract, produces no record, and `ambit diff` reports **nothing** when
-  authority is added inside it: exit 0 in both modes, `--coverage` byte-identical
-  (measured on
-  [outline](measurements/2026-09-11-third-third-party-validation-outline.md),
-  E6, over 226 such routes). `docs/DESIGN.md` §6.4 names this as the outcome
-  that must not happen, and §4.1 attaches `@effects` to "any function or
-  method", so the code is behind the specification rather than the reverse.
-  **The question is not necessarily a `symbol` question.** §5.3's declaration
-  path is what a *human* writes in an `ambit.config.ts` key, and §4.1 (a)
-  already has a tier that propagates without being declarable in JSDoc, so a
-  third tier — analyzed and compared, declarable by nobody — is a smaller
-  extension than minting a name would be. What such a record still needs is an
-  identity **stable enough that an approval line written today still matches
-  tomorrow** (§6.3 names a symbol in `ambit.approvals.md`). That is a weaker
-  requirement than being writable by hand, and it is the requirement the
-  candidates have to be judged against — deciding this as a notation question
-  first would rule out the shapes that might actually work.
+- **Whether an inline argument-position function should be named one at a
+  time.** `router.post("documents.create", auth(), async (ctx) => { … })` now
+  enters the comparison: every such function in a file is analyzed under one
+  entry, `file.ts#<inline callbacks>`, whose authority is compared as a
+  multiset over the bodies it owns (`docs/DESIGN.md` §4.1 (a), §6.3). What is
+  *not* settled is whether each body should also have a name of its own.
 
-  Candidates, with the failure mode each is known or suspected to have:
+  The reason it does not have one is that no candidate survived. A position
+  contradicts §6.4's "the key holds no position"; an ordinal renames every
+  sibling below an inserted one, and `ambit diff` reads a renamed symbol
+  holding authority as a new one, so inserting a route into a 16-handler group
+  would report the fifteen below it; keying on the registration's literal
+  argument reaches 86% of registrations with one silently *wrong* answer
+  ([`measurements/http-route-key-spike.md`](measurements/http-route-key-spike.md),
+  [ADR-0007](adr/0007-http-route-keys.md)) and needs an ordinal for the rest.
+  A per-file *set* was measured and rejected for the opposite reason: on
+  outline `server/` it would merge 495 `(body, authority)` pairs into silence,
+  187 of them outside test files
+  ([2026-09-11](measurements/2026-09-11-inline-callback-owner.md)). The
+  multiset is what closed that without a name.
 
-  - **positional** (`file.ts#router.post@1852`) — contradicts §6.4's "the key
-    holds no position" and turns a line shift into a rename;
-  - **keyed on the registration's literal argument** (`router.post("documents.create")`)
-    — measured for the neighbouring runtime question at 86% static
-    determinability with one silently *wrong* answer
-    ([`measurements/http-route-key-spike.md`](measurements/http-route-key-spike.md),
-    [ADR-0007](adr/0007-http-route-keys.md));
-  - **a per-file pseudo-symbol** holding the union of such bodies — needs no
-    key and no position, but cannot tell a second `fetch` in a file that
-    already has one from the first;
-  - **lexical/structural identity** — the path of enclosing constructs down to
-    the function, independent of line numbers. Unmeasured; the open question is
-    what an edit to a sibling registration does to it;
-  - **an ordinal scoped to the registration site** (`router.post` occurrence *n*
-    in this file, argument *k*) — unmeasured; the open question is whether
-    inserting a route above renames every one below it;
-  - **not an identity-bearing symbol at all** — the body is an analysis node
-    whose authority delta is attributed and compared without ever being
-    nameable. Unmeasured, and the one that most directly attacks the premise;
-    its open question is the approval-stability requirement above, which it
-    does not escape, only relocates.
-
-  The first three are the ones this run's evidence already speaks to; the last
-  three are not yet measured and none of them should be implemented before it
-  is. Until one is chosen the gap is recorded in
-  [`docs/limitations.md`](limitations.md) with its one-line workaround (bind
-  the handler to a name).
-  *Trigger:* already fired. This is the gap that has to close before an
-  external adopter on an inline-handler framework can rely on the gate, and it
-  is a design goal — compare and measure the candidates — not an
-  implementation one.
+  What a name would still buy is **attribution**, and the gap is sharp rather
+  than cosmetic. Authority moving from one body to another leaves every count
+  where it was, so it is not an increase and cannot be made one — the same two
+  sequences are what a plain reorder produces, and taxing a reorder with an
+  approval line is what §6.3's third criterion rules out. §6.4's third shape
+  reports that the bodies cannot be matched, which keeps it out of silence but
+  says "something moved" rather than "this handler gained it". A name would
+  turn that one report into one increase and one decrease.
+  *Trigger:* an adopter for whom the file-level report is not reviewable, or a
+  measured case where the git diff does not identify the handler.
+- **Whether the `unknown` rate deserves to be the top adoption heuristic.**
+  `ROADMAP.md` still reads "materially below the corpus median" as the signal
+  that an external pilot is credible. Three validations and this change have
+  moved the evidence: the rate rose on all three subjects precisely because the
+  analysis started seeing more, and what actually decided whether the gate was
+  usable each time was something else — standing noise on an unchanged tree,
+  silent misses, `--strict` noise, and whether a report named something a
+  reviewer could act on.
+  *Trigger:* already fired. Deciding it means choosing what replaces the rate,
+  which is a `ROADMAP.md` change, not an analysis one.
+- **Where a body-level fact's semantics are written down.** `AuthorityBody`
+  carries four kinds of fact and each is compared by its own rule — effects
+  exactly, `unknown` as a boolean, an unresolvable operation by identity *and*
+  count, a capability by §4.4's containment. Two places read them: `added` /
+  `removed` (§6.3) and §6.4's third shape. Adding a field to the record and
+  wiring it into only one of them is a real mistake with a real cost — it was
+  made once, with capabilities, and the symptom was the two disagreeing about
+  what a body holds while both looked correct on their own.
+  *Trigger:* a **second** new body-level fact. One more is not evidence; two
+  is, and the fix then is to extract the fact-reading into one definition both
+  sides call rather than to keep the rules in step by hand. Doing it before
+  that is polishing an abstraction with one member.
 - **Indirect calls in frameworks.** The call paths of Express, NestJS's DI,
   Next.js, and Hono. How far dedicated stubs and entry-point declarations can
   absorb them. NestJS's decorator DI and class inheritance were measured and

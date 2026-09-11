@@ -145,6 +145,14 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
           });
         }
       }
+      // The inline-callback owner's calls are collected per body and then
+      // flattened, rather than collected flat and partitioned afterwards: the
+      // groups are what the multiset comparison reads (DESIGN.md §6.3) and
+      // the flat list is what every other consumer reads, and deriving the
+      // second from the first is what keeps the two from disagreeing.
+      const bodies = ts.isSourceFile(node)
+        ? ownedBodyCalls(node, program, checker, declaredNodeToId, absoluteRoot)
+        : undefined;
       functions.push({
         id,
         location,
@@ -152,8 +160,11 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
         ...jsDocRangeOf(absoluteRoot, sourceFile, node),
         ...(ts.isClassDeclaration(node) ? { implicitConstructor: true as const } : {}),
         ...(configOnly ? { configOnly: true as const } : {}),
+        ...(bodies ? { bodies, undeclarable: true as const } : {}),
         jsDoc: configOnly ? undefined : extractJsDoc(node, absoluteRoot),
-        calls: collectCalls(node, sourceFile, program, checker, declaredNodeToId, absoluteRoot),
+        calls:
+          bodies?.flat() ??
+          collectCalls(node, sourceFile, program, checker, declaredNodeToId, absoluteRoot),
       });
     }
     const runtimeWrappers = collectRuntimeWrappers(
@@ -261,6 +272,14 @@ type FunctionLikeDeclaration =
    */
   | ts.ConstructorDeclaration
   | ts.ClassDeclaration
+  /**
+   * A file's *unowned inline callbacks*, indexed under the declaration path
+   * `<inline callbacks>`. The `SourceFile` stands in for a set of bodies that
+   * have no declaration of their own: the function expressions written
+   * directly as call arguments at module scope, which nothing else in this
+   * walk reaches (DESIGN.md §4.1 (a), "The inline-callback owner").
+   */
+  | ts.SourceFile
   | ts.GetAccessorDeclaration
   | ts.SetAccessorDeclaration
   | ts.ArrowFunction
@@ -433,7 +452,60 @@ function collectFunctionLikeDeclarations(
   }
 
   ts.forEachChild(sourceFile, (child) => visitTop(child, []));
+
+  // The one function-like shape nothing above reaches. A function expression
+  // written directly as a call argument has no name to index; when it also has
+  // no extracted ancestor, no other entry's body walks it either, so its calls
+  // belonged to nothing at all and authority added inside it was reported
+  // nowhere — the outcome DESIGN.md §6.4 names as the one that must not
+  // happen. They are owned collectively, per file, because an anonymous
+  // sibling has no non-positional name to be told apart by (§4.1 (a)).
+  if (unownedInlineCallbacks(sourceFile).length > 0) {
+    results.push([sourceFile, [INLINE_CALLBACKS_PATH_SEGMENT]]);
+  }
   return results;
+}
+
+/**
+ * The function expressions this file's other entries do not reach: written
+ * directly as an argument of a call or `new`, with no function-like or
+ * class-like ancestor to walk them.
+ *
+ * Both halves are load-bearing. Argument position is what
+ * `collectSkippedFunctions` already calls `callback-argument`, and having no
+ * such ancestor is what separates the ones nothing walks from the ones an
+ * extracted function's body already contains — `arr.map(x => f(x))` inside a
+ * method is part of that method's own calls, and must not be walked a second
+ * time. A class-like ancestor counts as one because a property initializer's
+ * calls belong to the class's construction (`propertyInitializersOf`).
+ *
+ * A callback nested inside one of these is not returned: it is inside the
+ * outer one's body, which is walked whole, exactly as a closure inside a named
+ * function is.
+ *
+ * Computed from the syntax alone — no index, no position — so the same file
+ * always yields the same set, and `bodiesOf` can recompute it rather than
+ * carry it.
+ */
+function unownedInlineCallbacks(
+  sourceFile: ts.SourceFile,
+): readonly (ts.ArrowFunction | ts.FunctionExpression)[] {
+  const found: (ts.ArrowFunction | ts.FunctionExpression)[] = [];
+
+  function visit(node: ts.Node): void {
+    if (ts.isClassLike(node) || isFunctionLikeNode(node)) {
+      // Everything below belongs to this node's own entry, or to nothing for
+      // a reason this function is not about.
+      if (isCallbackArgument(node) && (ts.isArrowFunction(node) || ts.isFunctionExpression(node))) {
+        found.push(node);
+      }
+      return;
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  ts.forEachChild(sourceFile, visit);
+  return found;
 }
 
 /**
@@ -598,6 +670,17 @@ const CONSTRUCTOR_PATH_SEGMENT = "constructor";
 
 /** The declaration-path segment an anonymous `export default` is indexed under (DESIGN.md §4.1 (a)). */
 const DEFAULT_EXPORT_PATH_SEGMENT = "default";
+
+/**
+ * The declaration-path segment a file's unowned inline callbacks are indexed
+ * under (DESIGN.md §4.1 (a), "The inline-callback owner").
+ *
+ * The angle brackets are what make it safe: no TypeScript identifier can
+ * contain one, so this can never collide with a declaration path a real
+ * declaration produces, and it holds no `"."` — the joiner §5.3 fixes — so it
+ * survives every split a symbol id is put through.
+ */
+const INLINE_CALLBACKS_PATH_SEGMENT = "<inline callbacks>";
 
 /**
  * `static run` — a `static` member's segment carries the marker, for exactly
@@ -793,6 +876,8 @@ function jsDocRangeOf(
   sourceFile: ts.SourceFile,
   decl: FunctionLikeDeclaration,
 ): { jsDocRange?: SourceLocation } {
+  // No declaration site, so no block to add a tag to — see `extractJsDoc`.
+  if (ts.isSourceFile(decl)) return {};
   const target: ts.Node = ts.isVariableDeclaration(decl) ? (decl.parent.parent ?? decl) : decl;
   const blocks = ts.getJSDocCommentsAndTags(target).filter(ts.isJSDoc);
   // More than one block above the same declaration has no single right place
@@ -804,6 +889,11 @@ function jsDocRangeOf(
 }
 
 function nameOrNode(decl: FunctionLikeDeclaration): ts.Node {
+  // The inline-callback owner stands for a set of bodies scattered through the
+  // file, so the one position that is true of all of them is the file itself.
+  // The position a reader needs is the operation's, and an authority path
+  // carries that (DESIGN.md §5.1, `contract.operation`).
+  if (ts.isSourceFile(decl)) return decl;
   if (ts.isVariableDeclaration(decl) || ts.isPropertyDeclaration(decl)) return decl.name;
   // An arrow function has no name node at all; an anonymous default export is
   // reported at the expression itself.
@@ -821,6 +911,7 @@ function nameOrNode(decl: FunctionLikeDeclaration): ts.Node {
  * from a single symbol.
  */
 function bodiesOf(decl: FunctionLikeDeclaration): readonly ts.Node[] {
+  if (ts.isSourceFile(decl)) return unownedInlineCallbacks(decl).flatMap(bodiesOf);
   if (
     ts.isVariableDeclaration(decl) ||
     ts.isPropertyAssignment(decl) ||
@@ -1102,6 +1193,12 @@ function extractJsDoc(decl: FunctionLikeDeclaration, absoluteRoot: string): RawJ
   // treating it as a verified constructor contract would manufacture a
   // guarantee out of a comment about something else.
   if (ts.isClassDeclaration(decl)) return undefined;
+  // The inline-callback owner has no declaration site at all — a file's
+  // leading comment documents the module, not the callbacks it registers — so
+  // nothing here is read as its contract. A tag written on one of the
+  // callbacks is still reported, by `collectSkippedFunctions`, which continues
+  // to see each of them as a `callback-argument` with no id of its own.
+  if (ts.isSourceFile(decl)) return undefined;
   const target = ts.isVariableDeclaration(decl) ? (decl.parent.parent ?? decl) : decl;
   const tags = ts.getJSDocTags(target);
   if (tags.length === 0) return undefined;
@@ -1168,6 +1265,10 @@ function collectCalls(
   declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
   absoluteRoot: string,
 ): readonly CallSite[] {
+  if (ts.isSourceFile(decl)) {
+    return ownedBodyCalls(decl, program, checker, declaredNodeToId, absoluteRoot).flat();
+  }
+
   const bodies = bodiesOf(decl);
   if (bodies.length === 0 && !ts.isClassDeclaration(decl)) return [];
 
@@ -1213,6 +1314,34 @@ function collectCalls(
   }
 
   return calls;
+}
+
+/**
+ * The calls of each body the inline-callback owner owns, one group per body
+ * and in source order.
+ *
+ * Each callback is collected as itself rather than as one of the file's
+ * bodies, so every question the collection asks about the *enclosing*
+ * function — is this callee already walked into my summary, does this
+ * assignment escape me — is asked about the callback the call is in, not
+ * about the whole file. Asking it of the file would make every module-scope
+ * binding look local and quiet the mutations that leave a callback (DESIGN.md
+ * §4.2, "Local mutation and `pure`").
+ *
+ * The grouping is what lets the owner's authority be compared as a multiset
+ * over its bodies (DESIGN.md §6.3), which is the whole reason one symbol may
+ * stand for several bodies without merging them into silence.
+ */
+function ownedBodyCalls(
+  sourceFile: ts.SourceFile,
+  program: ts.Program,
+  checker: ts.TypeChecker,
+  declaredNodeToId: ReadonlyMap<ts.Node, SymbolId>,
+  absoluteRoot: string,
+): readonly (readonly CallSite[])[] {
+  return unownedInlineCallbacks(sourceFile).map((callback) =>
+    collectCalls(callback, sourceFile, program, checker, declaredNodeToId, absoluteRoot),
+  );
 }
 
 function enclosingClassOf(node: ts.Node): ts.ClassLikeDeclaration | undefined {
@@ -2865,6 +2994,12 @@ function locationOf(
   sourceFile: ts.SourceFile,
   node: ts.Node,
 ): SourceLocation {
+  // The file standing for itself is the inline-callback owner (`nameOrNode`).
+  // Its span is the whole file, which as a diagnostic range would highlight
+  // every line and say nothing; the start of the file is the honest point.
+  if (ts.isSourceFile(node)) {
+    return { file: relativePath(absoluteRoot, sourceFile), line: 1, col: 1, endLine: 1, endCol: 1 };
+  }
   const start = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
   const end = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
   return {
