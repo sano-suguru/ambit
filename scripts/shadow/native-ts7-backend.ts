@@ -76,21 +76,17 @@ type Any = any;
  * see `scripts/shadow/compare.ts`.
  */
 export const NOT_PORTED: readonly string[] = [
-  // Receiver-origin naming: `memberChainQualifiedNameOf`'s second and third
-  // origins (the class a `const` was constructed from; the type an imported
-  // factory returned). Only the namespace/default-import origin is ported, so
-  // `pg.Pool.query` and `mysql2/promise.Pool.query` are named on the legacy
-  // side and unnamed here.
   // `objectLiteralReceiverTarget` / `constructedInstanceMemberTarget`: a call
   // through a receiver whose value is certainly one object literal or one
   // constructed class instance. `objectLiteralMemberTarget` *is* ported.
+  // `Extractor.recordDeclinedShape` emits these two codes at the sites it
+  // declines, so a divergence there is classified from the backend's own
+  // report rather than from the text of the rendered pair.
   "resolution:literal-receiver",
   "resolution:instance-member",
-  // `reExportHopsOf` / `deepestPackageHop`: naming a binding by the package it
-  // was re-exported from rather than by the module the source imported.
-  // `loadProjectConfig`'s no-tsconfig fallback. The native API opens a project
-  // by config path, so a root with no `tsconfig.json` throws here instead of
-  // scanning for `.ts` files.
+  // The legacy backend scans for `.ts` files when there is no `tsconfig.json`;
+  // this one throws instead, because the native API opens a project by config
+  // path.
   "project:no-tsconfig-fallback",
 ];
 
@@ -1483,12 +1479,36 @@ class Extractor {
     const declaration = this.constInitializedVariableOf(callee.expression);
     if (!declaration) return;
     const initializer = unwrapTypeOnlyExpression(is, declaration.initializer);
-    const code = is.isObjectLiteralExpression(initializer)
-      ? "resolution:literal-receiver"
-      : is.isNewExpression(initializer)
-        ? "resolution:instance-member"
-        : undefined;
-    if (code) this.declined.set(locationKey(location), code);
+    if (is.isObjectLiteralExpression(initializer)) {
+      this.declined.set(locationKey(location), "resolution:literal-receiver");
+      return;
+    }
+    // A `new` only counts when the class is one this project declares. The
+    // unported rule walks the class's own members for the method, so a
+    // receiver holding `new Set()` is not a shape it would have resolved
+    // either — recording one there claims a gap that does not exist, and
+    // claimed eight genuine `shadow-less-authority` disagreements on the
+    // corpus as accounted for when they are a branch-order difference in the
+    // builtin handling and nothing to do with this.
+    if (!is.isNewExpression(initializer)) return;
+    const classDeclaration = this.projectClassOf(initializer.expression);
+    if (classDeclaration) this.declined.set(locationKey(location), "resolution:instance-member");
+  }
+
+  /** The class-like declaration an expression names, when this project declares it. */
+  private projectClassOf(expression: Node): Node | undefined {
+    const is = this.is;
+    const symbol = this.checker.getSymbolAtLocation(expression);
+    if (!symbol) return undefined;
+    const resolved =
+      (symbol.flags & this.SymbolFlags.Alias) !== 0
+        ? this.checker.getAliasedSymbol(symbol)
+        : symbol;
+    return this.declarationsOf(resolved).find(
+      (declaration: Node) =>
+        (is.isClassDeclaration(declaration) || is.isClassExpression(declaration)) &&
+        !declaration.getSourceFile().isDeclarationFile,
+    );
   }
 
   private objectLiteralMemberTarget(member: Node): SymbolId | undefined {

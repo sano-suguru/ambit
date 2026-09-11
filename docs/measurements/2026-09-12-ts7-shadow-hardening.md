@@ -231,6 +231,29 @@ Unclassified divergences: `backend-conformance` 3 → 0, `backend-smoke` 15 → 
 `src` 3 → 3. The `src` three are the `Object.defineProperty` shapes above and
 are correctly unclassified: nobody has root-caused them.
 
+**Two ways a structured classifier can repeat the substring one's failure, both
+found in review and both fixed.** They are worth recording because the fix for
+the first version of this rewrite was itself wrong:
+
+- **The symbol index must not reach a site that has a location of its own.** It
+  exists for the propagated dimensions, which carry a symbol and no location. A
+  `classify` that consults it for a *call-site* divergence hands
+  `not-yet-ported` to every call in a function that happens to contain one
+  declined site.
+- **A decline must be recorded only where the unported rule would have acted.**
+  `resolution:instance-member` walks the constructed class's own members, so a
+  receiver holding `new Set()` is not a shape it would have resolved either.
+  Recording one there claimed eight genuine `shadow-less-authority`
+  disagreements on the corpus as accounted for. The premise is now "a class this
+  project declares", and those eight read `unclassified`, which is what they
+  are.
+
+`KNOWN_DIVERGENCES` is down to one rule, for the `call-edge` dimension, which
+carries a symbol and no location and so cannot reach a structured code. The
+three rules that justified themselves with "receiver-origin naming is
+`NOT_PORTED`" are deleted: that is no longer true, and one of them was what
+classified the real `ky.default` bug as a known gap.
+
 ## Performance — the hypothesis, measured
 
 The previous note recorded that the native engine is ~1.8x faster here where
@@ -290,6 +313,14 @@ the network and is therefore in no CI job.
 | got | `source` | 99.4% | 99.6% | 0/0, +2 unknown | +0.6 pt | agree | 55 (3) | 1.16x |
 | drizzle-orm | `drizzle-orm/src` | 100% | 100% | 0/0, +1 unknown | +0.0 pt | agree | 43 (6) | 0.73x |
 
+**Not one corpus divergence lands on a shape the shadow backend declared.** The
+`NOT_PORTED` list is now three shapes, and none of the 310 divergences across
+these five repositories is on one of them — every single one is unexplained.
+That is the most useful thing the corpus said, and it only became visible once
+the classifier stopped over-claiming (above): "accounted for" has to mean the
+backend said so at that site, or the list of findings is shorter than the
+findings.
+
 Three things this says that `src` could not.
 
 - **The direction holds on code nobody here wrote.** Across all five:
@@ -320,10 +351,17 @@ Three things this says that `src` could not.
 3. **7 `call-edge/shadow-extra`** on trpc-server and elysia: the shadow backend
    records a callback-handoff edge the adopted one does not. Direction is
    `shadow-extra`, so it overstates rather than hides. Not root-caused.
-4. **176 `unresolved-classification/shadow-more-unknown`** across the corpus,
+4. **204 `unresolved-classification/shadow-more-unknown`** across the corpus,
    the largest class by far and entirely in the safe direction. Not root-caused,
    and the count alone is a reason to: an instrument whose largest signal is
-   unexplained is not finished.
+   unexplained is not finished. The full unaccounted tally —
+   204 `unresolved-classification/shadow-more-unknown`,
+   19 `direct-effect/shadow-less-authority`, 16 `function/value-mismatch`,
+   14 `callee-resolution/shadow-more-unknown`, 11 each of
+   `authority`/`capability`/`propagated-effect` `shadow-more-unknown`,
+   8 `callee-resolution/shadow-less-authority`,
+   8 `unresolved-classification/shadow-less-authority`,
+   7 `call-edge/shadow-extra`, 1 `direct-effect/shadow-extra`.
 
 ## Protection
 
@@ -372,7 +410,7 @@ made within-engine instead.
 
 ## Remaining blockers, in order
 
-1. **Root-cause the 176 `unresolved-classification/shadow-more-unknown`** across
+1. **Root-cause the 204 `unresolved-classification/shadow-more-unknown`** across
    the corpus. Safe direction, largest class, unexplained — and until it is
    explained, "the shadow side is more conservative" is a description rather
    than a finding.

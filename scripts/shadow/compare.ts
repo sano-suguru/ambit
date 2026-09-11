@@ -133,50 +133,15 @@ export interface KnownDivergence {
 
 export const KNOWN_DIVERGENCES: readonly KnownDivergence[] = [
   {
-    category: "callee-resolution",
-    whenAuthorityIncludes: "resolved=",
-    whenShadowIncludes: "unresolvedReason=",
-    classification: "not-yet-ported",
-    note:
-      "resolution:literal-receiver / resolution:instance-member are not ported (NOT_PORTED): " +
-      "the adopted backend follows a receiver whose value is certainly one object literal or one " +
-      "constructed instance, the shadow backend does not and falls to the reason the callee's own " +
-      "declaration gives",
-  },
-  {
-    category: "callee-resolution",
-    whenAuthorityIncludes: "name=",
-    whenShadowIncludes: "unresolvedReason=",
-    classification: "not-yet-ported",
-    note:
-      "qualified-name:installed-type-receiver / :constructed-receiver / :factory-receiver are not " +
-      "ported (NOT_PORTED): the adopted backend names a receiver by the package type or class it " +
-      "came from, the shadow backend names only a namespace or default import",
-  },
-  {
-    // Both sides call the site unresolved for the same reason; only the
-    // *name* the report carries differs, because the shadow backend could not
-    // produce a receiver-origin qualified name. The effect outcome is
-    // identical — this costs the `--coverage` breakdown a name, not a verdict.
-    category: "direct-effect",
-    whenAuthorityIncludes: "kind=unresolved",
-    whenShadowIncludes: "operation=-",
-    classification: "not-yet-ported",
-    note: "the operation name comes from a receiver-origin qualified name (NOT_PORTED); both sides agree the site is unresolved",
-  },
-  {
-    category: "direct-effect",
-    whenAuthorityIncludes: "kind=stub",
-    whenShadowIncludes: "kind=unresolved",
-    classification: "not-yet-ported",
-    note: "the stub match the adopted backend gets from a receiver-origin qualified name (NOT_PORTED)",
-  },
-  {
+    // The structured code is the first thing `classify` consults, and it
+    // covers the resolution shapes at the sites that carry a location. This
+    // rule only reaches the dimensions that carry a *symbol* instead — a
+    // call-graph edge the adopted backend gets from a receiver the shadow
+    // backend does not follow.
     category: "call-edge",
     whenAuthorityIncludes: "present",
-    whenShadowIncludes: "",
     classification: "not-yet-ported",
-    note: "an edge the adopted backend gets from resolution:literal-receiver / resolution:instance-member",
+    note: "an edge the adopted backend gets from resolution:literal-receiver / resolution:instance-member (NOT_PORTED)",
   },
 ];
 
@@ -312,7 +277,16 @@ function classify(
       note: `the shadow backend reported \`${code}\` at this site (NOT_PORTED)`,
     };
   }
-  const codes = symbol === undefined ? undefined : declinedBySymbol.get(symbol);
+  // Only where there is no location of its own. A call-site divergence has
+  // both a symbol and a location, and consulting the symbol index for one of
+  // those would hand `not-yet-ported` to every call site inside a function
+  // that happens to contain one declined site — which is precisely the failure
+  // the substring classifier had, rebuilt out of structured data. Measured:
+  // eight genuine `shadow-less-authority` disagreements on the corpus
+  // (`mutation=local|Set.add|` against `builtin=Set.add`) read as accounted
+  // for when they are not.
+  const codes =
+    location !== undefined || symbol === undefined ? undefined : declinedBySymbol.get(symbol);
   if (codes !== undefined && codes.length > 0) {
     return {
       classification: "not-yet-ported",
