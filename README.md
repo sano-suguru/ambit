@@ -395,9 +395,13 @@ in which document.
 - [docs/diagnostics/](docs/diagnostics/README.md) — the diagnostic code ledger.
 - [CHANGELOG.md](CHANGELOG.md) — every breaking change to the guaranteed surface.
 - [docs/limitations.md](docs/limitations.md) — where the analysis is narrower
-  than the model suggests.
-- [docs/status.md](docs/status.md) — what is implemented, with measured numbers.
-- [ROADMAP.md](ROADMAP.md) — milestones and the Phase 1 exit criterion.
+  than the model suggests. Corner cases below that level are in
+  [docs/analysis-limitations.md](docs/analysis-limitations.md).
+- [docs/status.md](docs/status.md) — the current measured numbers, and the
+  verdict they support. The runs behind them are in [docs/measurements/](docs/measurements/).
+- [docs/open-questions.md](docs/open-questions.md) — what is undecided.
+- [ROADMAP.md](ROADMAP.md) — what has to be proved next.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how a change is proposed and verified.
 
 MIT licensed; see [LICENSE](LICENSE). Ambit is one person's experiment:
 no support commitment, no release schedule yet.

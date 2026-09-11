@@ -1,63 +1,95 @@
 # Roadmap
 
-What Ambit is aiming at, and how it would know it got there. The design itself is
-`docs/DESIGN.md`; what is actually implemented today, with the measured numbers,
-is [docs/status.md](docs/status.md).
+What Ambit has to **prove** next, in order. Not what it has to build — features
+are how a proof gets attempted, not the goal.
+
+The design is [`docs/DESIGN.md`](docs/DESIGN.md); what is actually implemented
+today, with the measured numbers, is [`docs/status.md`](docs/status.md).
+
+## Current product hypothesis
+
+**Teams shipping AI-generated TypeScript need authority-delta review on every
+pull request** — a mechanical answer to "did this change let the code do
+something it could not do before?", because reading the diff no longer scales
+to how fast the diff arrives.
+
+Unproven. Zero external adopters.
+
+## Current bottleneck
+
+**`unknown` on real third-party code.** The corpus median is 52.6% — more than
+half of all functions on real code depend on a path the analysis did not reach.
+A gate that cannot see half the tree is a gate an adopter will not trust.
+
+Second, and not far behind: **there is no adopter to say which half matters.**
+The corpus prints the whole unresolved-name histogram, so the next fix is always
+measurable; which of those names is worth fixing is not answerable from here.
+
+## Next proof
+
+**One external repository uses `ambit diff` as a real CI signal** — gating, not
+advisory, on a codebase nobody here wrote.
+
+That is the first claim about Ambit that is not self-reported. Everything before
+it is preparation for it:
+
+| To prove | What would show it | Where it stands |
+|---|---|---|
+| The analysis sees enough of a real codebase to be worth gating | Corpus median `unknown` materially below 52.6% — enough that an external pilot is credible. **This is a pre-adoption heuristic with no target number, not the KPI below** | 52.6% — [`docs/status.md`](docs/status.md) |
+| The gate does not block honest work | An adopter's approval ledger stays under a handful of lines per pull request in steady state | Measured only on this repository: five lines for the change that introduced it |
+| Contracts survive a real build | An adopter's bundled, minified production build enforces what its source declared | Verified in `test/e2e.*` only; no external build |
+| The cost of backing out is real | An adopter removes Ambit and their code still type-checks and runs | `test/e2e.install.test.ts` proves it for a scratch project, not for an application |
+
+The corpus figure and the exit criterion's 30% are **different populations and
+must not be read as one number.** The corpus is five repositories with no
+dependencies installed, measured by whoever is working on Ambit; the KPI is an
+adopting team's own code, with its own `node_modules`, three months in. Driving
+the corpus to 30% would not satisfy the KPI, and the KPI does not say what the
+corpus should read. [`docs/status.md`](docs/status.md) says the same thing
+beside the numbers themselves.
 
 ## Phase 1 exit criterion
 
-**Producing one team that can show "2× faster to production for AI-generated
-code, half the serious incidents".** Support for other languages is considered
-only after that. Speeding up analysis alone does not count as meeting the
-criterion.
-
-## Success metrics
-
-Measured in Phase 1.
+**One team that can show "2× faster to production for AI-generated code, half
+the serious incidents".** Support for other languages is considered only after
+that. Speeding up analysis alone does not count.
 
 | Metric | Target |
 |---|---|
-| `unknown` rate (median across adopting teams, three months after adoption) | 30% or below. The denominator, the trust categories for boundaries, and the analysis engine version are published too |
-| Proportion of agent-generated PRs whose contract violations were stopped before production | Being able to measure it at all is the first goal |
+| `unknown` rate, median across adopting teams three months after adoption | 30% or below, with the denominator, boundary trust categories, and engine version published |
+| Agent-generated pull requests whose contract violations were stopped before production | Being able to measure it at all is the first goal |
 | Lead time from generation to production | Improved against the pre-adoption baseline |
-| Number of serious incidents | Reduced against the pre-adoption baseline |
-| Cost of backing out | The removal procedure for whatever was adopted — JSDoc, settings, adapters — is tested automatically. Opt-in wrappers are handled separately |
-| Latency of the initial check and of a re-check after a change | Measured separately on a representative project. Compared against the allowances set before adoption (`docs/DESIGN.md` §3.5) |
-| Memory and communication volume during analysis | The conditions including child processes, and the measurement scope, are published |
+| Serious incidents | Reduced against the pre-adoption baseline |
+| Cost of backing out | The removal procedure is tested automatically |
+| Initial-check and re-check latency | Measured separately on a representative project, against the allowances in [ADR-0001](docs/adr/0001-analysis-backend.md) |
 
 ## Milestones
 
-| M | Content | Exit criterion |
+The milestones are the build plan behind the proofs above. What each has
+actually reached is in [`docs/status.md`](docs/status.md).
+
+| M | What it builds | Exit criterion |
 |---|---|---|
-| M0 | The specification, the diagnostic code list, the RFC procedure, securing the scope | Review complete |
-| M0.5 | Compare native API and legacy API on conformance, TS 5.x compatibility, startup and distribution, and initial and update performance | Publish the evidence for `docs/DESIGN.md` §3.5, and adopt a default backend and a support range. Do not rest on unverified speedups |
-| M1 | JSDoc, effect propagation, unknown, coverage, JSON diagnostics, init, the shared checker, the resident and update paths | Dogfooding on Ambit itself. Diagnostics updated even when only contract comments changed. The schema and the performance measurement conditions settled |
-| M2 | Entry-point capabilities / budget, fetch / fs / child_process / DB and LLM hooks, Express / Hono / Next.js adapters | Conformance trials for the planned targets, mapping contracts to handlers, 50 standard stub packages. Publish what is and is not actually supported |
-| M3 | Concrete fix patches, the `ambit agent` protocol | Connected to one external agent. Analysis failures and contract loosening during iteration distinguished |
-| M4 | Editor integration, `ambit sbom`, npm distribution | Editor compatibility with the chosen compiler confirmed. One pilot team |
+| M0 | Specification, diagnostic ledger, scope | Review complete |
+| M0.5 | Backend comparison on five gates | A default backend adopted on published evidence, not on unverified speedups |
+| M1 | Effects, `unknown`, coverage, JSON diagnostics, `init`, the resident path | Dogfooding on Ambit itself; diagnostics update on a contract-comment-only change |
+| M2 | Capabilities, budget, runtime hooks, framework adapters, 50 stubs | Conformance trials for the planned targets; publish what is and is not supported |
+| M3 | Concrete fix patches, the `ambit agent` protocol | Connected to one external agent; analysis failure distinguished from contract loosening |
+| M4 | Editor integration, `ambit sbom`, npm distribution | **One pilot team** — the "next proof" above |
 | M5 | Phase 1 exit criteria met | Success metrics and check performance published |
 
-The actual order of work differs from this table: M1 — the first vertical slice,
-as far as `docs/DESIGN.md` §4.2's propagation rules and §5.1's NDJSON
-diagnostics working — has been put ahead of M0.5, the backend comparison. The
-reason is that the connection-layer isolation of §3.4 lets contract analysis
-proceed independently of the backend, and that in solo development running two
-tracks in parallel is what costs the most efficiency. The definitions of the milestones themselves are
-unchanged.
-
-M0.5 is settled: the decision is [ADR-0001](docs/adr/0001-analysis-backend.md)
-and the measurements are in the M0.5 section of `docs/status.md`.
+M1 was put ahead of M0.5 deliberately: §3.4's connection-layer isolation lets
+contract analysis proceed independently of the backend, and in solo development
+running two tracks in parallel is what costs the most. M0.5 is settled — the
+decision is [ADR-0001](docs/adr/0001-analysis-backend.md) and the measurements
+are in
+[`docs/measurements/m0.5-backend-comparison.md`](docs/measurements/m0.5-backend-comparison.md).
 
 ## Supply chain (M4)
 
 Not implemented. The shape it is meant to take: Ambit rides the existing
-`package-lock.json` / `pnpm-lock.yaml` and npm provenance (Sigstore) and layers
-the contract layer's information on top.
-
-- `ambit sbom` attaches the effects and capabilities obtained from stubs to each
-  dependency package in the SBOM.
-- If effects widen through a dependency update, `ambit check` reports the
-  difference.
-
-The stub trust levels this rests on are part of the contract model, not of the
-roadmap; they are specified in `docs/DESIGN.md` §8.
+lockfile and npm provenance (Sigstore) and layers the contract information on
+top — `ambit sbom` attaching each dependency's effects and capabilities from its
+stubs, and `ambit check` reporting when a dependency update widens effects. The
+stub trust levels this rests on are part of the contract model, and are
+specified in `docs/DESIGN.md` §8.

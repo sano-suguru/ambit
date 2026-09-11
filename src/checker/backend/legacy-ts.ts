@@ -1389,7 +1389,7 @@ function classifyCall(
 
   // `f!()` is a call to `f`. The non-null assertion narrows the *type* and
   // leaves the declaration exactly where it was, so it must not cost the call
-  // its resolution — DESIGN.md §12 requires `as any` and `!` to be told apart,
+  // its resolution — docs/open-questions.md requires `as any` and `!` to be told apart,
   // and they differ in precisely this: a cast to `any` destroys the
   // declaration, an assertion keeps it. Only the assertion is unwrapped here;
   // `(f as any)()` continues to fall through to `any-typed`.
@@ -1494,7 +1494,7 @@ function classifyCall(
   //
   // Deliberately not the same thing as extracting the nested function: it
   // gets no id, no contract, and no summary of its own. Whether it should is
-  // DESIGN.md §12's "Nested function declarations and the locality rule".
+  // docs/open-questions.md's "Nested function declarations and the locality rule".
   if (declaration && !isAmbientDeclaration && isWalkedIntoSummaryOf(declaration, enclosing)) {
     return { location, inlinedCallee: true };
   }
@@ -1520,7 +1520,7 @@ function classifyCall(
   // reason than "unresolved-symbol" is already knowable from the ambient
   // declaration's own source file: TypeScript's default lib (a builtin
   // method reached through a value the connector layer can't name, e.g.
-  // `set.has(...)`) vs. a third-party package's `.d.ts` (DESIGN.md §12).
+  // `set.has(...)`) vs. a third-party package's `.d.ts` (docs/open-questions.md).
   const ambientReason =
     isAmbientDeclaration && declaration
       ? ambientUnresolvedReason(declaration.getSourceFile(), program)

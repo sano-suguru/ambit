@@ -21,7 +21,7 @@ import type { Diagnostic } from "../src/core/index.ts";
  * `app/status/route.ts` is the boundary this fixture also records: it sets
  * `export const runtime = "edge"` and is deliberately **not** wrapped, because
  * none of the hooks `ambitRoute` depends on are installed on the Edge runtime
- * (DESIGN.md §12, "Edge runtimes": Phase 1 guarantees Node.js only).
+ * (docs/open-questions.md, "Edge runtimes": Phase 1 guarantees Node.js only).
  */
 
 const execFileAsync = promisify(execFile);
