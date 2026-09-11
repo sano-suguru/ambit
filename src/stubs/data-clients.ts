@@ -70,6 +70,40 @@ const SQL_STATEMENT_ARGUMENT: ReadonlyMap<string, number> = new Map([
 ]);
 
 const CLIENT_METHOD_RULES: readonly ClientMethodRule[] = [
+  // knex — a query builder rather than a client object, so the key names the
+  // builder type every chain passes through (`this.db(TABLE).where(…).del()`),
+  // which is what `legacy-ts.ts`'s `installedTypeQualifiedNameOf` reads off the
+  // receiver. Admitted by the same rule as every other row here: measurement
+  // surfaced it — `knex.QueryBuilder.*` is the single most frequent unresolved
+  // receiver type in the third-party backend this table was measured against
+  // (Unleash, `src/lib`: 2147 call sites).
+  //
+  // Only the verbs that fix a direction are listed. knex has no terminal
+  // `execute`: the builder is thenable, and `where` / `join` / `orderBy` say
+  // nothing about whether the statement that eventually runs reads or writes,
+  // so they stay `unknown` rather than being guessed at. `knex.Knex` — the
+  // root the chain starts from (`this.db.select(…)`) — is an interface merged
+  // with a namespace and therefore not named at all; the `from` that follows
+  // such a `select` is, which is why `from` is here.
+  //
+  // `from` was the one row worth measuring rather than reasoning about, since
+  // a builder's table clause is not by itself a direction. Over the same
+  // backend: 166 `knex.QueryBuilder.from` sites, of which 4 sit anywhere near
+  // a write verb, and 3 of those are `select(…).from(…)` subqueries *inside* a
+  // delete's `whereNotIn` — reads, correctly. The remaining one is a `from`
+  // belonging to the delete itself, in a function that reads in the same
+  // statement through those subqueries, so the row adds no effect that
+  // function does not have.
+  { pattern: "knex.QueryBuilder.select", effects: ["db_read"] },
+  { pattern: "knex.QueryBuilder.from", effects: ["db_read"] },
+  { pattern: "knex.QueryBuilder.first", effects: ["db_read"] },
+  { pattern: "knex.QueryBuilder.pluck", effects: ["db_read"] },
+  { pattern: "knex.QueryBuilder.count", effects: ["db_read"] },
+  { pattern: "knex.QueryBuilder.insert", effects: ["db_write"] },
+  { pattern: "knex.QueryBuilder.update", effects: ["db_write"] },
+  { pattern: "knex.QueryBuilder.del", effects: ["db_write"] },
+  { pattern: "knex.QueryBuilder.delete", effects: ["db_write"] },
+  { pattern: "knex.QueryBuilder.truncate", effects: ["db_write"] },
   // @prisma/client — the delegate methods are the documented public API; the
   // model segment is whatever the user's schema declares.
   { pattern: "@prisma/client.PrismaClient.*.findMany", effects: ["db_read"] },

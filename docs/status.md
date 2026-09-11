@@ -30,12 +30,13 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | Authority increases an external team rejected or explicitly approved | 0 | > 0 |
 | `unknown` rate, real third-party code (corpus median, 4,200 functions) | 52.6% | lower — no target (see below) |
 | `unknown` rate, adopting-team-equivalent fixture (`realistic-api`) | 1.9% (1/53) | no target (see below) |
-| `unknown` rate, Ambit's own source (`check src`) | 38.1% (123/323) | — |
-| Tests | 496 passing, 31 files | green |
+| `unknown` rate, Ambit's own source (`check src`) | 38.5% (126/327) | — |
+| Authority Ambit sees in a third-party backend's data layer ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)) | 940 stubbed call sites, up from 120 | — |
+| Tests | 512 passing, 31 files | green |
 | `tsc --noEmit` / `biome ci .` | pass / pass | pass |
 | `check src` latency, 40 files | ~1.1 s | §3.5's 3 s allowance |
 | Incremental / resident analysis | no | yes (§6.2) |
-| Bundled stub packages | 5 DB/LLM clients, 9 builtin namespaces | 50 packages |
+| Bundled stub packages | 6 DB/LLM clients, 9 builtin namespaces | 50 packages |
 | Runtime hooks | 4 (`fetch`, `node:fs`, `node:child_process`, `pg`) | — |
 | Framework adapters | 2 (Hono, Next.js App Router) | — |
 
@@ -56,7 +57,7 @@ where it is measurable, as a Phase 1 exit metric in `ROADMAP.md`.
 ### Baseline commands
 
 ```sh
-pnpm test                                                    # 496 tests, 31 files — pass
+pnpm test                                                    # 512 tests, 31 files — pass
 pnpm exec tsc --noEmit                                       # pass
 ./node_modules/.bin/biome ci .                               # pass
 node src/cli/main.ts check src --coverage                    # exit 0
@@ -83,6 +84,21 @@ Each of these was measured, and the run is archived.
   `unknown` rate to 52.6%, in the order the measurement itself named:
   default-lib classification, by-reference callbacks (§4.2 rule 4), inlined
   self-walked bodies, then the locality rule on argument-position mutators.
+- **`ambit diff` gives reviewable signal on a backend nobody here wrote.**
+  Unleash (`Unleash/unleash@044461b`, `src/lib`, 596 files, 3,523 functions,
+  dependencies installed) was cloned untouched and put through the adopter's
+  workflow. The untouched tree reports **no** increase, so the gate has no
+  standing noise; four authority-expansion edits an agent might make were then
+  applied one at a time. `fetch`, `node:fs.writeFileSync` and
+  `node:child_process.execSync` are each reported with the whole call path to
+  the controller. A knex `del()` added inside an existing read method was
+  **missed** — and fixing the cause (naming a receiver from the package type
+  that describes it) took that repository's stubbed call sites from 120 to 940
+  and turned the miss into exit 1 naming the operation. Two misses survive, both of them
+  operations no table names: `ky`, the HTTP client that repository actually
+  uses, and the same `fs` / `child_process` edit written without the `node:`
+  prefix — the spelling that repository uses throughout. The run is
+  [2026-09-11](measurements/2026-09-11-third-party-diff-validation.md).
 - **The gate is real and it has cost something.** `ambit diff HEAD~1 src` runs
   as a **gating** CI step with `continue-on-error` removed. The change that
   introduced the approval ledger was itself a legitimate authority increase:
@@ -133,9 +149,24 @@ would move it next is measurable — the corpus prints the whole unresolved-name
 histogram — but which of those names *matters* is a question only an adopter can
 answer, and there is none.
 
-On Ambit's own source the same figure is 38.1%, dominated by calls into the
+On Ambit's own source the same figure is 38.5%, dominated by calls into the
 `typescript` compiler API from the connection layer: the one file §3.4 means to
 be replaceable.
+
+The 2026-09-11 third-party run narrowed the question without closing it. On a
+real backend with its dependencies installed, the unresolved-name histogram is
+no longer anonymous — it names `knex.QueryBuilder.*` (448 sites at the top),
+`express.Response.*`, `supertest.Test.*` — so *which* names matter is now
+answerable there. What it also showed is that `unknown` and the gate are less
+coupled than the rate suggests: a *known* effect added inside an `unknown`
+symbol fails the comparison already, because what is compared is the effect set
+and being `unknown` beside it changes neither side. What has no line at all is
+the gain the analysis cannot resolve — an outbound call through a client no
+table covers. Where the symbol was known before, that prints as `unknownGained`
+and exits 0; where it was already `unknown`, nothing prints, because a symbol
+carries a boolean rather than the set of operations behind it. That is the next
+decision, and it is filed with its measured noise in
+[`docs/open-questions.md`](open-questions.md).
 
 ## Next measurement
 

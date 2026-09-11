@@ -217,18 +217,24 @@ to write a comment — is
 ## Effect inference
 
 Effects are inferred from four bundled tables in `src/stubs/`: Node.js builtins
-and `fetch` (52 entries), database and LLM clients (39 rules over `pg`,
-`mysql2`, `@prisma/client`, `openai`, `@anthropic-ai/sdk`), pure built-ins
-(36 methods), and in-place mutators (19 methods). Everything else is `unknown`.
+and `fetch` (52 entries), database and LLM clients (49 rules over `pg`,
+`mysql2`, `knex`, `@prisma/client`, `openai`, `@anthropic-ai/sdk`), pure
+built-ins (36 methods), and in-place mutators (19 methods). Everything else is
+`unknown`.
 
 Three consequences an adopter should count on:
 
-- **Only those five client packages are covered.** Drizzle, MongoDB, Redis, an
-  S3 client, a queue client — all `unknown`.
-- **A client must be held in a `const`** initialized either by `new
-  <ImportedClass>(…)` or by a call of an imported factory function
-  (`createPool(…)`). A client in a class field, bound with `let`, or returned
-  by a method on another client (`pool.getConnection()`) is `unknown`.
+- **Only those six client packages are covered.** Drizzle, MongoDB, Redis, an
+  S3 client, a queue client, an HTTP client that is not `fetch` or `undici`
+  (`ky`, `axios`, `got`) — all `unknown`.
+- **A client must be one a package's own types describe.** Four shapes reach
+  the table: a `const` initialized by `new <ImportedClass>(…)` or by an
+  imported factory (`createPool(…)`), and — through the receiver's declared
+  type — a client held in a class field, handed in as a parameter, or returned
+  by an earlier call in a chain (`db(table).where(…).del()`). What stays
+  `unknown` is a receiver no *package* type describes: one whose type this
+  project declares, one the compiler's own lib declares, and an anonymous
+  object type.
 - **An opaque SQL statement costs both directions.** A `query` whose leading
   keyword the source does not fix contributes **both** `db_read` and
   `db_write`, so a read-only function that builds its statement dynamically

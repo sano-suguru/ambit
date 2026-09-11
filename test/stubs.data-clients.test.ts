@@ -66,6 +66,31 @@ describe("lookupClientEffects", () => {
       ).toEqual(["db_write"]);
     });
 
+    it("covers `knex`, whose receiver is the builder rather than a client object", () => {
+      // Every verb in a knex chain is called on the builder type, which is
+      // what `legacy-ts.ts`'s `installedTypeQualifiedNameOf` reads off the
+      // receiver — `this.db(TABLE).where(…).del()` names no binding at all.
+      expect(lookupClientEffects("knex.QueryBuilder.del", undefined)).toEqual(["db_write"]);
+      expect(lookupClientEffects("knex.QueryBuilder.delete", undefined)).toEqual(["db_write"]);
+      expect(lookupClientEffects("knex.QueryBuilder.insert", undefined)).toEqual(["db_write"]);
+      expect(lookupClientEffects("knex.QueryBuilder.update", undefined)).toEqual(["db_write"]);
+      expect(lookupClientEffects("knex.QueryBuilder.truncate", undefined)).toEqual(["db_write"]);
+      expect(lookupClientEffects("knex.QueryBuilder.select", undefined)).toEqual(["db_read"]);
+      expect(lookupClientEffects("knex.QueryBuilder.from", undefined)).toEqual(["db_read"]);
+      expect(lookupClientEffects("knex.QueryBuilder.first", undefined)).toEqual(["db_read"]);
+    });
+
+    it("says nothing about a knex verb that fixes no direction", () => {
+      // `where` / `join` / `orderBy` appear in both a read chain and a write
+      // one, so a verdict here would be a guess. `unknown` is the answer.
+      expect(lookupClientEffects("knex.QueryBuilder.where", undefined)).toBeUndefined();
+      expect(lookupClientEffects("knex.QueryBuilder.join", undefined)).toBeUndefined();
+      expect(lookupClientEffects("knex.QueryBuilder.orderBy", undefined)).toBeUndefined();
+      // The root the chain starts from is an interface merged with a
+      // namespace, which `packageTypeNameOf` refuses to name at all.
+      expect(lookupClientEffects("knex.Knex.select", undefined)).toBeUndefined();
+    });
+
     it("keeps both directions for a `mysql2/promise` statement the source does not fix", () => {
       expect(lookupClientEffects("mysql2/promise.Pool.execute", undefined)).toEqual([
         "db_read",
