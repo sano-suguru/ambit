@@ -65,8 +65,7 @@ exit: when it fires, the question is decided, the answer goes in the
   declaration path, yet is not adopted. Resolving it requires first deciding how
   to fix JSDoc's attribution uniquely.
   *Trigger:* an `AMB-E003` on a shape a config key also cannot name.
-- **What declaration path an anonymous argument-position function should
-  have.** `router.post("documents.create", auth(), async (ctx) => { … })` — the
+- **How an anonymous argument-position function enters the comparison.** `router.post("documents.create", auth(), async (ctx) => { … })` — the
   idiomatic registration in Koa, Express, Fastify and Hono — puts the handler
   body in a function with no name and no extracted ancestor, so it carries no
   contract, produces no record, and `ambit diff` reports **nothing** when
@@ -76,20 +75,50 @@ exit: when it fires, the question is decided, the answer goes in the
   E6, over 226 such routes). `docs/DESIGN.md` §6.4 names this as the outcome
   that must not happen, and §4.1 attaches `@effects` to "any function or
   method", so the code is behind the specification rather than the reverse.
-  What is undecided is the notation, and each candidate has a failure mode:
-  **positional** (`file.ts#router.post@1852`) contradicts §6.4's "the key holds
-  no position" and would turn a line shift into a rename; **keyed on the
-  registration's literal argument** was measured for the neighbouring runtime
-  question at 86% static determinability with one silently *wrong* answer
-  ([`measurements/http-route-key-spike.md`](measurements/http-route-key-spike.md),
-  [ADR-0007](adr/0007-http-route-keys.md)); a **per-file pseudo-symbol** holding
-  the union of such bodies needs no key and no position but cannot tell a
-  second `fetch` in a file that already has one from the first. Until one is
-  chosen the gap is recorded in
+  **The question is not necessarily a `symbol` question.** §5.3's declaration
+  path is what a *human* writes in an `ambit.config.ts` key, and §4.1 (a)
+  already has a tier that propagates without being declarable in JSDoc, so a
+  third tier — analyzed and compared, declarable by nobody — is a smaller
+  extension than minting a name would be. What such a record still needs is an
+  identity **stable enough that an approval line written today still matches
+  tomorrow** (§6.3 names a symbol in `ambit.approvals.md`). That is a weaker
+  requirement than being writable by hand, and it is the requirement the
+  candidates have to be judged against — deciding this as a notation question
+  first would rule out the shapes that might actually work.
+
+  Candidates, with the failure mode each is known or suspected to have:
+
+  - **positional** (`file.ts#router.post@1852`) — contradicts §6.4's "the key
+    holds no position" and turns a line shift into a rename;
+  - **keyed on the registration's literal argument** (`router.post("documents.create")`)
+    — measured for the neighbouring runtime question at 86% static
+    determinability with one silently *wrong* answer
+    ([`measurements/http-route-key-spike.md`](measurements/http-route-key-spike.md),
+    [ADR-0007](adr/0007-http-route-keys.md));
+  - **a per-file pseudo-symbol** holding the union of such bodies — needs no
+    key and no position, but cannot tell a second `fetch` in a file that
+    already has one from the first;
+  - **lexical/structural identity** — the path of enclosing constructs down to
+    the function, independent of line numbers. Unmeasured; the open question is
+    what an edit to a sibling registration does to it;
+  - **an ordinal scoped to the registration site** (`router.post` occurrence *n*
+    in this file, argument *k*) — unmeasured; the open question is whether
+    inserting a route above renames every one below it;
+  - **not an identity-bearing symbol at all** — the body is an analysis node
+    whose authority delta is attributed and compared without ever being
+    nameable. Unmeasured, and the one that most directly attacks the premise;
+    its open question is the approval-stability requirement above, which it
+    does not escape, only relocates.
+
+  The first three are the ones this run's evidence already speaks to; the last
+  three are not yet measured and none of them should be implemented before it
+  is. Until one is chosen the gap is recorded in
   [`docs/limitations.md`](limitations.md) with its one-line workaround (bind
   the handler to a name).
   *Trigger:* already fired. This is the gap that has to close before an
-  external adopter on an inline-handler framework can rely on the gate.
+  external adopter on an inline-handler framework can rely on the gate, and it
+  is a design goal — compare and measure the candidates — not an
+  implementation one.
 - **Indirect calls in frameworks.** The call paths of Express, NestJS's DI,
   Next.js, and Hono. How far dedicated stubs and entry-point declarations can
   absorb them. NestJS's decorator DI and class inheritance were measured and

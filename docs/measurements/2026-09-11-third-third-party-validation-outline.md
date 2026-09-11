@@ -728,7 +728,14 @@ considered and each has a failure mode that is measured or structural:
   second `fetch` in a file that already has one from the first, so it reports
   nothing for the second — silence again, in a narrower place.
 
-None is clearly right. That is a design question, not a patch, and per
+None is clearly right, and on review the list was also too narrow: it assumed
+the answer has to be a *name*. Three further shapes — a lexical/structural
+identity, an ordinal scoped to the registration site, and not giving the body
+an identity-bearing symbol at all — are recorded with the first three in
+`docs/open-questions.md`, none of them measured. What the record now states as
+the actual constraint is **approval stability** (§6.3 names a symbol in
+`ambit.approvals.md`), which is weaker than being writable by hand and does not
+rule the last shape out. That is a design question, not a patch, and per
 `AGENTS.md` it is recorded and left rather than guessed at. It is recorded in
 `docs/open-questions.md`, and the current behaviour with its one-line
 workaround (E7) in `docs/limitations.md`. **It is the reason this validation's
