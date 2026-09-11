@@ -97,8 +97,8 @@ recorded (`AGENTS.md`, Defects).
   `engine.version`, updating only the build tsc can silently change the engine
   string. Separation by a second npm alias was **rejected on measurement**:
   `typescript@7` also declares `bin: { tsc }`, so installing it under an alias
-  still takes `node_modules/.bin/tsc` ([`docs/status.md`](status.md), M0.5 gate
-  5). If separation becomes necessary, take a different route.
+  still takes `node_modules/.bin/tsc` ([`docs/measurements/m0.5-backend-comparison.md`](measurements/m0.5-backend-comparison.md),
+  gate 5). If separation becomes necessary, take a different route.
 - **The deadline for tracking the baseline runtime's LTS.** `docs/DESIGN.md`
   §3.1's baseline runtime is a single Active LTS (Node.js 24 as of 2026-09).
   Node.js 24 moves to Maintenance LTS on 2026-10-20 and Node.js 26 becomes

@@ -92,7 +92,7 @@ What a second backend would additionally have to satisfy is [ADR-0001](adr/0001-
 
 ### 3.5 The default backend
 
-**The default is the JS-implemented TypeScript Compiler API** (`typescript` 6.0.3, `src/checker/backend/legacy-ts.ts`). Native TypeScript — the Go implementation — is not adopted. Why, and what the choice costs, is [ADR-0001](adr/0001-analysis-backend.md); the measurements are in `docs/status.md`. Changing the default requires an RFC (§9.1).
+**The default is the JS-implemented TypeScript Compiler API** (`typescript` 6.0.3, `src/checker/backend/legacy-ts.ts`). Native TypeScript — the Go implementation — is not adopted. Why, and what the choice costs, is [ADR-0001](adr/0001-analysis-backend.md); the measurements are in [`docs/measurements/m0.5-backend-comparison.md`](measurements/m0.5-backend-comparison.md). Changing the default requires an RFC (§9.1).
 
 **The gates any backend is judged by.** These are not history: a re-evaluation runs against the same five. The latency and memory allowances are fixed before a comparison begins, and are in [ADR-0001](adr/0001-analysis-backend.md).
 

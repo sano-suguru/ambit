@@ -46,7 +46,8 @@ tracks in parallel is what costs the most efficiency. The definitions of the mil
 unchanged.
 
 M0.5 is settled: the decision is [ADR-0001](docs/adr/0001-analysis-backend.md)
-and the measurements are in the M0.5 section of `docs/status.md`.
+and the measurements are in
+[`docs/measurements/m0.5-backend-comparison.md`](docs/measurements/m0.5-backend-comparison.md).
 
 ## Supply chain (M4)
 

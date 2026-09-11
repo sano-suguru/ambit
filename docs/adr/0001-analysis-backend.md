@@ -2,7 +2,7 @@
 
 - Status: Accepted (2026-09-09)
 - Decides: `docs/DESIGN.md` §3.5
-- Evidence: `docs/status.md`, "M0.5 — the backend comparison, measured". Every
+- Evidence: [`docs/measurements/m0.5-backend-comparison.md`](../measurements/m0.5-backend-comparison.md). Every
   number this record relies on is measured there; none is repeated here.
 
 ## Context

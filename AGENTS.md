@@ -147,7 +147,7 @@ Non-obvious constraints:
   **the newest stable release of the JS-implementation line that leaves
   `pnpm test`, `tsc --noEmit`, `biome ci`, and `check src` / `check
   realistic-api` counts unchanged.** 6.0.3 was measured against that rule and
-  changed nothing (`docs/status.md`, M0.5). It is the analysis engine behind
+  changed nothing (`docs/measurements/m0.5-backend-comparison.md`). It is the analysis engine behind
   `src/checker/backend/legacy-ts.ts`, adopted by `docs/DESIGN.md` §3.5, and it
   doubles as the build-time compiler for `tsc --noEmit` — see §12 for why that
   pairing is provisional. 7.x is a different engine (Go), not a newer version
@@ -162,7 +162,8 @@ Non-obvious constraints:
 - Never add a second TypeScript to `package.json`, under an alias or
   otherwise. `typescript@7` also declares `bin: { tsc }`, so the two collide
   on `node_modules/.bin/tsc` and `pnpm exec tsc` silently changes compiler —
-  observed, and recorded in `docs/status.md` under M0.5 gate 5. The M0.5
+  observed, and recorded in `docs/measurements/m0.5-backend-comparison.md`
+  under gate 5. The M0.5
   comparison compiler lives in `.m05-native/` (gitignored), installed by
   `node scripts/m05-native-install.ts`; `test/architecture.test.ts` keeps it
   out of `src/` and out of the published package.
