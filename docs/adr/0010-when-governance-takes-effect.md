@@ -3,9 +3,10 @@
 - Status: Accepted (2026-09-10)
 - Decides: `docs/DESIGN.md` §9.1, §9.2, §9.3
 - Evidence: none measured — a procedure decision
-- Confirms: ADR-0001 and ADR-0009 both describe §9's trigger as the first npm
-  publish, which is what this record changes. Their decisions stand; only that
-  sentence is superseded here
+- Confirms: ADR-0001, ADR-0009 — both originally described §9's trigger as the
+  first npm publish, which is what this record changes. Their decisions stand;
+  that sentence was dropped from each when they were trimmed for length
+  (see [README](README.md), "Editing for length")
 
 ## Context
 

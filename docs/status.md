@@ -1,7 +1,11 @@
 # Current status
 
-Last measured: **2026-09-11**, Node.js v24.20.0, macOS (darwin arm64), Apple M1,
-8 cores, 16 GiB. Every number here was run, not estimated.
+Node.js v24.20.0, macOS (darwin arm64), Apple M1, 8 cores, 16 GiB. Every number
+here was run, not estimated — but not all on the same day. Re-run **2026-09-11**:
+`pnpm test`, `tsc --noEmit`, `biome ci`, `check src --coverage`, `check
+test/fixtures/realistic-api --coverage`. Quoted from the runs archived in
+[`docs/measurements/`](measurements/), not re-taken: the corpus median, the
+latency figures, and the npm install evidence.
 
 This file records *implementation status*, not design. The specification is
 [`docs/DESIGN.md`](DESIGN.md), and nothing here changes it. The measurement runs
@@ -29,7 +33,7 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | `unknown` rate, Ambit's own source (`check src`) | 38.1% (123/323) | — |
 | Tests | 496 passing, 31 files | green |
 | `tsc --noEmit` / `biome ci .` | pass / pass | pass |
-| `check src` latency, 40 files | ~1.1 s | § 3.5's 3 s allowance |
+| `check src` latency, 40 files | ~1.1 s | §3.5's 3 s allowance |
 | Incremental / resident analysis | no | yes (§6.2) |
 | Bundled stub packages | 5 DB/LLM clients, 9 builtin namespaces | 50 packages |
 | Runtime hooks | 4 (`fetch`, `node:fs`, `node:child_process`, `pg`) | — |
