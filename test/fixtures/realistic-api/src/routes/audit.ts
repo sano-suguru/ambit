@@ -19,8 +19,12 @@ export const LIST_AUDIT = ambitHandler(
 );
 
 /**
+ * The size read after the append is a real `SELECT`, so the contract carries
+ * `db_read` as well — it was written `db_write` alone while the MySQL pool was
+ * still unresolved, and nothing could contradict it.
+ *
  * @entrypoint
- * @effects db_write
+ * @effects db_write, db_read
  */
 export async function writeAudit(id: string, action: string): Promise<string> {
   await record(id, action);
@@ -29,7 +33,7 @@ export async function writeAudit(id: string, action: string): Promise<string> {
 }
 
 export const WRITE_AUDIT = ambitHandler(
-  { capabilities: ["db:write:audit"], budget: { timeMs: 1000, onExceed: "warn" } },
+  { capabilities: ["db:write:audit", "db:read:audit"], budget: { timeMs: 1000, onExceed: "warn" } },
   writeAudit,
   async (c: Context) => {
     const body = await c.req.json<{ readonly id: string; readonly action: string }>();

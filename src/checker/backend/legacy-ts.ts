@@ -1233,7 +1233,13 @@ function classifyConstruct(
   const importBindingReason: UnresolvedReason | undefined =
     isAlias && !resolvedSymbol?.declarations ? "import-binding" : undefined;
 
-  const name = qualifiedNameOf(checker, classExpression, importBindingReason === undefined);
+  const name = qualifiedNameOf(
+    checker,
+    program,
+    classExpression,
+    importBindingReason === undefined,
+    ambientReason !== "builtin-method",
+  );
   if (name) {
     return {
       location,
@@ -1528,7 +1534,17 @@ function classifyCall(
   const calleeType = checker.getTypeAtLocation(callee);
   const isAnyTyped = (calleeType.flags & ts.TypeFlags.Any) !== 0;
 
-  const qualifiedName = qualifiedNameOf(checker, callee, importBindingReason === undefined);
+  // The factory origin is withheld when the method being called is the
+  // compiler's own — a package interface may extend a default-lib type, and a
+  // name here would take the call off the `pureBuiltinName` path below, which
+  // is the only path that can prove it effect-free (DESIGN.md §4.2).
+  const qualifiedName = qualifiedNameOf(
+    checker,
+    program,
+    callee,
+    importBindingReason === undefined,
+    ambientReason !== "builtin-method",
+  );
   if (qualifiedName) {
     return {
       location,
@@ -2150,8 +2166,10 @@ function ambientUnresolvedReason(
  */
 function qualifiedNameOf(
   checker: ts.TypeChecker,
+  program: ts.Program,
   expr: ts.Expression,
   aliasResolved: boolean,
+  factoryOriginAllowed: boolean,
 ): string | undefined {
   if (ts.isIdentifier(expr)) {
     if (aliasResolved) {
@@ -2161,7 +2179,7 @@ function qualifiedNameOf(
     return expr.text;
   }
   if (ts.isPropertyAccessExpression(expr)) {
-    return memberChainQualifiedNameOf(checker, expr);
+    return memberChainQualifiedNameOf(checker, program, expr, factoryOriginAllowed);
   }
   return undefined;
 }
@@ -2171,24 +2189,28 @@ function qualifiedNameOf(
  * `<origin>` says where the receiver came from and the path is what the source
  * literally wrote after it.
  *
- * Two origins are recognized, both facts about the project's own source rather
- * than about any package's `.d.ts`:
+ * Three origins are recognized, each a fact about the project's own source or
+ * about a declaration the source imports, never about a local spelling:
  *
  * - a namespace or default import — `node:fs` for `import * as fs from
  *   "node:fs"`, giving `node:fs.readFileSync` (and now `node:fs.promises.readFile`
  *   for a deeper path, which previously had no name at all);
  * - the class a `const` was constructed from — `pg.Pool` for `const pool = new
  *   Pool(...)` with `Pool` imported from `"pg"`, giving `pg.Pool.query` and
- *   `@prisma/client.PrismaClient.user.findMany`.
+ *   `@prisma/client.PrismaClient.user.findMany`;
+ * - the type an imported *factory* handed back — `mysql2/promise.Pool` for
+ *   `const pool = createPool(...)`, see {@link factoryResultQualifiedNameOf}.
  *
  * Anything else yields `undefined`: a receiver whose origin is a parameter, a
- * `let`, a project-local class, or a call result has no module-qualified name
- * that a stub table could honestly key on, and inventing one from the local
- * variable's spelling would make the table match by coincidence.
+ * `let`, or a project-local class has no module-qualified name that a stub
+ * table could honestly key on, and inventing one from the local variable's
+ * spelling would make the table match by coincidence.
  */
 function memberChainQualifiedNameOf(
   checker: ts.TypeChecker,
+  program: ts.Program,
   expr: ts.PropertyAccessExpression,
+  factoryOriginAllowed: boolean,
 ): string | undefined {
   const path: string[] = [];
   let current: ts.Expression = expr;
@@ -2199,9 +2221,142 @@ function memberChainQualifiedNameOf(
   if (!ts.isIdentifier(current)) return undefined;
 
   const origin =
-    moduleSpecifierOf(checker, current) ?? constructedClassQualifiedNameOf(checker, current);
+    moduleSpecifierOf(checker, current) ??
+    constructedClassQualifiedNameOf(checker, current) ??
+    (factoryOriginAllowed ? factoryResultQualifiedNameOf(checker, program, current) : undefined);
   if (!origin) return undefined;
   return [origin, ...path].join(".");
+}
+
+/**
+ * `"<module specifier>.<returned type name>"` for a receiver bound by `const`
+ * to a call of an *imported* function — `"mysql2/promise.Pool"` for `const
+ * pool = createPool(...)`, and the same through `await` for `const conn =
+ * await createConnection(...)`.
+ *
+ * This is the factory half of the same question {@link
+ * constructedClassQualifiedNameOf} answers for `new`. A client handed out by a
+ * factory is the ordinary shape in the wild — `mysql2` has no exported class
+ * to construct — and without a name for it every call through the client is
+ * `unknown`, which then propagates to every transitive caller.
+ *
+ * Both halves of the name are evidence, not a guess:
+ *
+ * - the specifier is the one the source wrote, followed through re-exports the
+ *   same way a named import is ({@link deepestPackageHop}), so a barrel does
+ *   not rename the package. It has to be *bare*: every bundled table is keyed
+ *   on a package or a Node.js builtin, so a relative path could never match
+ *   one, and emitting it would put a name in `top-unresolved-names` that reads
+ *   like a stub candidate and is not. A project-local wrapper around a
+ *   package's factory therefore stays unnamed;
+ * - the type name is read off the declaration the *call expression's own type*
+ *   resolves to — not off the variable, whose annotation §4.2 rule 7 forbids
+ *   letting decide, and not off the factory's local spelling.
+ *
+ * Four conditions keep the name honest, and each rules out a shape where it
+ * would be a coincidence rather than a fact:
+ *
+ * - **`const`**, exactly as for `new`: a `let` may hold something else by the
+ *   time the call runs. `const` fixes the binding, not the object's
+ *   properties, so this is the same premise §4.2 rule 7 already states — and
+ *   no wider.
+ * - **an imported callee**, because a project-local factory has no
+ *   module-qualified name, and its result is a class this analysis could in
+ *   principle follow to a body. Naming it would hide that.
+ * - **a class or interface declaration**, so an anonymous return type
+ *   (`{ run(): void }`), a union, or a primitive yields nothing.
+ * - **declared in a `.d.ts` that is not the compiler's own lib.** A package
+ *   type has no body to follow, which is why a name is the only handle on it.
+ *   The default-lib exclusion is load-bearing rather than tidy: a factory
+ *   returning `Map` or `ReadonlyArray` would otherwise take its methods off
+ *   `src/stubs/pure-builtins.ts` — turning a call proven effect-free into an
+ *   unresolved one, which is a signal regression even though it errs safe.
+ *
+ * A name is not a verdict. A package no bundled table covers gets its name
+ * here and still reports `unknown`; what changes is that the name now appears
+ * in `--coverage`'s `top-unresolved-names` instead of vanishing into the
+ * reason count.
+ */
+function factoryResultQualifiedNameOf(
+  checker: ts.TypeChecker,
+  program: ts.Program,
+  receiver: ts.Identifier,
+): string | undefined {
+  const symbol = checker.getSymbolAtLocation(receiver);
+  if (!symbol) return undefined;
+  const resolved =
+    (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(symbol) : symbol;
+
+  const declaration = resolved.declarations?.[0];
+  if (!declaration || !ts.isVariableDeclaration(declaration)) return undefined;
+  if ((declaration.parent.flags & ts.NodeFlags.Const) === 0) return undefined;
+  if (!declaration.initializer) return undefined;
+
+  // The `await`ed form is the same fact one step later: `createConnection()`
+  // returns a promise of the client, and the client is what the binding holds.
+  // The type is read from whichever of the two nodes the binding is, so the
+  // promise wrapper never becomes the name.
+  const value = unwrapTypeOnlyExpression(declaration.initializer);
+  const call = ts.isAwaitExpression(value) ? unwrapTypeOnlyExpression(value.expression) : value;
+  if (!ts.isCallExpression(call)) return undefined;
+
+  const specifier = importedModuleSpecifierOf(checker, call.expression);
+  if (specifier === undefined || specifier.startsWith(".")) return undefined;
+
+  const typeName = packageTypeNameOf(program, checker.getTypeAtLocation(value));
+  return typeName === undefined ? undefined : `${specifier}.${typeName}`;
+}
+
+/**
+ * The declared name of a type whose every declaration is a class or interface
+ * in a declaration file other than the compiler's own lib — see
+ * {@link factoryResultQualifiedNameOf} for why each of those is required.
+ *
+ * `getSymbol()` rather than `aliasSymbol`: an alias is the spelling at the use
+ * site, and this name has to be the one the declaring module gave the type.
+ */
+function packageTypeNameOf(program: ts.Program, type: ts.Type): string | undefined {
+  const symbol = type.getSymbol();
+  const declarations = symbol?.declarations;
+  if (!symbol || !declarations || declarations.length === 0) return undefined;
+
+  const name = symbol.getName();
+  // TypeScript names an anonymous object type `__type`; the declaration check
+  // below already refuses one, and this refuses the whole `__`-prefixed
+  // internal namespace rather than relying on that.
+  if (!name || name.startsWith("__")) return undefined;
+
+  for (const declaration of declarations) {
+    if (!ts.isClassDeclaration(declaration) && !ts.isInterfaceDeclaration(declaration)) {
+      return undefined;
+    }
+    const file = declaration.getSourceFile();
+    if (!file.isDeclarationFile || program.isSourceFileDefaultLibrary(file)) return undefined;
+  }
+  return name;
+}
+
+/**
+ * The module specifier behind an expression that names an import, and nothing
+ * else — `"mysql2/promise"` for `createPool` (named, aliased, or reached
+ * through a barrel) and for `mysql.createPool` (namespace or default import).
+ *
+ * Taken apart from {@link importedQualifiedNameOf}, which joins the specifier
+ * to the exported name: here the exported name is the factory's, and the name
+ * being built is the returned type's.
+ */
+function importedModuleSpecifierOf(
+  checker: ts.TypeChecker,
+  expr: ts.Expression,
+): string | undefined {
+  if (ts.isIdentifier(expr)) {
+    const symbol = checker.getSymbolAtLocation(expr);
+    if (!symbol) return undefined;
+    const hop = deepestPackageHop(reExportHopsOf(checker, symbol));
+    return hop?.specifier ?? defaultImportSpecifierOf(checker, expr);
+  }
+  if (ts.isPropertyAccessExpression(expr)) return moduleSpecifierOf(checker, expr.expression);
+  return undefined;
 }
 
 /**

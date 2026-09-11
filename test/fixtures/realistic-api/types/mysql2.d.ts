@@ -3,6 +3,8 @@
  *
  * The real package builds a pool through the `createPool` factory, and the
  * fixture uses it that way on purpose: it is the shape a coding agent writes.
+ * The names here match `mysql2@3.15.3/promise.d.ts` — `createPool(config):
+ * Pool` — because the stub table is keyed on the type the factory returns.
  */
 declare module "mysql2/promise" {
   export interface RowDataPacket {

@@ -203,6 +203,87 @@ export async function formatCents(cents: number): Promise<string> {
     );
   }, 60_000);
 
+  it("accident 2: a literal SELECT through the factory-created MySQL pool is a db_read violation", async () => {
+    // `mysql2/promise` hands its pool out through `createPool`, not a
+    // constructor, and that is the ordinary shape. Until the receiver had a
+    // name, this call was `unknown` and the accident went unreported.
+    await withVariant(
+      [
+        {
+          file: "src/domain/money.ts",
+          find: PURE_TARGET,
+          replace: `import { auditPool } from "../lib/mysql.ts";
+
+/** @effects pure */
+export async function formatCents(cents: number): Promise<string> {
+  await auditPool.query("SELECT id FROM audit LIMIT 1");
+  return (cents / 100).toFixed(2);
+}`,
+        },
+      ],
+      (result) => {
+        const diagnostic = at(result, "AMB-E001", "src/domain/money.ts", 4);
+        expect(diagnostic?.message).toContain("performs [db_read] directly");
+        expect(result.exitCode).toBe(1);
+      },
+    );
+  }, 60_000);
+
+  it("accident 2: the same pool reached through two undeclared hops still reports", async () => {
+    // The propagation half: `auditTrail` and `recentAuditRows` declare
+    // nothing, so the authority has to travel the whole chain to reach the
+    // caller that claimed `pure`.
+    await withVariant(
+      [
+        {
+          file: "src/domain/money.ts",
+          find: PURE_TARGET,
+          replace: `import { auditTrail } from "../lib/audit.ts";
+
+/** @effects pure */
+export async function formatCents(cents: number): Promise<string> {
+  await auditTrail(1);
+  return (cents / 100).toFixed(2);
+}`,
+        },
+      ],
+      (result) => {
+        const diagnostic = at(result, "AMB-E001", "src/domain/money.ts", 4);
+        expect(diagnostic?.message).toContain("db_read");
+        expect(diagnostic?.contract?.via?.map((v) => v.symbol)).toEqual([
+          "src/lib/audit.ts#auditTrail",
+          "src/lib/mysql.ts#recentAuditRows",
+        ]);
+        expect(result.exitCode).toBe(1);
+      },
+    );
+  }, 60_000);
+
+  it("accident 2: a statement the source does not fix still needs both directions through the MySQL pool", async () => {
+    // The conservative half has to survive the new receiver name: naming the
+    // client must not make an opaque statement read as a read.
+    await withVariant(
+      [
+        {
+          file: "src/domain/money.ts",
+          find: PURE_TARGET,
+          replace: `import { auditPool } from "../lib/mysql.ts";
+
+/** @effects db_read */
+export async function formatCents(cents: number): Promise<string> {
+  await auditPool.execute(String(cents));
+  return (cents / 100).toFixed(2);
+}`,
+        },
+      ],
+      (result) => {
+        const diagnostic = at(result, "AMB-E001", "src/domain/money.ts", 4);
+        expect(diagnostic?.message).toContain("db_write");
+        expect(result.exitCode).toBe(1);
+      },
+    );
+  }, 60_000);
+
   it("accident 2: a non-literal statement contributes both directions", async () => {
     await withVariant(
       [

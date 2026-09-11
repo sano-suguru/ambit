@@ -55,6 +55,18 @@ const SQL_STATEMENT_ARGUMENT: ReadonlyMap<string, number> = new Map([
   ["mysql2.Pool.execute", 0],
   ["mysql2.Connection.query", 0],
   ["mysql2.Connection.execute", 0],
+  // `mysql2/promise` is a second entry point of the same package with its own
+  // types, and the one server code uses. Its clients come from `createPool()`
+  // and `await createConnection()` rather than from a constructor, so the key
+  // names the type those factories are declared to return (`legacy-ts.ts`'s
+  // `factoryResultQualifiedNameOf`). Read off `mysql2@3.15.3/promise.d.ts`:
+  // `export function createPool(config: PoolOptions): Pool`,
+  // `export function createConnection(config: ConnectionOptions):
+  // Promise<Connection>`, with `interface Pool extends Connection`.
+  ["mysql2/promise.Pool.query", 0],
+  ["mysql2/promise.Pool.execute", 0],
+  ["mysql2/promise.Connection.query", 0],
+  ["mysql2/promise.Connection.execute", 0],
 ]);
 
 const CLIENT_METHOD_RULES: readonly ClientMethodRule[] = [

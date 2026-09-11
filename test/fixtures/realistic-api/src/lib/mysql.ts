@@ -4,11 +4,12 @@ import { createPool } from "mysql2/promise";
  * The audit store, on MySQL rather than Postgres, because a real backend
  * accumulates more than one.
  *
- * `mysql2` hands out its pool through a factory, not a constructor. Ambit
- * names a client by the class a `const` was `new`ed from, so a factory result
- * has no module-qualified name and every call through this pool is `unknown`
- * — not `pure`. `docs/status.md` records that as one of the fixture's
- * remaining unknowns rather than hiding it behind `@boundary`.
+ * `mysql2` hands out its pool through a factory, not a constructor, and the
+ * fixture uses it that way because that is how the package is used. A `const`
+ * bound to an imported factory's call is named by the specifier the source
+ * wrote and the type the factory is declared to return — `mysql2/promise.Pool`
+ * — so the calls below reach `src/stubs/data-clients.ts` the same way
+ * `src/lib/db.ts`'s `new Pool(...)` does.
  */
 export const auditPool = createPool({
   uri: "mysql://localhost:3306/audit",

@@ -535,3 +535,109 @@ describe("legacyTsBackend.extractProject (client receivers)", () => {
     expect(unresolved.map((c) => c.unresolvedReason)).toEqual(["ambient-declaration"]);
   });
 });
+
+describe("legacyTsBackend.extractProject (factory-created client receivers)", () => {
+  const FACTORY_ROOT = path.join(import.meta.dirname, "fixtures", "factory-receiver");
+
+  function callsOf(
+    files: Awaited<ReturnType<typeof legacyTsBackend.extractProject>>["files"],
+    id: string,
+  ) {
+    for (const file of files) {
+      const fn = file.functions.find((f) => f.id === id);
+      if (fn) return fn.calls;
+    }
+    return [];
+  }
+
+  function nameOf(
+    files: Awaited<ReturnType<typeof legacyTsBackend.extractProject>>["files"],
+    id: string,
+  ) {
+    return callsOf(files, id).map((c) => c.calleeQualifiedName);
+  }
+
+  it("names a method on a factory-created client by module specifier and returned type", async () => {
+    // `const store = createStore()` — the specifier is what the source wrote,
+    // the type name is what the declaration the call resolves to says it
+    // returns. Neither comes from the local variable's spelling.
+    const { files } = await extractFixture(FACTORY_ROOT);
+    expect(nameOf(files, "named-import.ts#readsThroughNamedImportFactory")).toContain(
+      "widget-store.Store.get",
+    );
+  });
+
+  it("names it the same through every import shape the factory can arrive by", async () => {
+    // Namespace, default, `as` alias, and a barrel re-export all name the same
+    // client: the specifier is the module's, not the local spelling's.
+    const { files } = await extractFixture(FACTORY_ROOT);
+    for (const id of [
+      "namespace-import.ts#readsThroughNamespaceImportFactory",
+      "default-import.ts#readsThroughDefaultImportFactory",
+      "aliased-import.ts#readsThroughAliasedFactory",
+      "barrel-import.ts#readsThroughBarrelFactory",
+    ]) {
+      expect(nameOf(files, id)).toContain("widget-store.Store.get");
+    }
+  });
+
+  it("names a factory-created client used from another module", async () => {
+    // The client is constructed once at module scope and imported where it is
+    // used — the shape `src/lib/db.ts`'s `pool` already has for `new`.
+    const { files } = await extractFixture(FACTORY_ROOT);
+    expect(nameOf(files, "imported-client.ts#readsThroughImportedClient")).toContain(
+      "widget-store.Store.get",
+    );
+  });
+
+  it("looks through an `await` on the factory call", async () => {
+    const { files } = await extractFixture(FACTORY_ROOT);
+    expect(nameOf(files, "awaited.ts#closesAwaitedHandle")).toContain("widget-store.Handle.close");
+  });
+
+  it("keeps a subpath specifier distinct from the package root", async () => {
+    // `mysql2` and `mysql2/promise` are two entry points with two APIs; a name
+    // that collapsed them would match the wrong table row.
+    const { files } = await extractFixture(FACTORY_ROOT);
+    expect(nameOf(files, "subpath-import.ts#readsThroughSubpathFactory")).toContain(
+      "widget-store/sub.Store.get",
+    );
+  });
+
+  it("names without resolving: a package no table covers stays unresolved", async () => {
+    const { files } = await extractFixture(FACTORY_ROOT);
+    const call = callsOf(files, "unlisted-package.ts#writesThroughUnlistedPackage").find(
+      (c) => c.calleeQualifiedName === "widget-store.Store.put",
+    );
+    expect(call).toBeDefined();
+    expect(call?.resolvedCallee).toBeUndefined();
+    expect(call?.unresolvedReason).toBe("ambient-declaration");
+  });
+
+  it("names nothing for a `let` receiver, an anonymous return type, or a project-local factory", async () => {
+    const { files } = await extractFixture(FACTORY_ROOT);
+    for (const id of [
+      "mutable-binding.ts#readsThroughMutableBinding",
+      "anonymous-result.ts#callsAnonymousResult",
+      "project-factory.ts#callsProjectFactoryResult",
+      // A project-local wrapper around the package's own factory: the
+      // specifier is a path, and no bundled table is keyed on one.
+      "wrapper-client.ts#readsThroughProjectWrapper",
+    ]) {
+      // Asserted against the call that is there, not against an empty list: a
+      // mistyped id would make "no name" vacuously true.
+      expect(callsOf(files, id)).toHaveLength(1);
+      expect(nameOf(files, id)).toEqual([undefined]);
+    }
+  });
+
+  it("leaves a factory result the compiler's own lib declares on the pure-builtin path", async () => {
+    // `createIndex(): Map<string, number>` — naming this `widget-store.Map`
+    // would take `map.get(...)` off `src/stubs/pure-builtins.ts` and turn a
+    // call proven effect-free into an unresolved one.
+    const { files } = await extractFixture(FACTORY_ROOT);
+    const call = callsOf(files, "default-lib-result.ts#readsThroughDefaultLibResult")[0];
+    expect(call?.calleeQualifiedName).toBeUndefined();
+    expect(call?.pureBuiltinName).toBe("Map.get");
+  });
+});

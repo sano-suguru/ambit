@@ -255,16 +255,16 @@ client, a `mysql2` pool, two LLM SDKs, a barrel file, pure domain logic). **This
 and it does not satisfy that target, which requires a real adopting team after three
 months. It is the fixture that makes the number measurable at all.
 
-| Figure | Before the client stubs | After the client stubs | After the runtime hooks |
-|---|---|---|---|
-| files analyzed | 9 | 9 | 16 |
-| functions extracted | 19 | 19 | **51** |
-| `unknown` rate | 47.4% (9/19) | 5.3% (1/19) | **21.6% (11/51)** |
-| `boundary` rate | 0.0% | 0.0% | 0.0% |
-| call sites | 31 — resolved 12, stub 1, pure 9, unresolved 9 | 31 — resolved 12, stub 8, pure 9, mutation 1, unresolved 1 | 74 — resolved 31, stub 10, pure 26, mutation 2, unresolved 5 |
-| unresolved by reason | `builtin-method` 1, `unresolved-symbol` 8 | `ambient-declaration` 1 | `builtin-method` 1, `ambient-declaration` 4 |
-| top unresolved names | `Map.set` 1 | (none) | `ReadonlyArray.filter` 1 |
-| exit code | 0 | 0 | 0 |
+| Figure | Before the client stubs | After the client stubs | After the runtime hooks | After factory clients are named |
+|---|---|---|---|---|
+| files analyzed | 9 | 9 | 16 | 16 |
+| functions extracted | 19 | 19 | **51** | **53** |
+| `unknown` rate | 47.4% (9/19) | 5.3% (1/19) | **21.6% (11/51)** | **1.9% (1/53)** |
+| `boundary` rate | 0.0% | 0.0% | 0.0% | 0.0% |
+| call sites | 31 — resolved 12, stub 1, pure 9, unresolved 9 | 31 — resolved 12, stub 8, pure 9, mutation 1, unresolved 1 | 74 — resolved 31, stub 10, pure 26, mutation 2, unresolved 5 | 77 — resolved 33, stub 13, pure 28, mutation 2, unresolved 1 |
+| unresolved by reason | `builtin-method` 1, `unresolved-symbol` 8 | `ambient-declaration` 1 | `builtin-method` 1, `ambient-declaration` 4 | `ambient-declaration` 1 |
+| top unresolved names | `Map.set` 1 | (none) | `ReadonlyArray.filter` 1 | (none) |
+| exit code | 0 | 0 | 0 | 0 |
 
 The middle column is where the fixture stood at 19 functions: the client
 stubs took it from 47.4% to 10.5%, and DESIGN.md §4.2's local-mutation rule
@@ -272,16 +272,73 @@ then took it to 5.3% (1/19), because `putRate` in `src/lib/cache.ts` writes
 into a module-scope `Map` and is now inferred as `state_write` rather than
 left `unknown`.
 
-The right-hand column is the fixture after `mysql2` and `@anthropic-ai/sdk`
+The third column is the fixture after `mysql2` and `@anthropic-ai/sdk`
 were added — a second database client and a second LLM SDK, plus the pure
 domain code and the routes that use them — which is what makes 51 functions
 a realistic backend rather than a padded one. The rate went **up**, from 5.3%
-to 21.6%, and the reason is the point of recording it: `mysql2` hands out its
-pool through the `createPool` factory, and a factory result has no
-module-qualified name for a stub table to key on (see
-`docs/limitations.md`, "The database and LLM client table": a client
-"returned by a factory is not matched and reports `unknown`"). The fixture uses the factory
-because that is how the package is actually used.
+to 21.6%, and the reason it was recorded rather than smoothed over is that it
+named the next thing to fix: `mysql2` hands out its pool through the
+`createPool` factory, and a factory result had no module-qualified name for a
+stub table to key on. The fixture uses the factory because that is how the
+package is actually used.
+
+The right-hand column is that gap closed. Measured against commit `186b819`,
+which is the immediately preceding state and not the third column's tree (two
+later changes had already taken it to 18.9% on 53 functions):
+
+| | before (`186b819`) | after |
+|---|---|---|
+| `unknown` functions | 10 / 53 (18.9%) | **1 / 53 (1.9%)** |
+| unresolved call sites | 4 | **1** |
+| unresolved by reason | `ambient-declaration` 4 | `ambient-declaration` 1 |
+| `top-unresolved-names` | (none — no name could be built) | (none — one unnameable call left) |
+| stub call sites | 10 | **13** |
+
+Nine of the ten `unknown` functions were the audit chain, and all nine came
+from three call sites: `auditPool.query` and `auditPool.execute` in
+`src/lib/mysql.ts`. A receiver bound by `const` to a call of an *imported*
+function is now named by the module specifier the source wrote and the type
+the callee is declared to return — `mysql2/promise.Pool` — which is the same
+key shape `new Pool(...)` already produced for `pg`, reached by the other of
+the two ways a package hands out a client. `src/stubs/data-clients.ts` gained
+the four `mysql2/promise` rows those names need, read off
+`mysql2@3.15.3/promise.d.ts`. Only that entry point: the callback API's
+`createPool` is declared to return `BasePool`, not `Pool`
+(`mysql2@3.15.3/typings/mysql/index.d.ts`), so no row covers it and it stays
+`unknown` — recorded in `docs/limitations.md` rather than guessed at.
+
+Naming is not resolving. Before the table rows were added, the three sites
+were still `unresolved` — they had only stopped being anonymous, appearing as
+`mysql2/promise.Pool.query=2, mysql2/promise.Pool.execute=1` in
+`top-unresolved-names`. A package no bundled table covers gets the same
+treatment: a name, and still `unknown`.
+
+**The change found a wrong contract in the fixture itself.** `writeAudit`
+declared `@effects db_write`; it calls `auditSize()`, which runs `SELECT
+COUNT(*) AS total FROM audit`. The contract was green only because the whole
+chain was `unknown` and nothing could contradict it. `check` now reports
+`AMB-E001` for it, and the fixture's contract was corrected to `db_write,
+db_read` (and the route's `ambitHandler` grant to match). That is the shape of
+the product claim: the authority a route holds becomes visible, and
+under-declaration stops being invisible.
+
+**The analyzer change did not read as an authority increase.** `diff HEAD
+test/fixtures/realistic-api` against the tree that made it reported the nine
+audit functions as *unchanged* and named only two increases, both of them the
+`writeAudit` contract correction above. Both sides are analyzed by the running
+Ambit, so a change in the analysis cancels out — which is the property that
+lets the analysis keep improving without the CI gate firing at everyone. `diff
+HEAD src`, the shape CI runs, reported no increase at all and listed the three
+new helpers under the newly-unresolved section, which exits 0.
+
+**The corpus did not move, and that is expected.** `node
+scripts/bench-corpus.ts` reports the same median, 52.6%, and the same
+per-target rates as the table in "Real third-party code" below. The corpus
+deliberately installs no dependencies, so a factory's return type is not
+declared anywhere the checker can read — and the five targets are libraries
+and frameworks, none of which holds a database client. The mechanism is
+verified against real third-party *typings* (`mysql2@3.15.3`) rather than
+against corpus code.
 
 Five entries were added to the pure-builtin allowlist in the same
 measurement — `ReadonlyArray.filter`, `ReadonlyArray.every`, `Math.max`,
@@ -289,25 +346,32 @@ measurement — `ReadonlyArray.filter`, `ReadonlyArray.every`, `Math.max`,
 there. Unresolved call sites went 10 → 5 and the rate 29.4% → 21.6%. The
 allowlist now holds 36 methods.
 
-**All eleven remaining `unknown` functions, accounted for:**
+**The one remaining `unknown` function, accounted for:**
 
 | Function | File | Why |
 |---|---|---|
-| `recentAuditRows` | `src/lib/mysql.ts` | calls `auditPool.query`, and `auditPool` came from `createPool(…)`; a factory result has no module-qualified name (`ambient-declaration`) |
-| `appendAuditRow` | `src/lib/mysql.ts` | same, through `auditPool.execute` |
-| `countAuditRows` | `src/lib/mysql.ts` | same, through `auditPool.query` |
-| `auditTrail` | `src/lib/audit.ts` | calls `recentAuditRows`, which declares no contract, so the unknown propagates |
-| `record` | `src/lib/audit.ts` | same, through `appendAuditRow` |
-| `auditSize` | `src/lib/audit.ts` | same, through `countAuditRows` |
-| `listAudit` | `src/routes/audit.ts` | reaches the same unresolved call through the undeclared audit layer (`AMB-W001`, `AMB-W003`) |
-| `writeAudit` | `src/routes/audit.ts` | same |
-| `reviewAudit` | `src/routes/audit.ts` | same |
 | `fetchRate` | `src/lib/rates.ts` | `(await fetch(url)).json()` — the method is declared on a type from a `.d.ts`, and the pure-builtin allowlist covers only the compiler's own lib, so the call cannot be named (`ambient-declaration`) |
-| `backorderedSkus` | `src/domain/inventory.ts` | `levels.filter(isBackordered)` passes a callback *by reference*; DESIGN.md §4.2 rule 4 refuses a pure verdict from the method name alone even though `ReadonlyArray.filter` is on the allowlist (`builtin-method`) |
 
-That accounts for the five unresolved call sites too: three `mysql2` calls
-and one `.json()` are the four `ambient-declaration`s, and the callback-by-
-reference `filter` is the one `builtin-method`.
+That is also the one unresolved call site. It is deliberate rather than
+pending work: `docs/limitations.md` records that `Body.json` / `Response.json`
+are left `unknown` because a `Response` body can be a socket, so the name
+would not settle the effect even if one were built.
+
+The nine that went, and what each now carries, all of it read back out of
+`--format json`'s authority records rather than asserted:
+
+| Function | File | Now |
+|---|---|---|
+| `recentAuditRows` | `src/lib/mysql.ts` | `db_read` — `mysql2/promise.Pool.query` on a literal `SELECT` |
+| `appendAuditRow` | `src/lib/mysql.ts` | `db_write` — `mysql2/promise.Pool.execute` on a literal `INSERT` |
+| `countAuditRows` | `src/lib/mysql.ts` | `db_read` — `mysql2/promise.Pool.query` on a literal `SELECT COUNT(*)` |
+| `auditTrail` / `record` / `auditSize` | `src/lib/audit.ts` | inherited from the three above, witness path one hop long |
+| `listAudit` / `writeAudit` / `reviewAudit` | `src/routes/audit.ts` | inherited two hops, each `paths[]` entry naming the operation and the file and line it sits on |
+
+The direction came from the statement, not from the method name: the same
+`Pool.execute` handed something the source does not fix contributes both
+`db_read` and `db_write`, which `test/e2e.realistic.test.ts` asserts
+separately from the literal case.
 
 Functions that *call* an unknown function but declare their own contract —
 `summarizeUsers` calling `fetchRate`, for one — are not themselves `unknown`:
@@ -333,6 +397,17 @@ of `unknown` in the fixture.
 | `diff HEAD src`, five consecutive runs, 2026-09-10 (same tree, two analyses) | 2.56 / 2.06 / 1.99 / 1.83 / 1.97 s |
 | `check src`, five consecutive runs, 2026-09-10 after the approval ledger (39 files, 302 functions) | 1.11 / 1.07 / 1.09 / 1.08 / 1.10 s |
 | `diff HEAD src`, five consecutive runs, 2026-09-10 after the approval ledger (same tree, two analyses, one `git diff`) | 1.86 / 1.98 / 1.94 / 1.87 / 1.89 s |
+| `check test/fixtures/realistic-api`, five runs, 2026-09-11, before naming factory clients | 0.46 / 0.40 / 0.41 / 0.40 / 0.41 s |
+| `check test/fixtures/realistic-api`, five runs, 2026-09-11, after | 0.70 / 0.62 / 0.42 / 0.41 / 0.40 s |
+
+The last pair was measured back to back in one session, the "before" side in a
+`git worktree` of `186b819` sharing this tree's `node_modules`, because the
+rows above it were taken on other days and cannot be compared against. The two
+warm figures are the same; the extra `getTypeAtLocation` the receiver rule
+costs is below what this measurement can see. `check src` was measured the same
+way and is likewise indistinguishable — 1.26–1.37 s after against 1.52–1.78 s
+before, which is the machine's noise floor, not a speedup, and no claim is made
+from it.
 
 The backend's share of that is now measured separately (the M0.5 section
 above): 426 ms of program construction plus 110 ms of walking, on the same
@@ -466,6 +541,16 @@ added) and `check test/fixtures/realistic-api --coverage` from 20.8% to
 **18.9%** (10/53). (An earlier revision of this line read 37.3% (117/314); that
 was recorded before the last three helpers landed and does not reproduce at the
 commit that wrote it. The number above is what `check src --coverage` prints.)
+
+Naming factory-created clients left the corpus median at 52.6% and every
+per-target rate unchanged — see "Adopting-team-equivalent code" above for why
+this corpus cannot show the change. On `check src --coverage` it reads 38.1%
+(123/323): the three helpers it added are themselves undeclared functions
+calling the TypeScript API, so the whole movement is +25 call sites,
++15 `external-module`, and +3 functions of its own code. The `builtin-method`
+count held at 13 and `pure` went 560 → 561, which is the counter that would
+have fallen had the new receiver name taken anything off
+`src/stubs/pure-builtins.ts`.
 
 ### Why the corpus does not install its dependencies
 
@@ -1016,7 +1101,7 @@ version's API: the direct API confirmation was done against 7.0.2.
 | Acceptance | conformance tests for the planned hook targets; contract-to-handler mapping; 50 bundled stub packages |
 | Implemented | `@capabilities` narrowing (static, crosses undeclared functions, target globs), the static half of §4.4's dual enforcement for literal HTTP targets (`AMB-E009`), a literal `withAmbit` / `ambitHandler` `spec` read as the handler's own `@capabilities` / `@budget` declaration, with the source-level agreement check kept for a pair that is written twice — the capability set (`AMB-E010`) and the budget (`AMB-E011`), each half judged on its own (`AMB-W004` for a half the source does not fix), `@entrypoint` warning, `@boundary` with mandatory reason and separate coverage accounting, `@budget` parsing/validation, runtime `withAmbit` + `timeMs` enforcement + `runtime.unscoped`, four capability hooks with install/restore — `globalThis.fetch`, `node:fs`/`node:fs/promises`, `node:child_process`, and `pg` (`Pool`/`Client.query`) — every decision recorded on the context's audit trail, `db_read`/`db_write`/`llm` stubs for `pg`/`mysql2`/Prisma/OpenAI/Anthropic, two framework adapters — `ambit-ts/runtime/hono`'s `ambitHandler` and `ambit-ts/runtime/next`'s `ambitRoute`, each registering a route's contract explicitly and establishing the context for the handler and its request decoder |
 | Evidence | `test/contracts.test.ts` (41 — the wrapper block compares `withAmbit`, `ambitHandler` and `ambitRoute` registrations against the same handlers' JSDoc), `test/runtime.test.ts` (in-process, 27 — includes the fs, `child_process` and `pg` hooks and their restores), `test/runtime.hono.test.ts` (7 — the adapter driven through Hono itself), `test/runtime.next.test.ts` (10 — the Route Handler called the way Next.js calls it, with a real `NextRequest`; the fetch, `node:fs` and `node:child_process` denials each assert the operation was never reached), `test/e2e.next-app.test.ts` (5 — an `app/**/route.ts` fixture checked end to end and type-checked with nothing installed), `test/e2e.runtime.test.ts` (13 — real socket, real files, a real child process, a real `pg@8` client and a real Hono server, all through the installed package), `test/e2e.install.test.ts` (11 — includes the `ambit-ts/runtime/hono` subpath resolving after `npm install`, `withAmbit` / `ambitHandler` / `ambitRoute` specs read as declarations through the installed package's own specifiers, and README's own `withAmbit`/`ambitHandler`/`ambitRoute` examples plus its `instrumentation.ts` snippet type-checking against the installed package, with `next@16` installed so `NextRequest` resolves for real), `test/e2e.realistic.test.ts` (19 — the six agent-accident scenarios, the `AMB-E009`/`AMB-E005` overlap, and the fixture type-checking with nothing installed), `test/stubs.data-clients.test.ts`, `test/stubs.http-capabilities.test.ts` |
-| Outstanding | **`fetch`, `node:fs`, `node:child_process` and `pg` are hooked; nothing else is.** `node:http`/`https`/`net`, `mysql2`/Prisma/Drizzle/MongoDB, OpenAI/Anthropic/Vercel AI — no runtime hook, so calling them is neither blocked nor recorded. The builtin hooks cover named ESM imports only when installed from a preload (`docs/limitations.md`), and the `pg` hook is verified against `pg@8` only. **`costUsd` and `llmCalls` are not enforced**; nothing increments them. **Two framework adapters** — `ambit-ts/runtime/hono` (verified against `hono@4` and `@hono/node-server@1`) and `ambit-ts/runtime/next` (verified against `next@16` on the Node.js runtime, as a Route Handler function: no test starts a `next` server process). Express, BullMQ and `worker_threads` have none, and neither do Next.js Server Actions, `middleware.ts`, the Pages Router, or any route on the Edge runtime — a handler on those establishes no context, so `setUnscopedPolicy` decides what its operations do. **Contract-to-handler mapping is explicit registration** (§4.4's decision): the `spec` passed to `withAmbit`, `ambitHandler` or `ambitRoute` is a value in the module, so it reaches the running handler after a build strips the comments and after a bundler renames everything — the runtime reads no JSDoc, no symbol ID and no file path. A literal `spec` naming a handler in the same file *is* that handler's `@capabilities` / `@budget` (§4.4's "Removing the double declaration"), so the set and the budget are written once; writing the JSDoc tag as well stays legal and a disagreeing pair is still `AMB-E010` / `AMB-E011`. The two cases the `spec` cannot declare — a runtime-built list or budget, and a cross-module handler — still need the JSDoc, and are reported as uncompared (`AMB-W004`). The cross-module case is what §12's "Mapping contracts to handlers" (3) still holds. An adapter covers only the route it wraps: Hono's `app.use` middleware and Next.js's `middleware.ts` both run outside the context (`docs/limitations.md`). **Only HTTP targets are read from source** — no `db:` capability is derived from SQL (§4.4's caveat). **No `@budget` loop-pattern warnings.** Bundled stubs: 52 call entries across 9 namespaces (`fetch`, `globalThis`, `undici`, `node:http`, `node:https`, `node:net`, `node:fs`, `node:fs/promises`, `node:child_process`), 43 constructor entries, 36 pure-builtin methods, 19 in-place-mutation methods, 35 database/LLM client rules across 5 packages (`pg`, `mysql2`, `@prisma/client`, `openai`, `@anthropic-ai/sdk`), and 7 HTTP capability rules — **not** 50 packages. All nine effects now have at least one bundled source. |
+| Outstanding | **`fetch`, `node:fs`, `node:child_process` and `pg` are hooked; nothing else is.** `node:http`/`https`/`net`, `mysql2`/Prisma/Drizzle/MongoDB, OpenAI/Anthropic/Vercel AI — no runtime hook, so calling them is neither blocked nor recorded. The builtin hooks cover named ESM imports only when installed from a preload (`docs/limitations.md`), and the `pg` hook is verified against `pg@8` only. **`costUsd` and `llmCalls` are not enforced**; nothing increments them. **Two framework adapters** — `ambit-ts/runtime/hono` (verified against `hono@4` and `@hono/node-server@1`) and `ambit-ts/runtime/next` (verified against `next@16` on the Node.js runtime, as a Route Handler function: no test starts a `next` server process). Express, BullMQ and `worker_threads` have none, and neither do Next.js Server Actions, `middleware.ts`, the Pages Router, or any route on the Edge runtime — a handler on those establishes no context, so `setUnscopedPolicy` decides what its operations do. **Contract-to-handler mapping is explicit registration** (§4.4's decision): the `spec` passed to `withAmbit`, `ambitHandler` or `ambitRoute` is a value in the module, so it reaches the running handler after a build strips the comments and after a bundler renames everything — the runtime reads no JSDoc, no symbol ID and no file path. A literal `spec` naming a handler in the same file *is* that handler's `@capabilities` / `@budget` (§4.4's "Removing the double declaration"), so the set and the budget are written once; writing the JSDoc tag as well stays legal and a disagreeing pair is still `AMB-E010` / `AMB-E011`. The two cases the `spec` cannot declare — a runtime-built list or budget, and a cross-module handler — still need the JSDoc, and are reported as uncompared (`AMB-W004`). The cross-module case is what §12's "Mapping contracts to handlers" (3) still holds. An adapter covers only the route it wraps: Hono's `app.use` middleware and Next.js's `middleware.ts` both run outside the context (`docs/limitations.md`). **Only HTTP targets are read from source** — no `db:` capability is derived from SQL (§4.4's caveat). **No `@budget` loop-pattern warnings.** Bundled stubs: 52 call entries across 9 namespaces (`fetch`, `globalThis`, `undici`, `node:http`, `node:https`, `node:net`, `node:fs`, `node:fs/promises`, `node:child_process`), 43 constructor entries, 36 pure-builtin methods, 19 in-place-mutation methods, 39 database/LLM client rules across 5 packages (`pg`, `mysql2`, `@prisma/client`, `openai`, `@anthropic-ai/sdk`), and 7 HTTP capability rules — **not** 50 packages. All nine effects now have at least one bundled source. |
 
 ### M3 — concrete fix patches, agent protocol
 
