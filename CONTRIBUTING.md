@@ -23,8 +23,12 @@ node src/cli/main.ts check src --coverage
 node scripts/bench-corpus.ts
 ```
 
-Quote numbers you measured; never predict them. Measured numbers go in
-[`docs/status.md`](docs/status.md) and nowhere else.
+Quote numbers you measured; never predict them, and give every number one
+home. **A current summary metric has exactly one canonical home:
+[`docs/status.md`](docs/status.md).** The runs behind it — the raw output, the
+per-change history, a spike — go in [`docs/measurements/`](docs/measurements/),
+dated, and are cited from `docs/status.md` rather than restated in it. A number
+that appears in two files will eventually disagree with itself.
 
 ## How a design change is made
 
@@ -59,8 +63,8 @@ Duplication is the failure mode, not omission. One fact, one home.
 | `docs/adr/` | **Why** a design is the one in the specification |
 | `docs/limitations.md` | What Ambit cannot do today, for someone deciding whether to adopt |
 | `docs/analysis-limitations.md` | The same, at the AST corner-case level, for whoever maintains the checker |
-| `docs/status.md` | The current measured numbers, and the verdict they support |
-| `docs/measurements/` | The measurement runs behind those numbers, dated |
+| `docs/status.md` | The canonical home of every current summary metric, and the verdict they support |
+| `docs/measurements/` | The runs behind those metrics — raw output, per-change history, spikes — dated, and never updated in place |
 | `docs/open-questions.md` | What is undecided |
 | `ROADMAP.md` | What has to be proved next |
 | `docs/diagnostics/` | The reference for each diagnostic code |

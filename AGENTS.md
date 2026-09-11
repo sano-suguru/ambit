@@ -31,11 +31,15 @@ section explains them.
 5. **Never weaken or delete a test to make a change pass, and never pin a
    defect with one.** A test asserting wrong behavior makes the defect read
    as the specification.
-6. **Fix a defect you root-caused in code you are touching.** Recording it
-   instead is not a deliverable. If the write-up would be longer than the
-   patch, write the patch.
-7. **Never renumber a `docs/DESIGN.md` chapter.** `src/` and `test/` cite them
-   by number in the hundreds.
+6. **Fix a defect you root-caused when it causes, blocks, or falls inside the
+   change you are already making.** There, recording it instead is not a
+   deliverable: if the write-up would be longer than the patch, write the
+   patch. A defect *outside* that scope is recorded in one line and left —
+   abandoning the current goal to chase it is its own failure.
+7. **Do not renumber a `docs/DESIGN.md` chapter without migrating every
+   reference in the same change.** `src/` and `test/` cite them by number in
+   the hundreds, so the numbers are effectively an API; leaving a heading
+   behind as a pointer is the cheaper move, but it is a choice, not a law.
 8. **Keep the compiler out of `src/core/` and `src/stubs/`.** Only
    `src/checker/backend/legacy-ts.ts` may import `typescript`.
 9. **Do not add speculative architecture.** "May be useful later" is not a
@@ -105,22 +109,28 @@ leave the tree in a state where every claim it makes is true and verified.
 
 ### Defects
 
-None of the above licenses leaving a known defect in place. A defect you
-have root-caused, in code you are already touching, is in scope. Fix it.
+None of the above licenses leaving a known defect in place **inside the
+change you are making**. A defect you have root-caused, that causes, blocks,
+or falls within that change, is in scope. Fix it.
 
-Recording a fixable defect instead of fixing it is not a deliverable. It
+Recording such a defect instead of fixing it is not a deliverable. It
 converts a solvable problem into a permanent one, and writing up why it
 was not fixed usually costs more than the fix. If the write-up is longer
 than the patch would have been, write the patch.
 
-Deferring needs a reason that survives being said out loud. There is no
-one else to escalate to on a solo project, so the only honest reasons are
-that the fix turns on a design question with no settled answer — one that
-needs its own investigation, which is what `docs/open-questions.md` is for —
-or that it is genuinely a different problem from the one in front of you.
-"Out of scope" is a conclusion, not a reason. When you do defer, the
-record is one line: an issue, or a bullet in `docs/open-questions.md`.
-Never an essay.
+A defect **outside** that scope is a different matter, and the rule is the
+opposite one: record it in a line and leave it. A goal abandoned partway to
+chase an unrelated bug is its own failure, and finishing the change in front
+of you is what lets the next one start from a known state.
+
+Deferring *inside* the scope needs a reason that survives being said out
+loud. There is no one else to escalate to on a solo project, so the only
+honest reason is that the fix turns on a design question with no settled
+answer — one that needs its own investigation, which is what
+`docs/open-questions.md` is for. "Out of scope" is a conclusion, not a
+reason; if it is genuinely out of scope, the paragraph above already covers
+it. When you do defer, the record is one line: an issue, or a bullet in
+`docs/open-questions.md`. Never an essay.
 
 ## Architecture
 
@@ -290,8 +300,9 @@ record, which `docs/DESIGN.md` links to in one line. Test the split the same way
 as the specification/status one: a sentence that would still be true if all the
 code were discarded **and** that a reader has to know to use Ambit correctly
 belongs in `docs/DESIGN.md`; a sentence that only explains how the project
-arrived there belongs in the ADR. Never renumber a `docs/DESIGN.md` chapter —
-`src/` and `test/` cite them by number in the hundreds.
+arrived there belongs in the ADR. Do not renumber a `docs/DESIGN.md` chapter
+without migrating every reference in the same change — `src/` and `test/` cite
+them by number in the hundreds.
 
 RFC procedure (`docs/DESIGN.md` §9) applies from 1.0, or from the first
 external adopter, whichever comes first (§9.1) — **not** from the first npm

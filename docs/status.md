@@ -27,9 +27,9 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | Metric | Current | Target |
 |---|---:|---:|
 | **External adopters** | **0** | **1** |
-| Serious incidents prevented, observed | 0 | > 0 |
-| `unknown` rate, real third-party code (corpus median, 4,200 functions) | 52.6% | 30% |
-| `unknown` rate, adopting-team-equivalent fixture (`realistic-api`) | 1.9% (1/53) | 30% |
+| Authority increases an external team rejected or explicitly approved | 0 | > 0 |
+| `unknown` rate, real third-party code (corpus median, 4,200 functions) | 52.6% | lower — no target (see below) |
+| `unknown` rate, adopting-team-equivalent fixture (`realistic-api`) | 1.9% (1/53) | no target (see below) |
 | `unknown` rate, Ambit's own source (`check src`) | 38.1% (123/323) | — |
 | Tests | 496 passing, 31 files | green |
 | `tsc --noEmit` / `biome ci .` | pass / pass | pass |
@@ -39,11 +39,19 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | Runtime hooks | 4 (`fetch`, `node:fs`, `node:child_process`, `pg`) | — |
 | Framework adapters | 2 (Hono, Next.js App Router) | — |
 
-The two `unknown` targets are not comparable to their rows. `ROADMAP.md`'s 30%
-is **an adopting team's own code after three months**; no target in the corpus
-is an adopting team, and `realistic-api` is a fixture written in this
-repository. Neither number satisfies the metric, and the fixture's 1.9% least
-of all — it says the analysis handles the shapes it was given.
+**None of the three `unknown` rows has a target, and that is deliberate.**
+`ROADMAP.md`'s 30% KPI is about **an adopting team's own code, with its own
+`node_modules`, three months in.** No row here is that population: the corpus is
+five repositories measured with no dependencies installed, `realistic-api` is a
+fixture written in this repository, and `src` is Ambit's own connection layer.
+Driving any of them to 30% would not satisfy the KPI. They are read as movement,
+not as progress against it — the fixture's 1.9% least of all, since it says only
+that the analysis handles the shapes it was given.
+
+The second row replaced "serious incidents prevented". An incident that did not
+happen is a counterfactual and cannot be observed; an authority increase that an
+external team actually rejected or approved can be. Incident reduction stays
+where it is measurable, as a Phase 1 exit metric in `ROADMAP.md`.
 
 ### Baseline commands
 
