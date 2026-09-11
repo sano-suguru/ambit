@@ -36,64 +36,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import {
-  legacyTsBackend,
-  loadConfig,
-  resolveConfig,
-  summarizeExtractedFiles,
-} from "../src/checker/index.ts";
-import { analyze } from "../src/cli/analyze.ts";
-import type { TsBackend } from "../src/core/index.ts";
-import { compareFacts, type ShadowReport } from "./shadow/compare.ts";
-import { NOT_PORTED, nativeTs7Backend } from "./shadow/native-ts7-backend.ts";
-import { buildFacts, type ShadowFacts } from "./shadow/normalize.ts";
+import { nativeTs7Backend } from "./shadow/native-ts7-backend.ts";
 import { renderSummary } from "./shadow/report.ts";
-
-interface RunOutcome {
-  readonly facts?: ShadowFacts;
-  readonly error?: { readonly backend: string; readonly phase: string; readonly message: string };
-}
-
-/**
- * One backend through the whole pipeline, timed.
- *
- * The extraction is run twice — once for the raw facts, once inside
- * `analyze()` — because `analyze()` owns the config loading and the diagnostic
- * assembly, and reaching inside it to reuse one extraction would mean the
- * shadow run and a real `ambit check` no longer take the same path.
- *
- * Only the `analyze()` call is timed. The facts extraction is the shadow
- * harness's own cost and is not part of what `ambit check` does, so including
- * it would report a duration no product path pays.
- */
-async function run(label: string, backend: TsBackend, dir: string): Promise<RunOutcome> {
-  try {
-    const project = await backend.extractProject(dir);
-    const loaded = await loadConfig(dir);
-    const config = loaded ? resolveConfig(loaded, dir) : undefined;
-    const summaries = summarizeExtractedFiles(project.files, config);
-    const started = performance.now();
-    const analysis = await analyze(dir, { backend });
-    const durationMs = performance.now() - started;
-    return {
-      facts: buildFacts({
-        backend: { name: backend.name, version: backend.version },
-        durationMs,
-        project,
-        summaries,
-        analysis,
-      }),
-    };
-  } catch (error) {
-    return {
-      error: {
-        backend: label,
-        phase: "analyze",
-        message: error instanceof Error ? error.message : String(error),
-      },
-    };
-  }
-}
+import { compareRoot } from "./shadow/run-root.ts";
 
 function parseArgs(argv: readonly string[]): {
   readonly dir: string;
@@ -127,19 +72,14 @@ function parseArgs(argv: readonly string[]): {
 
 async function main(): Promise<void> {
   const { dir, jsonPath, selfCheck } = parseArgs(process.argv.slice(2));
-  const shadowBackend = selfCheck ? legacyTsBackend : nativeTs7Backend;
 
   // Fails loudly here rather than producing a report with nothing in it.
-  if (!selfCheck) {
-    const probe = shadowBackend.version;
-    if (!probe) throw new Error("the native compiler reported no version");
+  if (!selfCheck && !nativeTs7Backend.version) {
+    throw new Error("the native compiler reported no version");
   }
 
-  const authorityRun = await run("authority", legacyTsBackend, dir);
-  const shadowRun = await run("shadow", shadowBackend, dir);
-
-  const errors = [authorityRun.error, shadowRun.error].filter((e) => e !== undefined);
-  if (!authorityRun.facts || !shadowRun.facts) {
+  const { report, errors } = await compareRoot(dir, selfCheck);
+  if (!report) {
     for (const error of errors) {
       console.error(`${error.backend} failed during ${error.phase}: ${error.message}`);
     }
@@ -147,14 +87,6 @@ async function main(): Promise<void> {
     process.exitCode = 2;
     return;
   }
-
-  const report: ShadowReport = compareFacts({
-    root: dir,
-    authority: authorityRun.facts,
-    shadow: shadowRun.facts,
-    notPorted: selfCheck ? [] : NOT_PORTED,
-    errors,
-  });
 
   if (jsonPath) {
     const absolute = path.resolve(jsonPath);

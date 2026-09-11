@@ -1,0 +1,158 @@
+{
+  "schema": "ambit-shadow-baseline/1",
+  "notPorted": [
+    "resolution:literal-receiver",
+    "resolution:instance-member",
+    "project:no-tsconfig-fallback"
+  ],
+  "roots": {
+    "src": {
+      "divergences": 7,
+      "highRisk": 4,
+      "unclassified": 3,
+      "byClassification": {
+        "not-yet-ported": 4,
+        "unclassified": 3
+      },
+      "authorityParity": 1,
+      "calleeResolutionParity": 0.9979,
+      "unknownRateDelta": 0,
+      "decisionsAgree": true
+    },
+    "test/fixtures/backend-conformance": {
+      "divergences": 7,
+      "highRisk": 4,
+      "unclassified": 0,
+      "byClassification": {
+        "not-yet-ported": 7
+      },
+      "authorityParity": 0.9792,
+      "calleeResolutionParity": 0.9737,
+      "unknownRateDelta": 0.0208,
+      "decisionsAgree": true
+    },
+    "test/fixtures/backend-smoke": {
+      "divergences": 27,
+      "highRisk": 13,
+      "unclassified": 6,
+      "byClassification": {
+        "not-yet-ported": 21,
+        "unclassified": 6
+      },
+      "authorityParity": 0.9333,
+      "calleeResolutionParity": 0.9333,
+      "unknownRateDelta": 0.0667,
+      "decisionsAgree": true
+    },
+    "test/fixtures/cross-module": {
+      "divergences": 0,
+      "highRisk": 0,
+      "unclassified": 0,
+      "byClassification": {},
+      "authorityParity": 1,
+      "calleeResolutionParity": 1,
+      "unknownRateDelta": 0,
+      "decisionsAgree": true
+    },
+    "test/fixtures/held-receiver": {
+      "divergences": 0,
+      "highRisk": 0,
+      "unclassified": 0,
+      "byClassification": {},
+      "authorityParity": 1,
+      "calleeResolutionParity": 1,
+      "unknownRateDelta": 0,
+      "decisionsAgree": true
+    },
+    "test/fixtures/factory-receiver": {
+      "divergences": 0,
+      "highRisk": 0,
+      "unclassified": 0,
+      "byClassification": {},
+      "authorityParity": 1,
+      "calleeResolutionParity": 1,
+      "unknownRateDelta": 0,
+      "decisionsAgree": true
+    },
+    "test/fixtures/construction": {
+      "divergences": 0,
+      "highRisk": 0,
+      "unclassified": 0,
+      "byClassification": {},
+      "authorityParity": 1,
+      "calleeResolutionParity": 1,
+      "unknownRateDelta": 0,
+      "decisionsAgree": true
+    },
+    "test/fixtures/http-clients": {
+      "divergences": 0,
+      "highRisk": 0,
+      "unclassified": 0,
+      "byClassification": {},
+      "authorityParity": 1,
+      "calleeResolutionParity": 1,
+      "unknownRateDelta": 0,
+      "decisionsAgree": true
+    },
+    "test/fixtures/wrappers": {
+      "divergences": 0,
+      "highRisk": 0,
+      "unclassified": 0,
+      "byClassification": {},
+      "authorityParity": 1,
+      "calleeResolutionParity": 1,
+      "unknownRateDelta": 0,
+      "decisionsAgree": true
+    },
+    "test/fixtures/next-app": {
+      "divergences": 0,
+      "highRisk": 0,
+      "unclassified": 0,
+      "byClassification": {},
+      "authorityParity": 1,
+      "calleeResolutionParity": 1,
+      "unknownRateDelta": 0,
+      "decisionsAgree": true
+    },
+    "test/fixtures/realistic-api": {
+      "divergences": 0,
+      "highRisk": 0,
+      "unclassified": 0,
+      "byClassification": {},
+      "authorityParity": 1,
+      "calleeResolutionParity": 1,
+      "unknownRateDelta": 0,
+      "decisionsAgree": true
+    },
+    "test/fixtures/propagation": {
+      "divergences": 0,
+      "highRisk": 0,
+      "unclassified": 0,
+      "byClassification": {},
+      "authorityParity": 1,
+      "calleeResolutionParity": 1,
+      "unknownRateDelta": 0,
+      "decisionsAgree": true
+    },
+    "test/fixtures/contracts": {
+      "divergences": 0,
+      "highRisk": 0,
+      "unclassified": 0,
+      "byClassification": {},
+      "authorityParity": 1,
+      "calleeResolutionParity": 1,
+      "unknownRateDelta": 0,
+      "decisionsAgree": true
+    },
+    "test/fixtures/mutation": {
+      "divergences": 0,
+      "highRisk": 0,
+      "unclassified": 0,
+      "byClassification": {},
+      "authorityParity": 1,
+      "calleeResolutionParity": 1,
+      "unknownRateDelta": 0,
+      "decisionsAgree": true
+    }
+  }
+}

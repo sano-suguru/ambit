@@ -62,6 +62,7 @@ import { isOnExceed, symbolId } from "../../src/core/index.ts";
 import { constructorStubKey } from "../../src/stubs/constructors.ts";
 import { isFirstArgumentMutator, isMutatingBuiltin } from "../../src/stubs/mutating-builtins.ts";
 import { loadAst, loadAstIs, loadSyncApi, nativeVersion } from "../m05-probe/native-compiler.ts";
+import { locationKey } from "./normalize.ts";
 
 // biome-ignore lint/suspicious/noExplicitAny: the compiler's own types are not available here
 type Node = any;
@@ -114,7 +115,24 @@ export const nativeTs7Backend: TsBackend = {
 
 /** @effects fs_read */
 async function extractProject(rootDir: string): Promise<ExtractedProject> {
-  return (await extractProjectTimed(rootDir, false)).project;
+  const { project, declined } = await extractProjectTimed(rootDir, false);
+  lastDeclined = declined;
+  return project;
+}
+
+let lastDeclined: DeclinedReasons = new Map();
+
+/**
+ * The {@link DeclinedReasons} of the most recent `extractProject` call.
+ *
+ * A side channel rather than a field on `ExtractedProject`, because that type
+ * is `src/core`'s and belongs to the product: a shadow comparison does not get
+ * to widen the backend contract to carry its own diagnostics. One shadow run
+ * is one extraction, so "the most recent" is unambiguous here — and the caller
+ * that reads it is three lines below the one that triggered it.
+ */
+export function lastDeclinedReasons(): DeclinedReasons {
+  return lastDeclined;
 }
 
 /**
@@ -156,10 +174,24 @@ export interface NativeExtractionProfile {
   readonly callsByMethod: ReadonlyMap<string, number>;
 }
 
+/**
+ * Why the shadow backend declined a call site, keyed by its
+ * `file:line:col-endLine:endCol`.
+ *
+ * The values are the `NOT_PORTED` codes themselves, so a consumer classifies a
+ * divergence by looking one up rather than by matching a substring of a
+ * rendered pair. That split is the point: a rendered value is written for a
+ * human to read and changes when the wording does, and a classifier that reads
+ * it will happily file a genuine regression under whichever known-gap rule its
+ * text happens to resemble.
+ */
+export type DeclinedReasons = ReadonlyMap<string, string>;
+
 export interface TimedExtraction {
   readonly project: ExtractedProject;
   /** `undefined` when profiling was not requested — never an empty profile, which would read as "nothing was asked". */
   readonly profile: NativeExtractionProfile | undefined;
+  readonly declined: DeclinedReasons;
 }
 
 /**
@@ -189,10 +221,12 @@ export async function extractProjectTimed(
     const project = api.updateSnapshot({ openProjects: [configPath] }).getProjects()[0];
     if (!project) throw new Error(`no project opened for ${configPath}`);
     const callsByMethod = profile ? new Map<string, number>() : undefined;
-    const extracted = new Extractor(c, project, absoluteRoot, callsByMethod).run();
+    const extractor = new Extractor(c, project, absoluteRoot, callsByMethod);
+    const extracted = extractor.run();
     return {
       project: extracted,
       profile: callsByMethod ? { totals: totalsOf(api), callsByMethod } : undefined,
+      declined: extractor.declined,
     };
   } finally {
     api.close();
@@ -389,6 +423,8 @@ class Extractor {
   private readonly program: Any;
   private readonly checker: Any;
   private readonly declaredNodeToId = new Map<Node, SymbolId>();
+  /** See {@link DeclinedReasons}; filled as pass 2 declines a shape it has not ported. */
+  readonly declined = new Map<string, string>();
   private readonly project: Any;
   private readonly absoluteRoot: string;
 
@@ -1248,6 +1284,7 @@ class Extractor {
       const memberId = this.objectLiteralMemberTarget(declaration);
       if (memberId) return { location, resolvedCallee: memberId };
     }
+    this.recordDeclinedShape(callee, location);
 
     const importBindingReason: UnresolvedReason | undefined =
       isAlias && !declaration ? "import-binding" : undefined;
@@ -1296,7 +1333,7 @@ class Extractor {
     }
 
     if (ambientReason === "builtin-method" && resolvedSymbol) {
-      const builtinName = this.fullyQualifiedNameOf(resolvedSymbol);
+      const builtinName = this.fullyQualifiedNameOf(resolvedSymbol, callee);
       if (builtinName) {
         const callable = this.callableArgumentsOf(node);
         const callbackByReference = callable.opaque || undefined;
@@ -1381,7 +1418,7 @@ class Extractor {
    * chain reaches a module or the global scope stops there rather than
    * inventing a prefix.
    */
-  private fullyQualifiedNameOf(symbol: Node): string | undefined {
+  private fullyQualifiedNameOf(symbol: Node, callee?: Node): string | undefined {
     const parts: string[] = [];
     let current: Node | undefined = symbol;
     for (let hops = 0; current && hops < 8; hops++) {
@@ -1390,7 +1427,68 @@ class Extractor {
       parts.unshift(name);
       current = current.getParent();
     }
-    return parts.length > 0 ? parts.join(".") : undefined;
+    if (parts.length === 0) return undefined;
+    return parts.length === 1
+      ? (this.libReceiverQualified(parts[0] as string, callee) ?? parts[0])
+      : parts.join(".");
+  }
+
+  /**
+   * `"Response.json"` where the parent chain gave only `"json"`.
+   *
+   * The lib declares `Response` as a `var` of an anonymous object type, so its
+   * static members' `getParent()` reaches a `__`-named type symbol and the
+   * walk stops one segment short — where `ts.getFullyQualifiedName` prints
+   * both. The missing segment is not cosmetic: the pure-builtin and mutating
+   * tables are keyed on the two-part name, so `json` matches no row that
+   * `Response.json` matches, and a call proven effect-free on one backend is
+   * `unknown` on the other. Measured as two high-risk divergences on
+   * `test/fixtures/next-app`.
+   *
+   * The segment is taken from the **receiver's own symbol**, never from the
+   * identifier's spelling, and only when that symbol is declared in the
+   * compiler's own lib — a local `const Response = …` names nothing here.
+   */
+  private libReceiverQualified(member: string, callee: Node | undefined): string | undefined {
+    const is = this.is;
+    if (!callee || !is.isPropertyAccessExpression(callee)) return undefined;
+    const receiver = callee.expression;
+    if (!is.isIdentifier(receiver)) return undefined;
+    const symbol = this.checker.getSymbolAtLocation(receiver);
+    const name: string | undefined = symbol?.name;
+    if (!name || name.startsWith("__")) return undefined;
+    const declaration = this.declarationsOf(symbol)[0];
+    if (!declaration) return undefined;
+    if (!this.program.isSourceFileDefaultLibrary(declaration.getSourceFile())) return undefined;
+    return `${name}.${member}`;
+  }
+
+  /**
+   * Record, in a stable code, that this call site sits on a shape `NOT_PORTED`
+   * names — so `scripts/shadow/compare.ts` can classify the resulting
+   * divergence from *data the backend produced* rather than from a substring
+   * of the rendered pair.
+   *
+   * The test is the premise of the unported rule and nothing more: a property
+   * access whose receiver is a `const` holding one object literal
+   * (`resolution:literal-receiver`) or one `new` (`resolution:instance-member`).
+   * It deliberately does not go on to find the member — that would *be* the
+   * port. Saying "this is the shape I did not implement" is a different and
+   * much cheaper claim than "here is what I would have found", and only the
+   * first one is honest for a gap.
+   */
+  private recordDeclinedShape(callee: Node, location: SourceLocation): void {
+    const is = this.is;
+    if (!is.isPropertyAccessExpression(callee) || !is.isIdentifier(callee.expression)) return;
+    const declaration = this.constInitializedVariableOf(callee.expression);
+    if (!declaration) return;
+    const initializer = unwrapTypeOnlyExpression(is, declaration.initializer);
+    const code = is.isObjectLiteralExpression(initializer)
+      ? "resolution:literal-receiver"
+      : is.isNewExpression(initializer)
+        ? "resolution:instance-member"
+        : undefined;
+    if (code) this.declined.set(locationKey(location), code);
   }
 
   private objectLiteralMemberTarget(member: Node): SymbolId | undefined {

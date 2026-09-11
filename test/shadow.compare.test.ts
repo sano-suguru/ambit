@@ -136,7 +136,16 @@ describe("a shadow backend that reports less is high-risk", () => {
     const found = report.divergences.find((d) => d.category === "authority");
     expect(found?.direction).toBe("shadow-less-authority");
     expect(found?.risk).toBe("high");
-    expect(report.highRiskCount).toBe(1);
+    // Twice, and that is the point: the same loss is visible as a propagated
+    // effect and as authority, and direction is now read off both dimensions'
+    // own values rather than only off `diffAuthority`. A rendered-string
+    // comparison called the propagated-effect half a plain `value-mismatch`
+    // at normal risk, which is the shape a real regression would have hidden
+    // in.
+    const propagated = report.divergences.find((d) => d.category === "propagated-effect");
+    expect(propagated?.direction).toBe("shadow-less-authority");
+    expect(propagated?.risk).toBe("high");
+    expect(report.highRiskCount).toBe(2);
     expect(report.authorityDiff.decreases).toBe(1);
   });
 
