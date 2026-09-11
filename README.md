@@ -1,21 +1,12 @@
 # Ambit
 
-**A contract layer that makes what AI-written TypeScript is allowed to do
-explicit, checkable, and reviewable.**
-
-An agent can widen a function's authority faster than a human can review it.
-Ambit — the range of one's authority — makes that range a declaration in the
-source, and puts every increase in it in front of a reviewer.
-
-| | |
-|---|---|
-| **Contracts** | declare a function's authority, as JSDoc on ordinary TypeScript |
-| **`ambit check`** | fails code that exceeds the contract written today |
-| **`ambit diff`** | fails a change that grants authority the base commit did not, unless an approval in the same change covers it |
+**Review changes in what AI-written TypeScript is allowed to do.**
 
 A code diff says what changed. An authority diff says what became possible.
-Both gates exist because a contract that is in the way can simply be widened,
-which is what *The accident*, below, demonstrates.
+
+An agent can widen a function's authority faster than a human can review it.
+Ambit — the range of one's authority — makes that range a contract in the
+source, checks it, and puts increases in it in front of a reviewer.
 
 Experimental, `0.x`, and not a sandbox. [What Ambit does not
 guarantee](#what-ambit-does-not-guarantee) is a section of its own, and it is
@@ -42,6 +33,17 @@ JSDoc, so the code still type-checks and runs with Ambit gone.
 
 See **[CLI and CI](#cli-and-ci)** below for the flags, the exit codes, and the
 GitHub Actions output.
+
+## Three layers
+
+- **Contracts** declare a function's authority, as JSDoc on ordinary
+  TypeScript.
+- **`ambit check`** fails code that exceeds the contract written today.
+- **`ambit diff`** fails a change that grants authority the base commit did
+  not, unless an approval in the same change covers it.
+
+The third exists because the second can be satisfied by editing the contract
+rather than the code. The next section is that, run end to end.
 
 ## The accident, and the fix that is not one
 
