@@ -197,12 +197,24 @@ describe("ambitRoute", () => {
       () => [] as const,
     );
 
+    const startedAt = Date.now();
     const error = await GET(request(), noParams()).catch((e: unknown) => e);
+    const wall = Date.now() - startedAt;
     expect(error).toBeInstanceOf(AmbitBudgetError);
     // The message carries the measurement, so the budget is timed rather than
     // merely declared.
     expect((error as Error).message).toMatch(/^budget timeMs=5 exceeded \(took \d+ms\)$/);
-    expect(Number(/took (\d+)ms/.exec((error as Error).message)?.[1])).toBeGreaterThanOrEqual(40);
+    // Checked against this call's own elapsed time, read from `Date.now()` —
+    // the same clock `withAmbit` measures on — and not against the 40 ms the
+    // handler asked `setTimeout` for. A timer is scheduled on libuv's loop
+    // clock, which is a different millisecond-resolution clock, so `Date.now()`
+    // can advance only 39 ms across a 40 ms sleep. Asserting `>= 40` pinned a
+    // guarantee the platform does not give; it passed by luck until it did not.
+    // The bound that carries the intent is that the number is *this call's*
+    // duration, which a hard-coded constant fails.
+    const took = Number(/took (\d+)ms/.exec((error as Error).message)?.[1]);
+    expect(took).toBeLessThanOrEqual(wall);
+    expect(took).toBeGreaterThanOrEqual(wall - 5);
   });
 
   it("aborts an in-flight request when the budget runs out with onExceed abort", async () => {
