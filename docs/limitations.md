@@ -121,7 +121,7 @@ Authority increased in 1 symbol:
       operation: fetch (rates.ts:4)
 ```
 
-Five things `diff` does not see, or sees differently from how a reader might
+Six things `diff` does not see, or sees differently from how a reader might
 expect:
 
 - **A function whose file git does not report as renamed reads as a deletion
@@ -142,11 +142,23 @@ expect:
 - **Gaining `unknown` is not an increase, because unknown is not authority.**
   A call the analysis cannot resolve means the effect set may be incomplete
   (DESIGN.md §4.3) — it does not mean the function acquired anything. `ambit
-  diff` reports the symbols that newly reach an unresolved call in their own
-  section and exits 0 on them alone. A range that stopped being analyzable is
-  never reported as "nothing increased here", but it does not fail a build
-  either. If that matters for a directory, `check --strict` is the tool that
-  makes an unresolved call an error.
+  diff` reports it in its own section and exits 0, in both the shapes §6.4
+  names: a symbol that stopped being resolved, and a symbol already `unknown`
+  whose body gained an operation that could not be resolved. A range that
+  stopped being analyzable is never reported as "nothing increased here", but
+  it does not fail a build either unless `diff --strict` is passed.
+- **`diff --strict` is only usable where its reports can be closed.** The three
+  ways to reduce `unknown` (§4.3) are a verifiable declaration, a stub, or
+  `@boundary`. Of those, a stub for a third-party package is Ambit's to write,
+  not yours: `ambit.config.ts` declares contracts for symbols in the tree being
+  checked, named `file#path`, and has no notation for a symbol inside
+  `node_modules`. So a codebase calling a client no bundled table covers —
+  `axios` and `got` are the measured cases — has one exit under `--strict`, and
+  it is `@boundary` on the whole function, which says more than the change that
+  triggered the report. Leave the flag off until the packages you call are
+  covered; the report is there at exit 0 either way. Which packages are covered
+  is `src/stubs/`, and a name `check --coverage` puts at the top of its
+  unresolved histogram is the request worth filing.
 - **A symbol with no declaration path never appears at all.** A function
   Ambit could not extract — the `skipped` count in `--coverage`, and the
   symbols `AMB-E003` names as having nowhere to hang a contract — has no

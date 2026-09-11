@@ -15,6 +15,7 @@ function record(symbol: string, parts: Partial<AuthorityRecord> = {}): Authority
     entrypoint: false,
     effects: { declared: null, observed: [], unknown: false },
     capabilities: { declared: null, required: [], unknown: false },
+    unresolved: [],
     paths: [],
     ...parts,
   };

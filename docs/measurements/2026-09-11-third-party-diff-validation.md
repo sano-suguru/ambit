@@ -301,3 +301,169 @@ spelling — eleven un-prefixed builtin imports occur across three of its target
 (`http` 8, `net` 2, `fs` 1) — but they are type-only imports or reach members
 no table has a row for (`createServer`, `EventEmitter`), so not one call site
 changed classification. No target there uses `ky`.
+
+## Follow-up, same day: the unresolvable gain, implemented and measured
+
+The miss recorded above under "A gain the analysis cannot resolve has no line"
+— §6.4's second shape — implemented as
+[ADR-0012](../adr/0012-reporting-an-unresolvable-gain.md) decides it: the
+authority record carries the multiset of operations a function's own body could
+not resolve, `ambit diff` reports a gain in it, and `--strict` is what makes it
+fail.
+
+Same checkout (`Unleash/unleash@044461b`, cloned again and installed the same
+way, `pnpm install --ignore-scripts`), same machine. "Before" is
+`ambit@671fd51` — the commit this change is built on — run from a `git
+worktree` of this repository against the identical tree, so the two columns
+differ only in Ambit.
+
+**The untouched tree.** The property the whole gate rests on.
+
+```sh
+node <ambit>/src/cli/main.ts diff HEAD src/lib            # exit 0
+node <ambit>/src/cli/main.ts diff HEAD src/lib --strict   # exit 0
+```
+
+Both print the same four lines and nothing else:
+
+```text
+base HEAD (044461b) vs the working tree, over src/lib
+
+No authority increased.
+
+3523 symbols unchanged, out of 3523 symbols compared.
+```
+
+Zero standing noise, with the flag and without it. `check src/lib --coverage`
+is **byte-identical** between the two builds, down to the
+`unresolved-by-reason` breakdown: `unknown` rate 71.0% (2,500/3,523), 6,426
+unresolved call sites, 953 stub. The field is additive and the analysis did not
+move.
+
+**Twenty commits of the subject's own history.**
+
+```sh
+node <ambit>/src/cli/main.ts diff HEAD~20 src/lib   # exit 1 on both builds
+```
+
+The two outputs differ by exactly the new section and the tally under it;
+the authority half is byte-identical, and the exit code is 1 on both — from the
+one unapproved increase, not from anything new.
+
+| | before | after |
+|---|---:|---:|
+| authority increased, unapproved | 1 | 1 |
+| `unknownGained` (shape 1) | 3 | 3 |
+| gained an unresolvable operation (shape 2) | — | **3** |
+| symbols unchanged | 3,519 | 3,516 |
+| exit code | 1 | 1 |
+
+**Three symbols** — the number measured before the design was written, over the
+same range, by comparing per-symbol multisets by hand. The identity key the
+implementation settled on (`(reason, qualified name)`, no position, counts
+kept) reproduces it, and the three are disjoint from the three `unknownGained`
+already names, as they were then. What they name:
+
+```text
+3 symbols gained an operation the analysis could not resolve:
+
+  …#PersonalDashboardReadModel.getPersonalFeatures (…:112)
+    ? <unnamed> (any-typed)
+    ? knex.QueryBuilder.modify x2 (external-module)
+  …#ProjectReadModel.getProjectsByUser (…:269)
+    ? knex.QueryBuilder.modify (external-module)
+  …#ProjectReadModel.getProjectsFavoritedByUser (…:299)
+    ? knex.QueryBuilder.modify (external-module)
+```
+
+The tally moved 3,519 → 3,516 because `unchangedSymbols` counted these three as
+unchanged while the section above named them — a footer contradicting the body.
+Fixed in the same change.
+
+`--strict` over the same range exits 1 and adds two lines saying which of the
+two runs the reader is looking at; nothing else in the output changes.
+
+### E5: an outbound call through a client no table covers
+
+The case §6.4 exists for, and the one the earlier section recorded as invisible.
+`superagent` — installed in this repository, covered by no bundled table — added
+to `TagStore.getAll`, the method E4 used, `unknown` on both sides before and
+after.
+
+```ts
+async getAll(): Promise<ITag[]> {
+    const stopTimer = this.timer('getAll');
+    await superagent.get('https://telemetry.example.com/tags');   // added
+    const rows = await this.db.select(COLUMNS).from(TABLE);
+    …
+```
+
+| | before | after |
+|---|---|---|
+| `diff HEAD src/lib` | **exit 0, "3523 symbols unchanged, out of 3523"** — silent | exit 0, **1 symbol named**, with the operation |
+| `diff HEAD src/lib --strict` | **exit 2** — `ambit: diff does not support --strict (diff takes --format text or github)` | **exit 1** |
+
+After:
+
+```text
+1 symbol gained an operation the analysis could not resolve:
+
+  db/tag-store.ts#TagStore.getAll (db/tag-store.ts:43)
+    ? superagent.get (unresolved-symbol)
+
+This is not authority (DESIGN.md §4.3), so no approval covers it and none is
+asked for. What closes it is a stub, a verifiable declaration, or explicit
+isolation behind @boundary (§4.3, §6.4).
+```
+
+The reason is `unresolved-symbol` rather than `external-module`: the call goes
+through `superagent`'s default export, which follows to no single declaration.
+Recorded as measured — the report is keyed on whatever reason the analysis
+actually gave, and does not depend on which one it is.
+
+### E2 re-run: the working gate, unchanged
+
+`ky.post` in a new module called from `TagService.getTags` — the edit whose
+shape the follow-up above closed. Run on both builds against the same tree:
+**byte-identical output, exit 1 on both.** Six entries (3 symbols × 2
+authorities: `network` and `capability http:post:telemetry.example.com`), up
+through `TagService.getTags` to `TagController.getTags`, naming
+`operation: ky.post`. Nothing appears in the §6.4 section, because `ky`
+resolves and the gain is authority.
+
+This is the assertion that matters most here. §6.4 had to be added **beside**
+the authority comparison and not inside it: a classification that moved any part
+of a working gate into a reported-only box would have traded a failing build for
+a paragraph. It did not — three separate comparisons (`HEAD`, `HEAD~20`, E2)
+produce identical authority halves on the two builds.
+
+### Latency
+
+Three runs of each, interleaved on the same machine, `diff HEAD src/lib`:
+before **14.9 / 18.4 / 17.6 s**, after **20.3 / 17.8 / 15.5 s**. The bands
+overlap and the machine was not quiescent; nothing separable at this sample
+size. The work added is one pass over each function's existing call list.
+
+### Regression checks
+
+`pnpm test` 546 passing (527 before; 19 are new, in
+`test/unresolved-gain.test.ts`), `tsc --noEmit` pass, `biome ci .` pass,
+`check src --coverage` exit 0 with `unknown` rate 37.6% (127/338) and
+`unresolved-by-reason` unchanged, `diff HEAD~1 src` exit 0.
+`node scripts/bench-corpus.ts` median **52.6%, unchanged**, per target hono
+52.6%, trpc-server 59.7%, elysia 51.7%, got 54.6%, drizzle-orm 39.0%.
+
+### What is still missed, and was not fixed
+
+- **`@boundary` is the only exit under `--strict` for an uncovered package.**
+  §4.3's three routes are a declaration, a stub, or `@boundary`, and an adopter
+  cannot write the stub: `ambit.config.ts` names symbols in the checked tree,
+  not in `node_modules`. E5's `superagent.get` has no answer short of
+  `@boundary` on `TagStore.getAll`, which says more than the edit did. This is
+  why the flag is opt-in, and it is in
+  [`docs/limitations.md`](../limitations.md) rather than left to be discovered.
+- **A nameless operation is reported as `<unnamed>`.** `HEAD~20`'s first symbol
+  gained one (`any-typed`). It is a true report — an operation the analysis
+  could not read was added — but it names nothing a reader can act on, and no
+  stub can ever close it. Left as measured rather than filtered: excluding a
+  reason would read part of an unresolved surface as safe.

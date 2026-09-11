@@ -212,7 +212,7 @@ does not break code that has no contracts yet.
 |---|---|
 | `ambit check <dir>` | Static check. `--coverage`, `--strict`, `--format json`, `--format github` |
 | `ambit init <dir>` | Proposes `@effects` for undeclared functions. `--config` for the ones no comment can carry |
-| `ambit diff <ref> [dir]` | Compares the working tree's authority against a base ref and fails on an increase no approval covers |
+| `ambit diff <ref> [dir]` | Compares the working tree's authority against a base ref and fails on an increase no approval covers. `--strict` also fails where the analysis reached less than it did |
 
 Exit codes: **0** when nothing was reported, **1** on an error, **2** when the
 analysis itself could not run. That exit code is the whole CI integration:
@@ -262,6 +262,13 @@ exit=1
 That is a real run against this repository, with one function added to
 `src/core/authority-diff.ts` that fetches from `exfil.example.com`. Only
 increases fail: tightening a contract is never taxed.
+
+A change can also make Ambit see *less* than it did — a call through a client no
+stub table covers, added to a function that was already `unknown`. That is not
+authority and is not approved by a line; `diff` reports it in its own section
+and exits 0, and `diff --strict` is what turns it into a failure. Leave the flag
+off until the packages you call are covered by stubs — `docs/limitations.md`
+says why.
 
 ## For coding agents
 

@@ -27,6 +27,7 @@ function record(
     capRequired?: readonly string[];
     capUnknown?: boolean;
     entrypoint?: boolean;
+    unresolved?: AuthorityRecord["unresolved"];
     paths?: AuthorityRecord["paths"];
   } = {},
 ): AuthorityRecord {
@@ -45,6 +46,7 @@ function record(
       required: parts.capRequired ?? [],
       unknown: parts.capUnknown ?? false,
     },
+    unresolved: parts.unresolved ?? [],
     paths: parts.paths ?? [],
   };
 }

@@ -482,6 +482,7 @@ The primary consumer of diagnostics is the AI agent. Human-facing display is a r
   "entrypoint": false,
   "effects": {"declared": [], "observed": ["network"], "unknown": false},
   "capabilities": {"declared": null, "required": ["http:get:api.example.com"], "unknown": false},
+  "unresolved": [],
   "paths": [
     {
       "authority": "network",
@@ -495,6 +496,7 @@ The primary consumer of diagnostics is the AI agent. Human-facing display is a r
 
 - In `declared`, `null` means "there is no tag" and `[]` means "declared `pure`". A tag that could not be parsed (`AMB-E002`) goes on the `null` side: a broken declaration is not read as a narrower grant than one never written.
 - `observed` / `required` are post-propagation. `unknown` is not an authority but a separate claim — "the analysis did not reach" — so it is an independent boolean on each of `effects` and `capabilities` (§4.3).
+- `unresolved` is the multiset of operations **in this function's own body** the analysis could not resolve: `{reason, count}`, plus `operation` where the call has a qualified name and omitted where it has none. It is body-local, never propagated, and empty for a `@boundary` function, whose body is not analyzed by declaration (§4.6). It is what makes the second shape in §6.4 comparable; `effects.unknown` stays the boolean claim about the propagated result and is not derived from it — a function is `unknown` when a *callee* is, with nothing unresolved in its own body.
 - `paths` is attached only to authority actually reached; `via` and `operation` are built by the same computation as `AMB-E001`. No path is attached to authority merely declared (§5.3).
 - Records are in symbol ID order and the arrays within them are sorted, so analyzing the same tree twice produces identical output.
 - The position is between the diagnostic lines and the `kind: "summary"` line, so consumers that read the last record as `summary` are not broken. `init` does not emit these.
@@ -532,7 +534,7 @@ Diagnostics are managed by a versioned JSON Schema. Metadata lines that would br
 ```text
 ambit init      Propose inferred effects as JSDoc fix candidates. --config proposes additions to ambit.config.ts
 ambit check     Static checking. --format json / github / --coverage / --strict
-ambit diff      Authority difference against a base ref. --format github
+ambit diff      Authority difference against a base ref. --format github / --strict
 ambit run       Run with runtime enforcement enabled (for development)
 ambit agent     The agent loop
 ambit stubs     Generate and search stubs for dependency packages
@@ -549,6 +551,7 @@ What is implemented today is [`docs/status.md`](status.md).
 - A file git reports as renamed carries its symbols with it: the base side's ids are re-expressed under the new path before the comparison. Only git's own rename detection is used; no other guess about identity is made. What this does *not* cover is in §6.3.
 - The comparison itself is a pure function of the two sets of `kind: "authority"` records and the rename map, and touches git not at all.
 - An increase must be approved to pass (§6.3).
+- A symbol that gained an operation the analysis cannot resolve is reported, and fails only under `--strict` (§6.4). That is not an authority increase and carries no approval.
 - If analysis fails on either side, exit code 2. Not having been able to compare is not reported as "nothing increased" (§3.4).
 
 Exit codes:
@@ -562,11 +565,13 @@ Exit codes:
 | Authority only decreased | 0 (reported) |
 | A symbol only disappeared | 0 (reported) |
 | A new symbol with no authority | 0 |
-| `unknown` increased (authority did not) | 0 (reported) |
+| `unknown` increased (authority did not), without `--strict` | 0 (reported) |
+| A symbol gained an operation the analysis cannot resolve, without `--strict` (§6.4) | 0 (reported) |
+| Either of the two rows above, with `--strict` (§6.4) | 1 |
 | An approval that grants nothing, or a ledger line that did not parse | 0 (reported) |
 | Analysis failed on either side | 2 |
 
-Reducing authority is not what this command watches for: failing on a decrease would give the writer a reason not to touch contracts at all. `unknown` is not authority (§4.3), so it does not count as an increase, but it is reported.
+Reducing authority is not what this command watches for: failing on a decrease would give the writer a reason not to touch contracts at all. `unknown` is not authority (§4.3), so it does not count as an increase, but it is reported — and `--strict` decides whether a *widening* of it fails as well (§6.4).
 
 **Distribution and integration.** One package, `ambit-ts`: `npm install -D ambit-ts` installs the CLI and the runtime together. Production uses `ambit-ts/runtime` and the necessary adapters; the compiler and the development CLI are not to be required production dependencies, and **the single package does not yet meet this** — `typescript` is a `dependencies` entry, so importing only the runtime still installs the compiler. The runtime splits out at the first production adopter ([ADR-0009](adr/0009-package-name-and-single-package.md)).
 
@@ -661,6 +666,11 @@ own branch protection: requiring review, and naming `ambit.approvals.md` in
 `CODEOWNERS`. That is outside Ambit, and stating it is part of the design rather
 than a gap in it.
 
+An approval is also only ever about *authority*. A symbol that gained an
+operation the analysis could not resolve has gained no authority (§4.3), needs
+no line here, and cannot be approved by one — §6.4 states what happens to it
+instead.
+
 The same holds for the shape of the check. `ambit diff` compares two trees, so a
 change made outside the agent loop — hand-edited JSDoc, a rewritten
 `ambit.config.ts`, an updated stub — reaches the gate exactly as an agent's
@@ -675,6 +685,65 @@ about identity — the guess that hides a function which gained authority), and 
 file whose rename git does not detect, because the move was accompanied by
 enough editing, or because the new path is not yet tracked. Both are
 over-reporting, never under-reporting, which is the direction §3.4 requires.
+
+### 6.4 Gaining an operation the analysis cannot resolve
+
+§6.3 governs authority. This section governs the other direction: a change that
+made the analysis see *less* than it did.
+
+`unknown` is the unresolved extent of a guarantee, not a permission (§4.3), so
+none of what follows is an authority increase, and none of it is approved by a
+ledger line. What it must not be is silence — reporting an unanalyzed path as
+"nothing increased here" is exactly what §3.4 forbids.
+
+A *known* effect added inside an `unknown` symbol is not this case at all. What
+`ambit diff` compares is the effective effect set, and being `unknown` beside it
+changes neither side, so such an addition is an ordinary authority increase and
+fails as one. Only the **unresolvable** gain is left, in two shapes:
+
+1. **The symbol became unresolved.** It was resolved on the base side and is
+   `unknown` on the head side — including a symbol that is new and `unknown`.
+   Reported as the analysis having stopped reaching.
+2. **The unresolved extent widened.** The symbol is `unknown` on both sides, and
+   its own body holds **more** unresolvable operations than it did. An outbound
+   call through a client no stub table covers lands here.
+
+Shape 2 needs the record to carry more than a boolean, and §5.1's `unresolved`
+is that: per analyzed function, the operations **in its own body** the analysis
+could not resolve, as a multiset keyed by `(reason, operation name)`. Body-local
+and not propagated, because it answers where an operation was *added*; a
+callee's own unresolved calls remain that callee's record, and already reach the
+caller as shape 1 when they make it `unknown`. A `@boundary` function has no
+entry: its body is not analyzed at all by declaration (§4.6), so a call inside it
+is not an unresolved operation but an isolated one.
+
+Position and count both matter in the way a reader would expect. The key holds
+no position, so re-indenting or moving a line reports nothing; the multiset holds
+counts, so a second call to the same unresolvable operation is a second
+operation. A symbol compared under a renamed path is compared against its own
+base record (§6), so moving a file reports nothing either.
+
+**The exit code is opt-in.** Both shapes are reported at exit 0 by default and
+fail with exit 1 under `ambit diff --strict`, together. The default is 0 because
+the alternative is incoherent: shape 1 is the strictly worse event — analysis
+that used to reach a symbol no longer does — and a default that failed on shape 2
+while shape 1 passed would read as a classification rather than a rule. The flag
+is opt-in because closing either shape is not something every repository can do
+on demand; §4.3 gives three ways — a verifiable declaration, a stub, or
+explicit isolation behind `@boundary` — and all three are in-code, reviewable,
+and not always available to the repository that hit the report.
+
+`diff --strict` is defined here and not by `check --strict`, which promotes only
+§4.2 rule 3's warning about a *declared* function containing `unknown`. `diff
+--strict` has no such precondition: it fails on the two shapes above whether or
+not anything was declared. `ambit.config.ts`'s per-directory `strict` (§4.1) is
+a `check` setting and `ambit diff` does not read it.
+
+**What it does not claim.** That the operation is dangerous, or that the symbol
+is. A report here says one thing: the extent of what Ambit verified about this
+symbol got smaller, and here is the operation that made it so. Whether it
+matters is the reader's call, which is why it is a report by default and a gate
+only where a repository asks for one (P4).
 
 ## 7. The Agent Loop
 

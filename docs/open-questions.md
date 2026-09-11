@@ -20,35 +20,6 @@ exit: when it fires, the question is decided, the answer goes in the
 
 ## Analysis
 
-- **What `ambit diff` should say when a symbol gains an operation the analysis
-  cannot resolve.** A *known* effect added inside an `unknown` symbol already
-  fails the comparison — `added` is head's effective effects minus base's, and
-  being `unknown` alongside them changes neither side. Measured: a `del()`
-  added to a symbol that is `unknown` on both sides exits 1 naming the
-  operation ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)).
-  What has no line at all is the *unresolvable* gain. It has two shapes, and
-  only the first is reported today:
-  - base known, head `unknown` — `unknownGained`. Printed, and §6's exit table
-    gives it 0.
-  - base already `unknown`, head `unknown` with **more** unresolved operations
-    in it — nothing, because what a symbol carries is a boolean, not the set of
-    operations behind it. An outbound call through a client no table covers
-    (`axios`, `got`) lands here.
-
-  The question is what the honest signal is, and it is a question rather than a
-  defect because the answer changes what an approval *means*: an unresolvable
-  operation is not authority (§4.3), so failing on one is not the `authority
-  increase` §6.3 defines, and it would need its own name, diagnostic, approval
-  form and exit-code row rather than a place in the existing box. Saying nothing
-  is the one answer already ruled out — §3.4 forbids reading an unanalyzed path
-  as "nothing wrong".
-  *Trigger:* already fired, and the noise is measured: over three ranges of the
-  same backend's own history, the second shape fires on **1, 2 and 3 symbols**
-  for 3, 8 and 12 changed files — proportional to the change, not to the 71%
-  `unknown` surface, and disjoint from the symbols `unknownGained` already
-  names. This is the next decision. It is recorded here rather than fixed
-  because it is a change to §6.3's model and to §6's exit table (§9.2 surface),
-  not to the analysis.
 - **Type assertions and non-null assertions.** `as any` and `!` are not treated
   identically. The rule for when the type survives but the contract-level callee
   is not determined is unsettled.

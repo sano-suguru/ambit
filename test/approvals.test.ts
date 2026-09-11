@@ -26,6 +26,7 @@ function record(symbol: string, declared: readonly string[] | null = null): Auth
       unknown: false,
     },
     capabilities: { declared: null, required: [], unknown: false },
+    unresolved: [],
     paths: [],
   };
 }

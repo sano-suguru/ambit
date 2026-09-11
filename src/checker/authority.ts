@@ -1,5 +1,19 @@
-import type { AuthorityPath, AuthorityRecord, KnownEffect, SymbolId } from "../core/index.ts";
-import { formatCapability, KNOWN_EFFECTS } from "../core/index.ts";
+import type {
+  AuthorityPath,
+  AuthorityRecord,
+  FunctionSummary,
+  KnownEffect,
+  SymbolId,
+  UnresolvedOperation,
+} from "../core/index.ts";
+import {
+  formatCapability,
+  isBlockingCall,
+  KNOWN_EFFECTS,
+  sortUnresolvedOperations,
+  unresolvedOperationKey,
+  unresolvedReasonOf,
+} from "../core/index.ts";
 import { operationSite } from "./diagnose.ts";
 import {
   capabilityWitnessChain,
@@ -60,11 +74,45 @@ function buildRecord(
       required,
       unknown: propagated.required.unknown,
     },
+    unresolved: unresolvedOperations(summary),
     paths: [
       ...effectPaths(propagated, observed, state),
       ...capabilityPaths(summary.id, required, state),
     ],
   };
+}
+
+/**
+ * The operations in this function's own body the analysis could not resolve,
+ * as a multiset keyed by `(reason, qualified name)` (DESIGN.md §5.1, §6.4).
+ *
+ * The set of calls counted is `isBlockingCall`'s — exactly the set
+ * `propagate` derives `unknown` from — so the field can never name a call that
+ * left the function resolved, nor omit one that did not. Excluding a reason
+ * here would read part of an unresolved surface as safe.
+ *
+ * A `@boundary` function contributes nothing. Its body is not analyzed by
+ * declaration (§4.6), so what it calls is isolated, not unresolved; `propagate`
+ * takes the same exit at `boundaryState`, and reporting here what propagation
+ * never looked at would make an explicit decision read as an analysis failure.
+ */
+function unresolvedOperations(summary: FunctionSummary): readonly UnresolvedOperation[] {
+  if (summary.boundary.kind === "declared") return [];
+
+  const counts = new Map<string, UnresolvedOperation>();
+  for (const call of summary.calls) {
+    if (!isBlockingCall(call)) continue;
+    const reason = unresolvedReasonOf(call);
+    const operation: UnresolvedOperation = {
+      reason,
+      ...(call.qualifiedName === undefined ? {} : { operation: call.qualifiedName }),
+      count: 1,
+    };
+    const key = unresolvedOperationKey(operation);
+    const seen = counts.get(key);
+    counts.set(key, seen === undefined ? operation : { ...seen, count: seen.count + 1 });
+  }
+  return sortUnresolvedOperations([...counts.values()]);
 }
 
 /**

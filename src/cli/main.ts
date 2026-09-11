@@ -5,7 +5,13 @@ import type { CoverageReport } from "../checker/coverage.ts";
 import type { Diagnostic } from "../core/index.ts";
 import { displayName, isEffectsContract } from "../core/index.ts";
 import { type Analysis, analyze } from "./analyze.ts";
-import { formatDiffGithub, formatDiffText, hasUnapprovedIncrease, runDiff } from "./diff.ts";
+import {
+  failsStrict,
+  formatDiffGithub,
+  formatDiffText,
+  hasUnapprovedIncrease,
+  runDiff,
+} from "./diff.ts";
 import { githubAnnotation, workspacePath } from "./github.ts";
 
 /**
@@ -15,7 +21,8 @@ import { githubAnnotation, workspacePath } from "./github.ts";
  */
 const USAGE = `Usage: ambit check <dir> [--format json|github] [--coverage] [--strict]
        ambit init  <dir> [--format json] [--config]   propose @effects for undeclared functions
-       ambit diff  <ref> [dir] [--format github]      report authority the working tree gained over <ref>
+       ambit diff  <ref> [dir] [--format github] [--strict]
+                                                      report authority the working tree gained over <ref>
 `;
 
 const EXIT_OK = 0;
@@ -103,15 +110,20 @@ async function diffCommand(args: Args): Promise<number> {
     process.stderr.write(`ambit: diff failed: ${errorMessage(error)}\n`);
     return EXIT_ANALYSIS_FAILED;
   }
+  const options = { strict: args.strict };
   process.stdout.write(
-    args.format === "github" ? formatDiffGithub(result) : formatDiffText(result),
+    args.format === "github" ? formatDiffGithub(result, options) : formatDiffText(result, options),
   );
   // An increase with no approval in force fails (DESIGN.md §6.3). An increase
   // carrying an approval added in this same comparison is reported and passes;
   // so are a decrease and a deletion, because taking authority away is not the
   // thing this command watches for, and failing on it would give an author a
   // reason to leave a contract alone.
-  return hasUnapprovedIncrease(result) ? EXIT_VIOLATIONS : EXIT_OK;
+  //
+  // `--strict` adds the one other failure: the analysis reaching less of the
+  // tree than it did (§6.4). It is not an increase, holds no approval, and is
+  // reported at exit 0 without the flag.
+  return hasUnapprovedIncrease(result) || failsStrict(result, options) ? EXIT_VIOLATIONS : EXIT_OK;
 }
 
 interface Args {
@@ -193,12 +205,12 @@ function parseArgs(argv: readonly string[]): Args {
     ref = first;
     if (second !== undefined) dir = second;
     // A flag `diff` does not act on is an error, not something to drop
-    // quietly: an author who wrote `--strict` and got a green diff would
-    // read it as "strict found nothing" (DESIGN.md §3.4, the same reason an
-    // unknown option exits 2 rather than running).
+    // quietly: an author who wrote it and got a green diff would read it as
+    // "that option found nothing" (DESIGN.md §3.4, the same reason an unknown
+    // option exits 2 rather than running). `--strict` is acted on — it is
+    // §6.4's gate — and is therefore not in this list.
     const inert = [
       ...(coverage ? ["--coverage"] : []),
-      ...(strict ? ["--strict"] : []),
       ...(config ? ["--config"] : []),
       ...(format === "json" ? ['--format "json"'] : []),
     ];
