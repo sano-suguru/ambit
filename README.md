@@ -5,12 +5,20 @@
 A code diff says what changed. An authority diff says what became possible.
 
 An agent can widen a function's authority faster than a human can review it.
-Ambit — the range of one's authority — makes that range a contract in the
-source, checks it, and puts increases in it in front of a reviewer.
+Ambit makes authority explicit in the source, checks it, and puts increases in
+front of a reviewer.
 
-Experimental, `0.x`, and not a sandbox. [What Ambit does not
-guarantee](#what-ambit-does-not-guarantee) is a section of its own, and it is
-specific.
+- **Contracts** declare a function's authority, as JSDoc on ordinary
+  TypeScript.
+- **`ambit check`** fails code that exceeds the contract written today.
+- **`ambit diff`** fails a change that grants authority the base commit did
+  not, unless an approval in the same change covers it.
+
+The third exists because the second can be satisfied by editing the contract
+rather than the code, which is what the demonstration below does.
+
+Experimental, `0.x`, and not a sandbox. Known blind spots are documented in
+[What Ambit does not guarantee](#what-ambit-does-not-guarantee).
 
 ## Quick start
 
@@ -20,30 +28,12 @@ Requires Node.js 24.
 npm i -D ambit-ts
 npx ambit init src       # propose `@effects` for the functions that have none
 npx ambit check src      # check the code against what they now declare
-npx ambit diff HEAD src  # and check what the working tree is allowed to do that HEAD was not
+npx ambit diff HEAD src  # and what the change to them allows that HEAD did not
 ```
 
-`init` writes nothing on its own — it reports the declarations it would add, as
-fix candidates, and exits 0. `check` and `diff` exit 0 when they reported
-nothing, 1 on an error, and 2 when the analysis itself could not run; neither
-returns 0 for "could not tell".
-
-Backing out is `npm remove ambit-ts`. The `@effects` comments left behind are
-JSDoc, so the code still type-checks and runs with Ambit gone.
-
-See **[CLI and CI](#cli-and-ci)** below for the flags, the exit codes, and the
-GitHub Actions output.
-
-## Three layers
-
-- **Contracts** declare a function's authority, as JSDoc on ordinary
-  TypeScript.
-- **`ambit check`** fails code that exceeds the contract written today.
-- **`ambit diff`** fails a change that grants authority the base commit did
-  not, unless an approval in the same change covers it.
-
-The third exists because the second can be satisfied by editing the contract
-rather than the code. The next section is that, run end to end.
+The contracts are JSDoc, so `npm remove ambit-ts` leaves ordinary TypeScript
+that still type-checks and runs. The flags, the exit codes, and the GitHub
+Actions output are in **[CLI and CI](#cli-and-ci)**.
 
 ## The accident, and the fix that is not one
 
@@ -282,11 +272,12 @@ does not break code that has no contracts yet.
 | Command | What it does |
 |---|---|
 | `ambit check <dir>` | Static check. `--coverage`, `--strict`, `--format json`, `--format github` |
-| `ambit init <dir>` | Proposes `@effects` for undeclared functions. `--config` for the ones no comment can carry |
+| `ambit init <dir>` | Proposes `@effects` for undeclared functions, writing nothing. `--config` for the ones no comment can carry |
 | `ambit diff <ref> [dir]` | Compares the working tree's authority against a base ref and fails on an increase no approval covers. `--strict` also fails where the analysis reached less than it did |
 
 Exit codes: **0** when nothing was reported, **1** on an error, **2** when the
-analysis itself could not run. That exit code is the whole CI integration:
+analysis itself could not run — never **0** for "could not tell". That exit code
+is the whole CI integration:
 
 ```yaml
 - run: npx ambit check src --strict
@@ -454,5 +445,6 @@ in which document.
 - [ROADMAP.md](ROADMAP.md) — what has to be proved next.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how a change is proposed and verified.
 
-MIT licensed; see [LICENSE](LICENSE). Ambit is one person's experiment:
+MIT licensed; see [LICENSE](LICENSE). An *ambit* is the range of one's
+authority, which is the thing this tracks. Ambit is one person's experiment:
 no support commitment, no release schedule yet.
