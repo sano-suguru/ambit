@@ -513,7 +513,61 @@ No proposal is made when the function's effects reached `unknown`. Declaring
 `@effects pure` for a function the analysis could not resolve would convert
 "could not tell" into a guarantee, which is the thing `unknown` exists to
 prevent (§4.3). Those functions stay undeclared and keep appearing in
-`--coverage`.
+`--coverage` — and, where the unresolvable call is in their own body, they get
+an `AMB-I002` saying so.
 
 `ambit init` exits 0 regardless of how many proposals it makes: contracts left
 to write are not a failed check.
+
+## AMB-I002
+
+No contract can be proposed, and why.
+
+**Severity:** info
+**Category:** effects
+
+Emitted by `ambit init`, never by `ambit check`. A function has no `@effects`
+tag, is not behind `@boundary`, its propagated effects reached `unknown`, and
+its **own** body holds a call that could not be resolved — so `AMB-I001` has
+nothing to propose for it (DESIGN.md §4.1). The prohibition is unchanged; what
+this adds is the reason for it.
+
+One diagnostic per function, whatever the number of unresolved calls. The
+message's first line names the function and how many calls stopped the
+inference; each line after it is one call — its qualified name where the
+connector layer produced one, its `file:line`, its reason, and what that reason
+implies:
+
+| Reason | What it implies |
+|---|---|
+| `external-module` | Declared in a package under `node_modules`. A stub for that package resolves it; `@boundary reason="<package>"` isolates it instead, which `--coverage` tallies separately from analysis (§4.3) |
+| `import-binding` | An import binding that follows to no declaration — the module specifier or the named export first, then the same two routes as above |
+| `ambient-declaration` | Declared in a `.d.ts` belonging to this project: a contract written on that declaration resolves it |
+| `builtin-method` | A TypeScript default-lib method Ambit's own bundled tables do not name. **A gap in Ambit**, not in the code being checked |
+| `callback-parameter` | A callback parameter called directly. §4.2 rule 4 infers its effects from the actual argument at each call site, so the callers decide it |
+| `callback-by-reference` | A callback handed to a mutator (`xs.sort(cmp)`). Same rule, same conclusion |
+| `any-typed` | The callee's type is `any`, so nothing identifies it (§4.2 rule 6). A type annotation on that value restores the call |
+| `dynamic-import`, `eval`, `new-function` | Not analyzable by design (§4.2 rule 6) |
+| `overload-without-body` | Reaches a declaration with no implementation in the project (§4.1, "Overloads and bodyless declarations") |
+| `unresolved-symbol` | No single declaration Ambit can follow — a nested function, or a receiver with no one object literal certainly behind it (§4.2 rule 7) |
+
+`callback-by-reference` is the one label here that is not an
+`UnresolvedReason`: the site is a mutation carrying a by-reference callback, not
+an unresolved call, but it leaves the caller incomplete for the same reason
+`callback-parameter` does, so it is reported in the same namespace rather than
+left out.
+
+**Fixes:** none, ever. Every route above is either a decision only a person can
+make or work on Ambit itself, and DESIGN.md §5.3 defines `fixes[].edits` as
+concrete applicable patches. `@boundary` in particular is never proposed: §4.3
+tallies a boundary separately from succeeding at analysis, so a tool that
+generated one would be generating movement in its own primary KPI
+([ADR-0011](../adr/0011-reporting-why-a-contract-cannot-be-proposed.md)).
+
+No `contract` field either. `EffectsContract.observed` has no spelling for
+`unknown`, so listing the effects that did resolve would read as the complete
+set — the claim this diagnostic exists to deny.
+
+A function that merely inherited `unknown` from a callee is **not** reported.
+The callee that holds the call is, and repeating it once per caller would be
+volume rather than information.

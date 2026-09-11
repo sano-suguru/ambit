@@ -72,7 +72,10 @@ describe("ambit init (DESIGN.md §4.1)", () => {
     const { diagnostics, exitCode } = await run("init", FIXTURE_ROOT);
     // Contracts left to write are not a failed check.
     expect(exitCode).toBe(0);
-    expect(diagnostics.every((d) => d.id === "AMB-I001" && d.severity === "info")).toBe(true);
+    expect(diagnostics.every((d) => d.severity === "info")).toBe(true);
+    // Two info ids come out of `init`: a proposal, and the report of why
+    // there is none (AMB-I002, `test/init-unresolved.test.ts`).
+    expect(new Set(diagnostics.map((d) => d.id))).toEqual(new Set(["AMB-I001", "AMB-I002"]));
 
     expect(named(diagnostics, "loadConfig")?.fixes[0]?.edits[0]?.replacement).toContain(
       "@effects fs_read",
@@ -88,9 +91,15 @@ describe("ambit init (DESIGN.md §4.1)", () => {
 
   it("proposes nothing for a function whose effects could not be resolved", async () => {
     // The guard that matters: proposing `pure` for an unanalyzable function
-    // would convert "could not tell" into a declared guarantee (§4.3).
+    // would convert "could not tell" into a declared guarantee (§4.3). What
+    // it gets instead is AMB-I002 — the reason, carrying no patch.
     const { diagnostics } = await run("init", FIXTURE_ROOT);
-    expect(named(diagnostics, "opaque")).toBeUndefined();
+    const reported = named(diagnostics, "opaque");
+    expect(reported?.id).toBe("AMB-I002");
+    expect(reported?.fixes).toEqual([]);
+    expect(
+      diagnostics.filter((d) => d.id === "AMB-I001" && d.message.startsWith("opaque ")),
+    ).toEqual([]);
   });
 
   it("proposes nothing for a function that already declares @effects", async () => {
@@ -109,7 +118,7 @@ describe("ambit init (DESIGN.md §4.1)", () => {
     expect(proposal?.message).toContain("write an explicit constructor");
   });
 
-  it("marks its proposals as consistent with the contract", async () => {
+  it("marks the proposals it does make as consistent with the contract", async () => {
     // Adding a declaration where there was none cannot contradict one, and
     // the set proposed is exactly what was observed.
     const { diagnostics } = await run("init", FIXTURE_ROOT);

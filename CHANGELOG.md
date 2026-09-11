@@ -14,6 +14,15 @@ report.
 
 ## [Unreleased]
 
+### Added
+
+- **`AMB-I002`** — `ambit init` now says *why* it cannot propose a contract.
+  For an undeclared function that reached `unknown` and holds the unresolvable
+  call in its own body, it reports those calls — name, position, reason — and
+  what each reason implies. It carries no `fixes` and proposes no `@boundary`
+  ([ADR-0011](docs/adr/0011-reporting-why-a-contract-cannot-be-proposed.md)),
+  and it does not change what `AMB-I001` proposes or when.
+
 ## [0.1.0] — unreleased
 
 The first release, so this records the surface it establishes rather than a

@@ -244,6 +244,8 @@ The value of a definition may only be standard effect names; defined names are n
 
 `ambit init` infers the effects of existing code from the evidence in 4.2 and emits JSDoc additions as fix candidates in diagnostics (chapter 5, `fixes[].edits`). Functions it cannot infer remain `unknown` and appear in `--coverage`.
 
+Not being able to propose a contract is not a reason to say nothing: where such a function holds the unresolvable call in **its own** body, `ambit init` reports those call sites and what each one's reason implies — carrying no fix candidate, because none of the routes is a patch, and never proposing `@boundary`, because 4.3 tallies a boundary apart from succeeding at analysis ([ADR-0011](adr/0011-reporting-why-a-contract-cannot-be-proposed.md)). A function that only inherited `unknown` from a callee is not reported; the callee that holds the call is.
+
 `ambit init --config` emits the results of the same inference, only for **declaration sites where JSDoc cannot be placed**, as an append patch for `ambit.config.ts`. The targets are the two kinds in (a), plus the construction of a class that does not write a constructor (`Class.constructor`). The latter has a declaration path but no place at all to write the comment, so, for the same reason as the two kinds in (a), only config can declare it. For functions where JSDoc can be placed, JSDoc is proposed as before. For functions that reached `unknown`, neither is proposed — for the same reason as §4.3: so that "could not tell" is not turned into a declaration.
 
 ### 4.2 Effects

@@ -460,10 +460,12 @@ What moved the number, in the order the measurement said to take it:
 | calls to a function whose body this summary already walked (`inlined`) | 54.0% |
 | the locality rule applied to argument-position mutators (`Object.assign`) | 52.6% |
 
-The same changes take `check src --coverage` from 62.9% to **37.3%**
-(117/314 functions; the denominator grew from 302 with the helpers the changes
+The same changes take `check src --coverage` from 62.9% to **37.9%**
+(120/317 functions; the denominator grew from 302 with the helpers the changes
 added) and `check test/fixtures/realistic-api --coverage` from 20.8% to
-**18.9%** (10/53).
+**18.9%** (10/53). (An earlier revision of this line read 37.3% (117/314); that
+was recorded before the last three helpers landed and does not reproduce at the
+commit that wrote it. The number above is what `check src --coverage` prints.)
 
 ### Why the corpus does not install its dependencies
 
@@ -543,6 +545,37 @@ controllers and readers, `Body.json` / `Response.json` (about 120 together)
 depend on what the object is backed by; `console.*` (45) writes to a stream
 §4.2's effect table has no name for. Each is `unknown`, which is the honest
 answer, not an oversight.
+
+### How much of the `unknown` a reader can be told about
+
+`ambit init` proposes nothing for a function that reached `unknown` (§4.1), so
+until `AMB-I002` those functions carried no information at all. How many of them
+hold the unresolvable call *themselves* — the ones a report can point at,
+rather than the ones that merely inherited `unknown` from a callee — was
+measured over the same corpus, on the same pinned checkouts:
+
+| Target | undeclared and `unknown` | holds its own unresolved call | inherited only |
+|---|---|---|---|
+| `hono` | 339 | **234** | 105 |
+| `trpc-server` | 117 | **100** | 17 |
+| `elysia` | 182 | **142** | 40 |
+| `got` | 195 | **143** | 52 |
+| `drizzle-orm` | 1035 | **549** | 486 |
+
+Counted over `propagate`'s result, per function: undeclared (`declared.kind ===
+"none"`), not `@boundary`, `observed.unknown`, and — for the middle column —
+`summary.calls.some(callLeavesUnknown)`. Same extraction and propagation as
+`scripts/bench-corpus.ts`, over the same checkouts it pins.
+
+The middle column is what `AMB-I002` reports on; the last is deliberately left
+silent, because the leaf that holds the call is already reported and saying it
+again once per caller is not information. None of this moves the `unknown`
+rate — no contract is proposed and none is inferred. `check src --coverage`
+after the change is **37.5%** (120/320): the same 120 `unknown` functions as
+before, over a denominator three larger, being the three resolvable helpers the
+change added to `src/checker/init.ts`. It is a diagnostic id, so it is a §9.2
+change with a `CHANGELOG.md` entry. The reasoning for carrying no fix is
+[ADR-0011](adr/0011-reporting-why-a-contract-cannot-be-proposed.md).
 
 One behavioural consequence worth flagging: `Date.now()` and `Math.random()`
 now carry `env` rather than `unknown`, so a caller declaring `@effects pure`
@@ -971,8 +1004,8 @@ version's API: the direct API confirmation was done against 7.0.2.
 |---|---|
 | Spec section | §4.2, §4.3, §5.1–5.3, §6.2 |
 | Acceptance | dogfooding on Ambit itself; diagnostics update on a contract-comment-only change; schema and measurement conditions fixed |
-| Implemented | `@effects` parsing and propagation (rules 1–7 incl. cycles, constructors, `super`, object literals), `unknown`, `--coverage` (with a `declared-by` jsdoc/config split), NDJSON diagnostics with `engine`, a `kind: "authority"` NDJSON record per function (§5.1), `ambit diff <ref>` comparing the working tree's authority against a base ref, carrying symbols across the file renames git reports, and exiting 1 on an increase no approval covers (§6, §6.3), the `ambit.approvals.md` ledger read on both sides of that comparison, `--strict`, `fixes[].edits` for AMB-E001, `ambit init` contract inference. `ambit.config.ts` (§4.1): out-of-code contracts for all five tags, JSDoc-wins merging with `AMB-W005` on a difference, `AMB-W006` for an exact key that matches nothing, user-defined effects usable from both JSDoc and config, per-directory `strict`, and `ambit init --config` for the declarations no comment can carry |
-| Evidence | `test/{effects,propagate,summarize,diagnose,construction,cli,fix}.test.ts`; `test/authority-diff.test.ts` (23, the comparison as a pure function including renames, no repository), `test/approvals.test.ts` (19, the ledger grammar and the count-based rule, no repository), `test/diff-output.test.ts` (21, the text and GitHub renderings), `test/e2e.diff.test.ts` (8, against this repository's own history, asserting the worktree is gone after every path), `test/e2e.approvals.test.ts` (9, each case building a repository of its own, for the git rename reading and the ledger on both sides); `check src --coverage` exit 0; `test/backend.legacy-ts.test.ts` self-hosting block; `test/init.test.ts` round-trips every proposal through `check`; `test/e2e.config.test.ts` (15 cases, all through the CLI as a subprocess); `test/e2e.realistic.test.ts` round-trips `init --config`; `test/e2e.install.test.ts` loads a config that imports `ambit-ts/config` from the installed package |
+| Implemented | `@effects` parsing and propagation (rules 1–7 incl. cycles, constructors, `super`, object literals), `unknown`, `--coverage` (with a `declared-by` jsdoc/config split), NDJSON diagnostics with `engine`, a `kind: "authority"` NDJSON record per function (§5.1), `ambit diff <ref>` comparing the working tree's authority against a base ref, carrying symbols across the file renames git reports, and exiting 1 on an increase no approval covers (§6, §6.3), the `ambit.approvals.md` ledger read on both sides of that comparison, `--strict`, `fixes[].edits` for AMB-E001, `ambit init` contract inference, `AMB-I002` reporting the unresolved calls that prevent one (no fix, no `@boundary` proposal — [ADR-0011](adr/0011-reporting-why-a-contract-cannot-be-proposed.md)). `ambit.config.ts` (§4.1): out-of-code contracts for all five tags, JSDoc-wins merging with `AMB-W005` on a difference, `AMB-W006` for an exact key that matches nothing, user-defined effects usable from both JSDoc and config, per-directory `strict`, and `ambit init --config` for the declarations no comment can carry |
+| Evidence | `test/{effects,propagate,summarize,diagnose,construction,cli,fix}.test.ts`; `test/authority-diff.test.ts` (23, the comparison as a pure function including renames, no repository), `test/approvals.test.ts` (19, the ledger grammar and the count-based rule, no repository), `test/diff-output.test.ts` (21, the text and GitHub renderings), `test/e2e.diff.test.ts` (8, against this repository's own history, asserting the worktree is gone after every path), `test/e2e.approvals.test.ts` (9, each case building a repository of its own, for the git rename reading and the ledger on both sides); `check src --coverage` exit 0; `test/backend.legacy-ts.test.ts` self-hosting block; `test/init.test.ts` round-trips every proposal through `check`; `test/init-unresolved.test.ts` (8, one function per unresolved reason, asserting `AMB-I002` carries no fix); `test/e2e.config.test.ts` (15 cases, all through the CLI as a subprocess); `test/e2e.realistic.test.ts` round-trips `init --config`; `test/e2e.install.test.ts` loads a config that imports `ambit-ts/config` from the installed package |
 | Outstanding | **The price table is not implemented** — `@budget costUsd` parses, carries and is compared, and nothing prices an LLM call, so it is never enforced (§4.5). Config has no `stubs` key either: a package's effect definitions still come only from `src/stubs/` (§4.2). **No resident or incremental check** (§6.2) — measured above: a re-check costs the same as a first check. **No versioned JSON Schema** for the diagnostic format (§5.2); the shape is fixed in code and documented, not schema-validated. |
 
 ### M2 — capabilities, budget, runtime hooks, framework adapters, 50 stubs
