@@ -1,7 +1,7 @@
 {
   "name": "ambit-ts",
   "version": "0.1.0",
-  "description": "A contract layer on top of TypeScript for AI-generated code",
+  "description": "Review changes in what AI-written TypeScript is allowed to do",
   "keywords": [
     "typescript",
     "jsdoc",
@@ -9,6 +9,8 @@
     "effects",
     "capabilities",
     "contracts",
+    "code-review",
+    "authority",
     "ai-generated-code",
     "supply-chain",
     "cli"
