@@ -78,3 +78,4 @@ is left out rather than padded.
 | [0008](0008-approving-an-authority-increase.md) | An authority increase is approved by a ledger line valid only in the comparison that adds it | Accepted (2026-09-10) |
 | [0009](0009-package-name-and-single-package.md) | The npm package is `ambit-ts`, and it stays a single package | Accepted (2026-09-10) |
 | [0010](0010-when-governance-takes-effect.md) | The RFC procedure starts at 1.0 or the first external adopter; a guaranteed surface holds until then | Accepted (2026-09-10) — confirms 0001, 0009 |
+| [0011](0011-reporting-why-a-contract-cannot-be-proposed.md) | `ambit init` reports why it cannot propose a contract, and proposes no `@boundary` | Accepted (2026-09-11) |

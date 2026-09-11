@@ -289,16 +289,18 @@ function formatJson(diagnostic: Diagnostic): string {
  * carries what was observed — follows as one indented line per hop, each with
  * its own `file:line`, so the middle of the path is readable without
  * re-running the check with `--format json`.
+ *
+ * A message may itself be more than one line (`AMB-I002` lists one call site
+ * per line). Only its first line takes the `(file:line)` suffix — appending
+ * the location after the last line would attach the function's declaration
+ * site to whichever call happened to be listed last. The remaining lines are
+ * indented like the hops, which they sit beside.
  */
 function formatText(diagnostic: Diagnostic): string {
   const { severity, message, location } = diagnostic;
-  const header = `${severity}: ${message} (${location.file}:${location.line})\n`;
-  return (
-    header +
-    viaPath(diagnostic)
-      .map((hop) => `  ${hop}\n`)
-      .join("")
-  );
+  const [first = "", ...rest] = message.split("\n");
+  const header = `${severity}: ${first} (${location.file}:${location.line})\n`;
+  return header + [...rest, ...viaPath(diagnostic)].map((line) => `  ${line}\n`).join("");
 }
 
 /**
