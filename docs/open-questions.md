@@ -227,6 +227,18 @@ exit: when it fires, the question is decided, the answer goes in the
   carry a second backend as a product — meaningful only once §3.5's conditions
   are met.
   *Trigger:* an adopter whose tsconfig `ambit check` refuses to start on.
+- **The adopted backend truncates a JSDoc `@see` URL's scheme.** On `hono`,
+  `@see https://developers.cloudflare.com/...` is extracted as
+  `see://developers.cloudflare.com/...` by `typescript-legacy@6.0.3` and
+  correctly by the TypeScript 7 shadow backend — 16 `function` divergences
+  across `hono` and `trpc-server`
+  (`docs/measurements/2026-09-12-ts7-shadow-hardening.md`, defect 5). It reaches
+  no contract tag and no diagnostic, so no verdict changes today. What is
+  undecided is whether the raw text of a non-contract tag is something Ambit
+  promises to carry faithfully at all, or only the five tags §9.2 names — the
+  answer decides whether this is a bug in the adopted backend or a property of a
+  field nobody reads.
+
 - **The rule for tracking the analysis engine's version.** The version is "the
   latest stable release of the JS-implementation line that leaves the counts of
   `pnpm test` / `tsc --noEmit` / `biome ci` / `check src` and `check
