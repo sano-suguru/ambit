@@ -30,11 +30,12 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | Authority increases an external team rejected or explicitly approved | 0 | > 0 |
 | `unknown` rate, real third-party code (corpus median, 4,200 functions) | 52.6% | lower — no target (see below) |
 | `unknown` rate, adopting-team-equivalent fixture (`realistic-api`) | 1.9% (1/53) | no target (see below) |
-| `unknown` rate, Ambit's own source (`check src`) | 37.8% (128/339) | — |
+| `unknown` rate, Ambit's own source (`check src`) | 37.9% (129/340) | — |
 | Authority Ambit sees in a third-party backend's data layer ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)) | 940 stubbed call sites, up from 120 | — |
-| Third-party backends `ambit diff` is silent on when nothing changed | **2** — Unleash ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)), immich ([2026-09-11](measurements/2026-09-11-second-third-party-validation-immich.md)) | — |
+| Third-party backends `ambit diff` is silent on when nothing changed | **3** — Unleash ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)), immich ([2026-09-11](measurements/2026-09-11-second-third-party-validation-immich.md)), outline ([2026-09-11](measurements/2026-09-11-third-third-party-validation-outline.md)) | — |
 | `unknown` rate, second third-party backend (immich `server/src`, 3,061 functions) | 79.5% (2,432/3,061) | no target (see below) |
-| Tests | 549 passing, 33 files | green |
+| `unknown` rate, third third-party backend (outline `server`, 1,951 functions) | 69.0% (1,347/1,951) | no target (see below) |
+| Tests | 552 passing, 33 files | green |
 | `tsc --noEmit` / `biome ci .` | pass / pass | pass |
 | `check src` latency, 40 files | ~1.1 s | §3.5's 3 s allowance |
 | Incremental / resident analysis | no | yes (§6.2) |
@@ -71,7 +72,7 @@ where it is measurable, as a Phase 1 exit metric in `ROADMAP.md`.
 ### Baseline commands
 
 ```sh
-pnpm test                                                    # 512 tests, 31 files — pass
+pnpm test                                                    # 552 tests, 33 files — pass
 pnpm exec tsc --noEmit                                       # pass
 ./node_modules/.bin/biome ci .                               # pass
 node src/cli/main.ts check src --coverage                    # exit 0
@@ -138,6 +139,24 @@ Each of these was measured, and the run is archived.
   increase and 35 unresolvable gains. Unleash re-measured on the same checkout
   is unchanged. The run is
   [2026-09-11](measurements/2026-09-11-second-third-party-validation-immich.md).
+- **A third backend, chosen against what Ambit already answers, repeated the
+  gate's properties and found the failure the first two could not.**
+  `outline/outline@35dd15b9` — Koa 3 with inline route handlers, Sequelize 6,
+  `bull` on ioredis, `@aws-sdk/client-s3`, yarn 4, 474 analyzed files, 1,951
+  functions — was cloned untouched and put through the same workflow. Zero
+  standing noise in both modes; `fetch`, `node:fs` / `node:child_process` and
+  their un-prefixed spellings reported with the whole call path; history diffs
+  proportional to the change; `unknown` at 69.0%, the **lowest** of the three
+  and on the subject with the worst miss. Nothing from either earlier run was
+  contradicted. Two findings are new and neither is closed: authority added
+  inside an **argument-position route handler** is reported nowhere at all
+  (exit 0 in both modes, `--coverage` byte-identical), and a §6.4 entry reads
+  `? <unnamed>` when the receiver is a project class inheriting the method from
+  a package — an ActiveRecord ORM's whole surface. A third finding was fixed:
+  `check` and `diff` **did not terminate** when two declarations shared a
+  symbol id, which a class declaring `run()` beside `static run()` produces.
+  The run is
+  [2026-09-11](measurements/2026-09-11-third-third-party-validation-outline.md).
 - **The gate is real and it has cost something.** `ambit diff HEAD~1 src` runs
   as a **gating** CI step with `continue-on-error` removed. The change that
   introduced the approval ledger was itself a legitimate authority increase:
@@ -161,6 +180,17 @@ Each of these was measured, and the run is archived.
 - **That anyone wants this.** Zero external adopters, zero pilot teams, zero
   observed incidents prevented. This is the single most important row above, and
   no amount of test coverage substitutes for it.
+- **That `ambit diff` sees a change to a route written in the idiomatic style
+  of Koa, Express, Fastify or Hono.** A handler registered as an
+  argument-position arrow at the top level of a file carries no contract and
+  has no extracted ancestor, so authority added inside it produces no line and
+  exit 0 in both modes — measured on outline, whose 226 routes are all written
+  that way. `docs/DESIGN.md` §6.4 names this outcome as the one that must not
+  happen, so the code is behind the specification. What a stable declaration
+  path for such a function should be is undecided
+  ([`docs/open-questions.md`](open-questions.md)); the workaround is to bind
+  the handler to a name. **This is the blocker that has to close before an
+  external adopter on such a framework can rely on the gate.**
 - **That the corpus number generalizes.** The corpus deliberately does not
   install its dependencies, so a call into a package whose types are absent stays
   unresolved. The measurement can only be pessimistic, never flattering — but it
@@ -177,6 +207,21 @@ Each of these was measured, and the run is archived.
   `.github/workflows/release.yml` — **which has therefore never run.**
 
 ## Current bottleneck
+
+**A route handler written inline is a hole in the gate, and there is still no
+adopter to point the next fix at.**
+
+The third third-party run changed which of these comes first. `ambit diff` is
+silent — exit 0 in both modes, no line anywhere — when authority is added
+inside a handler registered as an argument-position arrow, which is how Koa,
+Express, Fastify and Hono are idiomatically written and how all 226 of
+outline's routes are written. Closing it needs a declaration path for an
+anonymous argument-position function, and the three candidate notations each
+have a measured or structural failure mode
+([`docs/open-questions.md`](open-questions.md)). Until it closes, "no authority
+increased" means less than it reads as on such a repository.
+
+Behind it, unchanged:
 
 **`unknown` on real third-party code, and the absence of an adopter to point the
 next fix at.**

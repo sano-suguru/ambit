@@ -244,8 +244,9 @@ Two of the `HEAD~49` entries are the finding that E2 isolates below:
 
 ## The experiment matrix
 
-Nine edits an AI coding agent might plausibly make, each applied **alone** to a
-clean tree and reverted before the next. The target is the
+Eleven edits, each applied **alone** to a clean tree and reverted before the
+next. Eight are edits an AI coding agent might plausibly make; E2b, E6b and E7
+are controls that isolate a cause. The target is the
 `documents.create` request path:
 
 ```
@@ -274,6 +275,12 @@ Two more callers reach `documentCreator` without passing through HTTP:
 
 ### E1 — known network authority
 
+An earlier E1 landed one function higher by an anchor mistake — in
+`authorizeDocumentCreate`, which the same route handler also calls — and is
+recorded rather than dropped: 6 entries, exit 1, and the same two non-HTTP tops
+(`tools/documents.ts#documentTools` → `routes/mcp/index.ts#createMcpServer`).
+The row below is the intended injection point.
+
 16 entries, 8 symbols × 2 authorities, exit 1, with the whole path:
 
 ```text
@@ -296,8 +303,8 @@ them** — its handler is an argument-position arrow, which §4 skips. A reviewe
 reading this output learns that document import and duplication *jobs* gained
 outbound network, and does not learn that `POST /api/documents.create` did.
 
-**Approval cost is 16 lines for one edit**, against 6 on Unleash and 6 on
-immich. The cost is (symbols on the path) × (authorities), and this repository's
+**Approval cost is 16 lines for one edit**, against 3 on Unleash's E1 and 6 on
+immich's. The cost is (symbols on the path) × (authorities), and this repository's
 command layer has more callers per command.
 
 ### E3 / E3b — filesystem and process authority
@@ -430,7 +437,7 @@ and no run is separable within that band.
 | skipped, callback-argument | — | 4,141 | **5,741** |
 | standing noise, `diff` on an unmodified tree | 0 | 0 (package-rooted / after the fix) | **0** |
 | standing noise, `diff --strict` on an unmodified tree | 0 | 0 | **0** |
-| approval lines for one `fetch` edit | 6 | 6 | **16** |
+| approval lines for one `fetch` edit | 3 (E1) | 6 (E1) | **16** (E1) |
 | known authority reported with the full call path | yes | yes | **yes, but stopping below HTTP** |
 | §6.4 entry carries a call path | no | no | **no** |
 | §6.4 operation is named | yes | yes | **no, for the repository's own ORM** |
@@ -757,3 +764,169 @@ Not implemented.
    its own, so the analysis sees strictly more, never less. No `unknown`
    becomes known, no detection is removed, and an unmodified tree has nothing
    new to report — measured below.
+
+## The change
+
+Two edits to `collectFunctionLikeDeclarations`, one guard, and the notation
+they imply.
+
+- **A `static` class member's declaration-path segment carries the marker** —
+  `Cache.static run`, and `Cache.static get total` for a static accessor. This
+  is the device `docs/DESIGN.md` §4.1 (a) already uses for `get x` / `set x`,
+  applied to the other pair that shares a name. The marker is unconditional:
+  applying it only where a collision exists would rename a static method's
+  symbol the moment somebody added an instance method beside it.
+- **A namespace member hangs off the namespace's name** — `sql.param`.
+  `visitTop` descended into a `ModuleDeclaration` with the container path
+  unchanged, so a namespaced function and a top-level function of the same name
+  shared an id. Found by the guard below, on `drizzle-orm`'s `src/sql/sql.ts`,
+  which declares both: it is the same defect, in the second container the
+  declaration path was not naming.
+- **A residual collision stops the run.** Where ids are minted, a second
+  declaration under an id already used throws, naming the id and the line.
+  §3.4 forbids turning an analysis failure into "no violations", and the
+  failure this replaces is worse than either: no answer at all.
+- `docs/DESIGN.md` §4.1 (a), `CHANGELOG.md` (this changes the `symbol`
+  notation, so an `ambit.config.ts` key or an `ambit.approvals.md` line naming
+  a static or namespaced declaration must be rewritten),
+  `docs/analysis-limitations.md`, and two conformance fixtures.
+
+The fixture is in `test/fixtures/backend-conformance/static-and-instance.ts`,
+where the two members' effects deliberately **differ**: two summaries under one
+id only fail to converge when they disagree, so a fixture with both `pure`
+would have passed while the defect was present. With the source change reverted,
+`vitest run test/backend.conformance.test.ts` produces no result and is killed
+at 90 s; with it, the file's 31 tests pass in 0.6 s.
+
+## After, measured
+
+Same checkouts, same machine, same commands. "Before" is Ambit `58d9a0b`.
+
+### The defect itself
+
+| | before | after |
+|---|---|---|
+| minimal 11-line repro, `check src --coverage` | **did not terminate** | exit 0, **0.5 s** |
+| outline E8a (`fetch` in the instance `destroyWithCtx`), `check server` | **did not terminate** (killed at 180 s) | exit 0, **9.9 s** |
+| outline E8b (`fetch` in the static `destroyWithCtx`), `check server` | **did not terminate** (killed at 180 s) | exit 0, **9.7 s** |
+| outline E8a, `diff HEAD server` | killed at 10 min, child at 88% CPU | exit 1, **33 authority increases** with paths to `commands/accountProvisioner.ts#accountProvisioner` |
+| outline E8b, `diff HEAD server` | not reachable | exit 1, 2 entries on `models/base/Model.ts#Model.static destroyWithCtx` |
+
+### The untouched tree — the invariant
+
+| `diff HEAD server`, unmodified | before | after |
+|---|---:|---:|
+| authority increases | 0 | **0** |
+| §6.4 entries | 0 | **0** |
+| symbols compared | 1,950 | **1,951** |
+| exit, `diff` / `--strict` | 0 / 0 | **0 / 0** |
+| report length | 5 lines | **5 lines** |
+
+The one extra symbol is the previously-masked declaration getting a record of
+its own — the analysis sees strictly more, and has nothing new to report about
+an unchanged tree. `check server --coverage` is otherwise identical to the
+baseline: `unknown` 69.0% (1,347/1,951), 9,618 call sites, 3,698 unresolved,
+the same reason histogram and the same top ten. 11.0 s against 11.5 s.
+
+### The matrix, re-run
+
+| | before | after |
+|---|---|---|
+| E1 `fetch` | exit 1, 16 entries | **exit 1, 16 entries** — unchanged |
+| E2 Sequelize hard `DELETE` | exit 0 / `--strict` 1, `? <unnamed>` | **exit 0 / `--strict` 1, `? <unnamed>`** — the symbol now reads `Template.static findByPk`, the operation is still unnamed |
+| E6 `fetch` in the inline handler | exit 0, silent | **exit 0, silent** — unchanged |
+
+E2 and E6 are B2 and B1, and neither was this run's fix. They are recorded in
+`docs/open-questions.md` and `docs/limitations.md`, not closed. **The
+`<unnamed>` entries in the `HEAD~49` range are a different shape again** —
+`callback-parameter` and `unresolved-symbol`, not `external-module` — so even
+the B2 fix, when it is made, would not name those.
+
+### Regression checks
+
+- **Unleash, the first subject, re-cloned at `044461b` and re-installed**:
+  `check src/lib --coverage` reproduces the recorded figures **exactly** —
+  16,491 call sites, stub **953**, unresolved **6,426**, `external-module`
+  **3,390**, top name `knex.QueryBuilder.where` **448**. `diff HEAD src/lib`
+  exit **0**, `--strict` exit **0**, "3523 symbols unchanged, out of 3523".
+  Symbol count unchanged, so that repository has no collision.
+- **immich, the second subject, re-cloned at `2a62622` and re-installed**:
+  `check server/src --coverage` reproduces its recorded figures exactly —
+  15,041 call sites, stub **116**, unresolved **8,482**, `external-module`
+  **7,738**, top name `kysely.RawBuilder.execute` **1902**. `diff HEAD
+  server/src` exit **0**, `--strict` exit **0**, "3061 symbols unchanged, out
+  of 3061". The workspace fix from that run is unaffected.
+- `pnpm test` **552 passing, 33 files**, against **549, 33** at `58d9a0b`. The
+  three new ones are the conformance assertions above.
+- `pnpm exec tsc --noEmit` pass. `./node_modules/.bin/biome ci .` pass.
+- `check src --coverage` exit 0, `unknown` **37.9% (129/340)** against 37.8%
+  (128/339) — the one new function is `memberSegment`, `unknown` because
+  `typescript`'s own API has no rows. `AMB-W001` count **10**, unchanged.
+- `diff HEAD src` on Ambit itself: **no authority increase, exit 0.**
+  `memberSegment` appears as one §6.4 entry, as a new function calling into the
+  compiler API does.
+- `node scripts/bench-corpus.ts` median **52.6%**, per target hono 52.6%,
+  trpc-server 59.7%, elysia 51.7%, got 54.6%, drizzle-orm 39.0% — every number
+  unchanged. This run is where the namespace collision surfaced: before the
+  namespace fix the guard stopped `drizzle-orm` with
+  `two declarations share the symbol id sql/sql.ts#param`, which is the
+  previously-silent merge becoming visible. After it, the corpus completes and
+  reads the same as it did.
+
+## Answers to the questions this run was set
+
+1. **Standing diff noise on an unmodified tree: zero.** Both modes, 5 lines,
+   exit 0, before and after the fix, re-checked on a `git status`-clean tree
+   after the whole matrix.
+2. **Known authority expansions are detected with useful witness paths — up to
+   a point.** E1 and E3/E3b each exit 1 with the full chain, through four hops.
+   The paths reach Bull job classes and the MCP server factory and **stop below
+   the HTTP route**, because the route handler is an argument-position arrow.
+3. **`ambit diff --strict` stays usable: exit 0 on the unmodified tree**, and
+   exit 1 only where the analysis genuinely reached less — 8 symbols over 46
+   changed commits, and each of E2/E4/E5. No unrelated persistent error.
+4. **No, a body-local §6.4 report was not sufficient for review here**, and it
+   failed in two different ways: without a call path for E4/E5, and without an
+   operation name at all for E2.
+5. **What the reviewer was missing**, in order: for E6, everything; for E2, the
+   operation's identity and the path; for E4/E5/E2c, one route from a changed
+   caller to the leaf; for E1/E3, the HTTP entry point above the deepest named
+   symbol.
+6. **Caller/reachability enrichment would close rows 3 and 4 and neither of the
+   first two.** A witness path supplies no name for an operation, and there is
+   nothing to attach a path to when no record exists.
+7. **No new base/head environment skew.** `node_modules` is at the git root
+   here, so the immich fix links what was already linked; `diff` on the
+   unmodified tree is silent in both modes. The layout difference that *did*
+   cost something is a different one: the checked directory is not the project,
+   so first-party code in `shared/` is unresolved — symmetrically on both
+   sides, so no noise.
+8. **Repeated / contradicted / new** — the three-repository table above. Eight
+   findings repeated, none contradicted (two narrowed), seven new.
+
+## Recommendation
+
+**Fix B1 before asking an external adopter, and do not start a fourth
+repository.**
+
+Three subjects is enough. The sampling has stopped producing new questions
+about the *gate* — zero standing noise, path-carrying authority reports,
+proportional history diffs, and the `unknown` rate's independence from all of
+it have now held three times, on three frameworks, three ORMs, three package
+managers and three repository layouts. What the third subject produced that the
+first two could not is a class of miss, and it is not a sampling question: it
+is that `ambit diff` says "No authority increased" about a tree that gained an
+outbound POST inside a request handler, which is the one sentence the product
+cannot afford to be wrong about. Every subsequent repository written in that
+style would report it again, and none of them would tell us anything more about
+what to do.
+
+This run's fix was the non-terminating analysis, because a command that never
+returns outranks everything and its cause was settled. B1's cause is not
+settled — three candidate notations, each with a measured or structural failure
+mode — so it needs a design decision, which is where it now sits
+(`docs/open-questions.md`). It is small enough to decide and implement
+deliberately, and large enough that guessing at it inside a validation run
+would have been the wrong way to spend the one change this run allowed.
+
+B2 is the runner-up and is recorded, not implemented.

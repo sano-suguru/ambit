@@ -192,7 +192,9 @@ This rule is a termination requirement as well as a notation: the declaration pa
 
 **(a) Notation of the `symbol` part, and which declaration sites can be named**
 
-`symbol` is the checker's internal declaration path itself (joined with `"."`: `Class.method`, `obj.member`, `Class.constructor`), and config can name that set plus accessors (`Class.get total` / `Class.set total`) and anonymous default exports (`default`).
+`symbol` is the checker's internal declaration path itself (joined with `"."`: `Class.method`, `obj.member`, `Class.constructor`, `Namespace.member`), and config can name that set plus accessors (`Class.get total` / `Class.set total`) and anonymous default exports (`default`).
+
+A `static` member carries the marker in its segment — `Class.static method`, and `Class.static get total` for a static accessor — for the same reason `get` and `set` are in theirs: a class may declare `run()` and `static run()` at once, and they are two functions with two bodies. The marker is unconditional, so that adding an instance member never renames the static one's symbol. Members of a namespace hang off the namespace's name for the same reason.
 
 These last two have a declaration path, but **writing JSDoc on them is still not adopted** (AMB-E003). Members with computed, string, or numeric keys cannot be named even in config. The resulting asymmetry — config's namespace is wider than JSDoc's — is an open question, not a distinction derived from principle ([`docs/open-questions.md`](open-questions.md)).
 
