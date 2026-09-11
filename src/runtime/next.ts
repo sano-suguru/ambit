@@ -26,7 +26,7 @@ import { withAmbit } from "./index.ts";
  * - a route that sets `export const runtime = "edge"` — the hooks
  *   (`installFetchHook` and friends) are Node.js hooks and are not installed
  *   there, so no capability is checked on such a route. Nothing else about
- *   `ambitRoute` on Edge is claimed either: no test runs there. DESIGN.md §12
+ *   `ambitRoute` on Edge is claimed either: no test runs there. docs/open-questions.md
  *   "Edge runtimes": Phase 1 guarantees Node.js only.
  * - Server Actions (`"use server"`), which are not route modules and have no
  *   registration call to attach a spec to.

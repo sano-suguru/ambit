@@ -41,7 +41,7 @@ const NULLARY_ONLY_EFFECTS: ReadonlyMap<string, KnownEffect> = new Map([["new Da
  * Constructors known to perform none of Ambit's `KnownEffect`s. As with
  * `src/stubs/pure-builtins.ts`, this claims "no `KnownEffect`", not purity in
  * a stricter sense — `new Map()` allocates mutable state, which is outside
- * the effect model (DESIGN.md §12).
+ * the effect model (docs/open-questions.md).
  *
  * A constructor that takes a callback (`Promise`) is listed here, but the
  * connector layer marks `new Promise(namedExecutor)` `callbackByReference`
