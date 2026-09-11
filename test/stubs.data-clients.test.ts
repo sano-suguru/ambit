@@ -46,6 +46,40 @@ describe("lookupClientEffects", () => {
       ]);
     });
 
+    it("covers `mysql2/promise`, whose clients come from a factory rather than a constructor", () => {
+      // `mysql2@3.15.3/promise.d.ts`: `createPool(config): Pool` and
+      // `createConnection(config): Promise<Connection>`, with `interface Pool
+      // extends Connection`. The receiver is named from the type those return
+      // (`legacy-ts.ts`'s `factoryResultQualifiedNameOf`), so the key carries
+      // the subpath specifier the source wrote.
+      expect(
+        lookupClientEffects("mysql2/promise.Pool.query", literal("SELECT id FROM audit")),
+      ).toEqual(["db_read"]);
+      expect(
+        lookupClientEffects("mysql2/promise.Pool.execute", literal("INSERT INTO audit VALUES (?)")),
+      ).toEqual(["db_write"]);
+      expect(lookupClientEffects("mysql2/promise.Connection.query", literal("SELECT 1"))).toEqual([
+        "db_read",
+      ]);
+      expect(
+        lookupClientEffects("mysql2/promise.Connection.execute", literal("UPDATE audit SET x = 1")),
+      ).toEqual(["db_write"]);
+    });
+
+    it("keeps both directions for a `mysql2/promise` statement the source does not fix", () => {
+      expect(lookupClientEffects("mysql2/promise.Pool.execute", undefined)).toEqual([
+        "db_read",
+        "db_write",
+      ]);
+    });
+
+    it("says nothing about a `mysql2/promise` method no row covers", () => {
+      // The subpath is not a licence for the whole client surface.
+      expect(lookupClientEffects("mysql2/promise.Pool.end", undefined)).toBeUndefined();
+      expect(lookupClientEffects("mysql2/promise.Pool.getConnection", undefined)).toBeUndefined();
+      expect(lookupClientEffects("mysql2/promise.PoolConnection.query", undefined)).toBeUndefined();
+    });
+
     it("reads the keyword from a template literal's static head", () => {
       expect(
         lookupClientEffects("pg.Pool.query", templatePrefix("SELECT * FROM orders WHERE id = ")),

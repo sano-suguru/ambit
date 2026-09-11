@@ -95,7 +95,7 @@ Authority increased in 1 symbol:
       operation: fetch (rates.ts:4)
 ```
 
-Four things `diff` does not see, or sees differently from how a reader might
+Five things `diff` does not see, or sees differently from how a reader might
 expect:
 
 - **A function whose file git does not report as renamed reads as a deletion
@@ -128,6 +128,17 @@ expect:
   such a function gains, `ambit diff` is silent about it. The `skipped`
   breakdown in `check --coverage` is the number to read alongside a green
   diff.
+- **A sharper analysis is not an increase.** Both sides are analyzed by the
+  *running* Ambit — one process, two trees — so anything that changes only in
+  the analyzer cancels out. Measured on 2026-09-11, when naming
+  factory-created clients moved nine functions in
+  `test/fixtures/realistic-api` from `unknown` to real `db_read` / `db_write`:
+  `diff HEAD test/fixtures/realistic-api` reported those nine as unchanged,
+  and reported only the two increases that came from a contract actually
+  edited in the tree. The same property is what keeps `diff HEAD~1 src` green
+  in CI across an analyzer change. The flip side is worth saying: `diff` is
+  silent about authority that a *previously installed* Ambit would have
+  missed. Upgrading Ambit surfaces that in `check`, not here.
 - **It compares two trees, so it runs the analysis twice.** There is no cache
   and no resident path (DESIGN.md §6.2 is a separate open question), and the
   base side is a fresh `git worktree`. Measured on this repository, five runs
@@ -248,21 +259,50 @@ nothing outside it. A binding reached by destructuring a *value*
 
 ### The database and LLM client table (`src/stubs/data-clients.ts`)
 
-35 rules covering `pg`, `mysql2`, `@prisma/client`, `openai`, and
-`@anthropic-ai/sdk`, producing `db_read`, `db_write`, and `llm`. Keys are the
-module specifier the client's class was imported from, the class name, and the
-property path written at the call site — `pg.Pool.query`,
-`@prisma/client.PrismaClient.user.findMany`,
-`openai.OpenAI.chat.completions.create`. Every part comes from the project's
-own source, so a locally written `declare module "pg"` and an installed `pg`
-produce the same key.
+39 rules covering `pg`, `mysql2`, `@prisma/client`, `openai`, and
+`@anthropic-ai/sdk`, producing `db_read`, `db_write`, and `llm`.
+Keys are the module specifier the client came from, the client type's name, and
+the property path written at the call site — `pg.Pool.query`,
+`mysql2/promise.Pool.query`, `@prisma/client.PrismaClient.user.findMany`,
+`openai.OpenAI.chat.completions.create`. The specifier and the property path
+come from the project's own source, so a locally written `declare module "pg"`
+and an installed `pg` produce the same key.
 
 Two limits follow from that:
 
-- The receiver must be a `const` whose initializer is `new <ImportedClass>(…)`,
-  followed through imports and re-exports. A client held in a class field,
-  bound with `let`, or returned by a factory is not matched and reports
+- The receiver must be a `const`, and its initializer one of the two ways a
+  package hands out a client:
+  - **`new <ImportedClass>(…)`**, followed through imports and re-exports. The
+    type's name here is the identifier the source wrote.
+  - **a call of an imported function** — `createPool(…)`, and the same through
+    one `await` for `await createConnection(…)`. The specifier is the one the
+    source wrote (followed through re-exports, and it must be *bare*: no
+    bundled table is keyed on a path, so a project-local wrapper around a
+    package's factory is not named); the type's name is read off the
+    declaration the call's own type resolves to, which must be a class or
+    interface in a `.d.ts` other than the compiler's own lib. An anonymous
+    return type, a union, a project class in a `.ts`, and anything the default
+    lib declares all yield no name. That last exclusion is what keeps a factory
+    returning `Map` on the pure-builtin path below rather than turning a call
+    proven effect-free into an unresolved one.
+
+  A client held in a class field, bound with `let`, or returned by a method on
+  another client (`pool.getConnection()`) is still not matched and reports
   `unknown`.
+- **A name is not a verdict.** A receiver these rules name is looked up in the
+  table and, on a miss, stays `unresolved` exactly as an unnamed one does —
+  what changes is that it now appears in `--coverage`'s
+  `top-unresolved-names` instead of only in the reason count.
+- **For the factory form, half the key is the package's own type name**, and a
+  package is free to change it. `mysql2`'s two entry points already differ:
+  `mysql2@3.15.3/promise.d.ts` declares `createPool(config): Pool`, which the
+  four `mysql2/promise.*` rows cover, while `typings/mysql/index.d.ts` declares
+  `createPool(config): BasePool`, which no row covers — so `import { createPool
+  } from "mysql2"` (the callback API) is named `mysql2.BasePool.query` and
+  stays `unknown`. The `mysql2.Pool.*` rows match a hand-written `declare
+  module "mysql2"` that calls the type `Pool`, not the installed package.
+  Nothing tells the two apart from a package whose client was never covered:
+  both read as an unresolved call with a name.
 - Only these five packages are covered. Drizzle, MongoDB, Redis, an S3 client,
   a queue client — all `unknown`.
 
@@ -386,7 +426,9 @@ if that function declares a contract. It is counted under `unresolved-symbol` in
 gives (`builtin-method`, `external-module`, `ambient-declaration`). It is
 counted *without a name* unless one could be built, and a name is only built
 for a bare identifier, or a property access whose receiver traces back to an
-import or to a `const` constructed from an imported class. A call through a
+import, or to a `const` constructed from an imported class, or to a `const`
+holding an imported factory's result (see "The database and LLM client table"
+above for both `const` forms and their conditions). A call through a
 parameter, a class field, or a `let` gets no name and appears nowhere but the
 reason counts. See Reading `--coverage` below.
 
