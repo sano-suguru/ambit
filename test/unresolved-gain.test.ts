@@ -132,6 +132,34 @@ describe("an unresolvable gain, compared (DESIGN.md §6.4)", () => {
     ]);
   });
 
+  it("keeps operations distinct when the name itself contains the key's joiner", () => {
+    // `node:fs.writeFileSync` is a real qualified name in these tables, and the
+    // multiset's key is `<reason>:<name>`. It stays unambiguous because a
+    // reason is a fixed token with no `":"` in it, so the first colon is always
+    // the joiner — asserted rather than assumed, since a collision here would
+    // silently merge two operations and hide one of them.
+    const diff = diffAuthority(
+      [
+        record("a.ts#f", {
+          unresolved: [{ reason: "external-module", operation: "node:fs.writeFileSync", count: 1 }],
+        }),
+      ],
+      [
+        record("a.ts#f", {
+          unresolved: [
+            { reason: "external-module", operation: "node:fs.writeFileSync", count: 1 },
+            { reason: "external-module", operation: "node:fs.readFileSync", count: 1 },
+            { reason: "import-binding", operation: "node:fs.writeFileSync", count: 1 },
+          ],
+        }),
+      ],
+    );
+    expect(unresolvedGains(diff)[0]?.unresolvedGained).toEqual([
+      { reason: "external-module", operation: "node:fs.readFileSync", count: 1 },
+      { reason: "import-binding", operation: "node:fs.writeFileSync", count: 1 },
+    ]);
+  });
+
   it("leaves a new symbol to the shape that already covers it", () => {
     // A new `unknown` symbol is `unknownGained` — §6.4's first shape. Naming
     // its whole body as "gained" as well would report one event twice.

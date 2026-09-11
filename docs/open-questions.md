@@ -20,6 +20,18 @@ exit: when it fires, the question is decided, the answer goes in the
 
 ## Analysis
 
+- **What `kind: "authority"` records are called, now that they carry more than
+  authority.** §5.1's record gained `unresolved` (§6.4,
+  [ADR-0012](adr/0012-reporting-an-unresolvable-gain.md)), which is explicitly
+  *not* authority — it is what the analysis failed to read. The field belongs on
+  the record, because `ambit diff` compares base and head records and the
+  comparable state has to travel with them; what no longer holds is the reading
+  that an authority record contains only authority. The shape is drifting toward
+  an analysis-state record. Renaming is not free — `kind` and the field names are
+  §9.2's NDJSON surface — and one field does not pay for the churn.
+  *Trigger:* a second non-authority field being added to the record. At that
+  point the name is describing neither the contents nor the intent, and the
+  rename is decided together with whatever that field is.
 - **Type assertions and non-null assertions.** `as any` and `!` are not treated
   identically. The rule for when the type survives but the contract-level callee
   is not determined is unsettled.
