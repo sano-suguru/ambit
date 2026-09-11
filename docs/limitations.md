@@ -121,8 +121,29 @@ Authority increased in 1 symbol:
       operation: fetch (rates.ts:4)
 ```
 
-Six things `diff` does not see, or sees differently from how a reader might
+Seven things `diff` does not see, or sees differently from how a reader might
 expect:
+
+- **Authority added inside a handler registered as an argument, at the top
+  level of a file, is not reported at all.** A route written as
+  `router.post("documents.create", auth(), async (ctx) => { … })` registers an
+  arrow function in argument position. Such a function carries no contract of
+  its own (see "Function extraction" in
+  [`docs/analysis-limitations.md`](analysis-limitations.md)), and its calls are
+  attributed to the nearest *enclosing extracted* function — of which, at the
+  top level of a module, there is none. So a `fetch(…)` added inside the
+  handler body produces **no** line: not an authority increase, not a §6.4
+  report, not a warning, and exit 0 in both `diff` and `diff --strict`.
+  Measured on `outline/outline@35dd15b9`, whose 226 routes are all written this
+  way, against the same `fetch` one hop deeper, which is reported with the full
+  call path
+  ([2026-09-11](measurements/2026-09-11-third-third-party-validation-outline.md),
+  E6/E1). The workaround is in the checked repository and is one line per
+  route: bind the handler to a name — `const createDocument = async (ctx) => {
+  … }` — and it becomes an ordinary symbol whose authority `diff` reports
+  (E7). This is the largest open gap in `diff`'s coverage; what a stable
+  declaration path for an anonymous argument-position function should be is
+  recorded in [`docs/open-questions.md`](open-questions.md).
 
 - **A function whose file git does not report as renamed reads as a deletion
   plus a new symbol.** A symbol id is `<path relative to the checked

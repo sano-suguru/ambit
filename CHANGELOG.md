@@ -43,6 +43,23 @@ report.
 
 ### Fixed
 
+- **`ambit check` and `ambit diff` did not terminate when two declarations in
+  one file shared a symbol id.** A class declaring `run()` and `static run()`,
+  or a file declaring `param()` beside `namespace sql { export function param }`,
+  gave two functions one declaration path; `propagate` then held two summaries
+  under one key, overwrote one with the other on every pass, and never reached
+  a fixed point. On the unedited tree the run finished and one record silently
+  answered for both. A `static` member now carries the marker in its
+  declaration-path segment (`Class.static run`, `Class.static get total`) and a
+  namespace member hangs off the namespace's name (`sql.param`) — **a change to
+  §4.1 (a)'s `symbol` notation, so an `ambit.config.ts` key or an
+  `ambit.approvals.md` line naming a static or namespaced declaration has to be
+  rewritten in the same spelling.** A residual collision now stops the run with
+  **exit 2** and an error naming the id, rather than hanging (§3.4). Found on
+  `outline/outline@35dd15b9`, with an 11-line reproduction that needs no
+  dependencies
+  ([2026-09-11](docs/measurements/2026-09-11-third-third-party-validation-outline.md)).
+
 - **`ambit diff` compared two different environments when the checked
   package's `node_modules` was not at the repository root.** Only
   `<repository root>/node_modules` was linked into the base checkout, so for a

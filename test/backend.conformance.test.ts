@@ -84,6 +84,56 @@ describe("backend conformance: SymbolId uniqueness (§3.5 gate 1)", () => {
   });
 });
 
+describe("backend conformance: static and instance members (§4.1 (a))", () => {
+  /**
+   * `Cache.load` and `Cache.static load` are two functions with two bodies, so
+   * they must be two declaration paths. Sharing one is the shape §4.1 calls "a
+   * termination requirement as well as a notation": the two summaries disagree
+   * (one is `network`, one is `pure`), so `propagate` would overwrite one with
+   * the other on every pass and never converge. The uniqueness and fixed-point
+   * tests above are what catch that; this one states the notation the fix
+   * chose, so that a second backend has to produce the same ids.
+   */
+  it("indexes a static member under its own declaration path", async () => {
+    const file = await fileOf("static-and-instance.ts");
+    const ids = file.functions.map((f) => f.id);
+    expect(ids).toContain("static-and-instance.ts#Cache.load");
+    expect(ids).toContain("static-and-instance.ts#Cache.static load");
+    expect(ids).toContain("static-and-instance.ts#Cache.get size");
+    expect(ids).toContain("static-and-instance.ts#Cache.static get size");
+  });
+
+  /**
+   * The behaviour the ids protect: an effect declared on one of the two does
+   * not reach a caller of the other. Under a shared id, whichever summary won
+   * the last write would answer for both.
+   */
+  /**
+   * A namespace is a named container, so its members hang off the name. Found
+   * on `drizzle-orm`'s `src/sql/sql.ts`, where a top-level `param` and
+   * `namespace sql { export function param }` shared one id.
+   */
+  it("indexes a namespace member under the namespace's name", async () => {
+    const file = await fileOf("static-and-instance.ts");
+    const ids = file.functions.map((f) => f.id);
+    expect(ids).toContain("static-and-instance.ts#param");
+    expect(ids).toContain("static-and-instance.ts#sql.param");
+  });
+
+  it("keeps the two members' effects apart", async () => {
+    const { files } = await extract();
+    const state = propagate(summarizeExtractedFiles(files));
+    const instance = state.get(
+      "static-and-instance.ts#callsInstanceLoad" as never as Parameters<typeof state.get>[0],
+    );
+    const staticSide = state.get(
+      "static-and-instance.ts#callsStaticLoad" as never as Parameters<typeof state.get>[0],
+    );
+    expect([...(instance?.observed.effects ?? [])]).toContain("network");
+    expect([...(staticSide?.observed.effects ?? [])]).not.toContain("network");
+  });
+});
+
 describe("backend conformance: overloads (§3.5 gate 1)", () => {
   /**
    * An overload set is one runtime function. The signatures are types; the

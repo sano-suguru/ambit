@@ -86,8 +86,27 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
   for (const sourceFile of sourceFiles) {
     const declarations = collectFunctionLikeDeclarations(sourceFile);
     declarationsByFile.set(sourceFile, declarations);
+    const mintedInFile = new Set<SymbolId>();
     for (const [node, declPath] of declarations) {
-      declaredNodeToId.set(node, symbolId(relativePath(absoluteRoot, sourceFile), declPath));
+      const id = symbolId(relativePath(absoluteRoot, sourceFile), declPath);
+      // DESIGN.md §4.1: "the declaration path and the function the backend
+      // returns must be one to one, or §4.2 rule 7's fixed-point iteration
+      // does not converge". Two declarations under one id do not make a wrong
+      // answer — they make no answer: `propagate` overwrites one summary with
+      // the other every pass and `ambit check` never returns. So a residual
+      // collision has to stop the run rather than reach the fixed point
+      // (§3.4 — a failure to analyze is never reported as "no violations").
+      if (mintedInFile.has(id)) {
+        const { line } = locationOf(absoluteRoot, sourceFile, nameOrNode(node));
+        throw new Error(
+          `two declarations share the symbol id ${id} (the second is at line ${line}): ` +
+            "a declaration path must name exactly one function, or the analysis does not " +
+            "terminate (DESIGN.md §4.1). Report the shape — this is a gap in Ambit's " +
+            "declaration paths, not in the code being checked.",
+        );
+      }
+      mintedInFile.add(id);
+      declaredNodeToId.set(node, id);
     }
   }
 
@@ -303,7 +322,7 @@ function collectFunctionLikeDeclarations(
           member.name &&
           ts.isIdentifier(member.name)
         ) {
-          results.push([member, [...classPath, member.name.text]]);
+          results.push([member, [...classPath, memberSegment(member, member.name.text)]]);
         }
         // `handle = async (req) => { … }` is a method written as a property.
         // It must be indexed in its own right, or its body would be
@@ -311,19 +330,23 @@ function collectFunctionLikeDeclarations(
         // it does not run it, and a class of arrow-shaped request handlers
         // would make every `new Controller()` look like it hit the network.
         if (isFunctionValuedProperty(member)) {
-          results.push([member, [...classPath, member.name.text]]);
+          results.push([member, [...classPath, memberSegment(member, member.name.text)]]);
         }
         // An accessor's body runs like any other method's, so it propagates
         // like one; it is indexed under `get x` / `set x` because `get` and
         // `set` share a name and a plain `x` could not tell them apart
         // (DESIGN.md §4.1 (a)). A JSDoc tag written on it is still inert —
-        // see `configOnlyPath`.
+        // see `configOnlyPath`. A static accessor takes both markers:
+        // `static get x`.
         if (
           (ts.isGetAccessor(member) || ts.isSetAccessor(member)) &&
           member.name &&
           ts.isIdentifier(member.name)
         ) {
-          results.push([member, [...classPath, accessorSegment(member, member.name.text)]]);
+          results.push([
+            member,
+            [...classPath, memberSegment(member, accessorSegment(member, member.name.text))],
+          ]);
         }
       }
       // `new C(...)` has to have somewhere to propagate *from*, or a
@@ -338,6 +361,20 @@ function collectFunctionLikeDeclarations(
           ts.isConstructorDeclaration(member) && member.body !== undefined,
       );
       results.push([explicitConstructor ?? node, [...classPath, CONSTRUCTOR_PATH_SEGMENT]]);
+      return;
+    }
+    // A namespace is a container with a name, so its members hang off that
+    // name in the declaration path (`sql.param`), exactly as a class's or an
+    // object literal's do. Descending with the path unchanged would give
+    // `namespace sql { export function param() {} }` the same path as a
+    // top-level `param` in the same file — two functions under one id, which
+    // §4.1 states as the one-to-one rule and `propagate` needs to terminate.
+    // Observed on `drizzle-orm`'s `src/sql/sql.ts`, which has both.
+    // A string-named `declare module "x"` is not a namespace and names
+    // nothing here: its members are ambient and carry no body.
+    if (ts.isModuleDeclaration(node) && ts.isIdentifier(node.name)) {
+      const namespacePath = [...containerPath, node.name.text];
+      ts.forEachChild(node, (child) => visitTop(child, namespacePath));
       return;
     }
     if (
@@ -562,6 +599,34 @@ const CONSTRUCTOR_PATH_SEGMENT = "constructor";
 /** The declaration-path segment an anonymous `export default` is indexed under (DESIGN.md §4.1 (a)). */
 const DEFAULT_EXPORT_PATH_SEGMENT = "default";
 
+/**
+ * `static run` — a `static` member's segment carries the marker, for exactly
+ * the reason an accessor's carries `get` / `set` (DESIGN.md §4.1 (a)): a class
+ * may declare `run()` and `static run()` at once, and a plain `run` cannot tell
+ * them apart. They are two functions with two bodies, so one declaration path
+ * for both breaks the one-to-one rule §4.1 states as "a termination
+ * requirement as well as a notation" — `propagate` then has two summaries for
+ * one key, overwrites one with the other every pass, and never converges.
+ * Measured on a third-party backend, with an 11-line reproduction, in
+ * `docs/measurements/2026-09-11-third-third-party-validation-outline.md`.
+ *
+ * The marker is unconditional rather than applied only where a collision
+ * exists: a conditional one would change a static method's id the moment an
+ * instance method of the same name was added, which is a rename of a symbol
+ * nobody touched.
+ *
+ * A static accessor takes both markers, in the order they are written in the
+ * source: `static get total`.
+ */
+function memberSegment(member: ts.ClassElement, segment: string): string {
+  const modifiers = ts.canHaveModifiers(member) ? (ts.getModifiers(member) ?? []) : [];
+  const isStatic = modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword);
+  return isStatic ? `${STATIC_PATH_MARKER}${segment}` : segment;
+}
+
+/** `static ` — see {@link memberSegment}. */
+const STATIC_PATH_MARKER = "static ";
+
 /** `get total` / `set total` — the accessor's kind is part of the segment (DESIGN.md §4.1 (a)). */
 function accessorSegment(
   node: ts.GetAccessorDeclaration | ts.SetAccessorDeclaration,
@@ -601,7 +666,10 @@ function anonymousDefaultExport(node: ts.Node): FunctionLikeDeclaration | undefi
  */
 function configOnlyPath(declPath: readonly string[]): boolean {
   if (declPath.length === 1 && declPath[0] === DEFAULT_EXPORT_PATH_SEGMENT) return true;
-  const last = declPath[declPath.length - 1] ?? "";
+  const written = declPath[declPath.length - 1] ?? "";
+  const last = written.startsWith(STATIC_PATH_MARKER)
+    ? written.slice(STATIC_PATH_MARKER.length)
+    : written;
   return last.startsWith("get ") || last.startsWith("set ");
 }
 

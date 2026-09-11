@@ -65,9 +65,64 @@ exit: when it fires, the question is decided, the answer goes in the
   declaration path, yet is not adopted. Resolving it requires first deciding how
   to fix JSDoc's attribution uniquely.
   *Trigger:* an `AMB-E003` on a shape a config key also cannot name.
+- **How an anonymous argument-position function enters the comparison.** `router.post("documents.create", auth(), async (ctx) => { … })` — the
+  idiomatic registration in Koa, Express, Fastify and Hono — puts the handler
+  body in a function with no name and no extracted ancestor, so it carries no
+  contract, produces no record, and `ambit diff` reports **nothing** when
+  authority is added inside it: exit 0 in both modes, `--coverage` byte-identical
+  (measured on
+  [outline](measurements/2026-09-11-third-third-party-validation-outline.md),
+  E6, over 226 such routes). `docs/DESIGN.md` §6.4 names this as the outcome
+  that must not happen, and §4.1 attaches `@effects` to "any function or
+  method", so the code is behind the specification rather than the reverse.
+  **The question is not necessarily a `symbol` question.** §5.3's declaration
+  path is what a *human* writes in an `ambit.config.ts` key, and §4.1 (a)
+  already has a tier that propagates without being declarable in JSDoc, so a
+  third tier — analyzed and compared, declarable by nobody — is a smaller
+  extension than minting a name would be. What such a record still needs is an
+  identity **stable enough that an approval line written today still matches
+  tomorrow** (§6.3 names a symbol in `ambit.approvals.md`). That is a weaker
+  requirement than being writable by hand, and it is the requirement the
+  candidates have to be judged against — deciding this as a notation question
+  first would rule out the shapes that might actually work.
+
+  Candidates, with the failure mode each is known or suspected to have:
+
+  - **positional** (`file.ts#router.post@1852`) — contradicts §6.4's "the key
+    holds no position" and turns a line shift into a rename;
+  - **keyed on the registration's literal argument** (`router.post("documents.create")`)
+    — measured for the neighbouring runtime question at 86% static
+    determinability with one silently *wrong* answer
+    ([`measurements/http-route-key-spike.md`](measurements/http-route-key-spike.md),
+    [ADR-0007](adr/0007-http-route-keys.md));
+  - **a per-file pseudo-symbol** holding the union of such bodies — needs no
+    key and no position, but cannot tell a second `fetch` in a file that
+    already has one from the first;
+  - **lexical/structural identity** — the path of enclosing constructs down to
+    the function, independent of line numbers. Unmeasured; the open question is
+    what an edit to a sibling registration does to it;
+  - **an ordinal scoped to the registration site** (`router.post` occurrence *n*
+    in this file, argument *k*) — unmeasured; the open question is whether
+    inserting a route above renames every one below it;
+  - **not an identity-bearing symbol at all** — the body is an analysis node
+    whose authority delta is attributed and compared without ever being
+    nameable. Unmeasured, and the one that most directly attacks the premise;
+    its open question is the approval-stability requirement above, which it
+    does not escape, only relocates.
+
+  The first three are the ones this run's evidence already speaks to; the last
+  three are not yet measured and none of them should be implemented before it
+  is. Until one is chosen the gap is recorded in
+  [`docs/limitations.md`](limitations.md) with its one-line workaround (bind
+  the handler to a name).
+  *Trigger:* already fired. This is the gap that has to close before an
+  external adopter on an inline-handler framework can rely on the gate, and it
+  is a design goal — compare and measure the candidates — not an
+  implementation one.
 - **Indirect calls in frameworks.** The call paths of Express, NestJS's DI,
   Next.js, and Hono. How far dedicated stubs and entry-point declarations can
-  absorb them.
+  absorb them. NestJS's decorator DI and class inheritance were measured and
+  cost nothing (immich); what is left is the registration shape above.
   *Trigger:* an adopter's framework whose handlers do not resolve.
 - **How a §6.4 gain is connected to the caller it is reachable from.** The
   report names the function whose own body gained the unresolved operation and
@@ -79,9 +134,12 @@ exit: when it fires, the question is decided, the answer goes in the
   deciding instead is whether the entry should carry a *witness path* — one
   route from a changed caller down to the leaf — as explanation beside the
   body-local fact, not as a claim about the caller.
-  *Trigger:* a third independent backend where a leaf-only §6.4 entry is again
-  what stops a reviewer. Two subjects have shown the shape; the third must not
-  be chosen for this question, or the answer is the question restated.
+  *Trigger:* already fired — a third independent backend, chosen for its
+  architecture and not for this question, reported every operation through its
+  ORM, its queue and its object storage body-locally
+  ([outline](measurements/2026-09-11-third-third-party-validation-outline.md)).
+  It was not implemented there because two blockers outranked it; the witness
+  path is the form to decide on, not propagation.
 - **What environment `ambit diff` reconstructs.** Both sides are analyzed
   against the *working tree's* `node_modules` (§6), so a change that upgrades a
   dependency analyzes the base commit's source against the new package's types.
@@ -93,6 +151,21 @@ exit: when it fires, the question is decided, the answer goes in the
   *Trigger:* `ambit sbom` or "a dependency update widens effects" (`ROADMAP.md`,
   M4) being implemented, or an adopter reporting an upgrade whose authority
   change `diff` did not name.
+- **Naming an operation whose receiver is a project class that inherits the
+  method from a package.** `installedTypeNameOf` names a receiver from its
+  declared type, so `sequelize.query(…)` is named and `Template.destroy(…)` —
+  where `Template extends … extends sequelize.Model` — is reported as
+  `? <unnamed> (external-module)`. The reason already knows the package: it is
+  derived from the declaration file of the *callee*. An unnamed entry satisfies
+  none of §4.3's three closures — a declaration, a stub, or `@boundary` all
+  need the operation to be identifiable — so `--strict` on an ActiveRecord
+  codebase (Sequelize, TypeORM `BaseEntity`, Mongoose) can only be turned off.
+  What is undecided is whether naming from the callee's declaring type is
+  sound in general, or only where the receiver's type has no name of its own.
+  *Trigger:* already fired, on
+  [outline](measurements/2026-09-11-third-third-party-validation-outline.md)
+  (E2 / E2b against E2c). Ranked second there and left unimplemented because
+  one fix was allowed and a non-terminating analysis outranked it.
 - **`unknown` fatigue.** Beyond per-directory `strict`, the total volume of
   warnings and the measurement denominator in practice.
   *Trigger:* an adopter turning `--strict` off rather than fixing what it

@@ -388,6 +388,22 @@ covers:
 - members of a module-scope `const` object literal, when the member has an
   identifier name — `const handlers = { read() { … } }` gives `read` the id
   `handlers.read`, the same declaration-path notation a class method uses
+- members of a namespace, under the namespace's name — `namespace sql { export
+  function param() { … } }` gives `param` the id `sql.param`
+
+A `static` member's segment carries the marker: `Class.static run`, and
+`Class.static get total` for a static accessor. A class may declare `run()` and
+`static run()` at once and they are two different functions, so one declaration
+path for both would break the one-to-one rule DESIGN.md §4.1 calls "a
+termination requirement as well as a notation" — `propagate` would never
+converge. The marker is unconditional, so adding an instance member never
+renames the static one. If two declarations do end up sharing an id, the run
+stops with exit 2 and an error naming it rather than hanging; that is a gap in
+these declaration paths and is worth reporting. One shape is known to remain: a
+class and a namespace of the same name merged in one file — `class Foo { bar()
+{} }` beside `namespace Foo { export function bar() {} }` — gives both members
+the path `Foo.bar`. Neither of the three measured third-party backends nor the
+corpus has it, so it has never fired.
 
 Two more shapes are extracted and propagate, but can only be *declared* from
 `ambit.config.ts` (DESIGN.md §4.1 (a)): a `get`/`set` accessor, under
