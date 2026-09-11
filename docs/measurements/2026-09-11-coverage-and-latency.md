@@ -10,6 +10,34 @@ Every number was run, not estimated. `docs/status.md` carries what is true now;
 this file carries how it got there, and is not updated in place — a later
 measurement is a later file.
 
+## Promoting `ambit diff` to a gate
+
+**`continue-on-error: true` is now removed.** What was missing was an approval
+mechanism, and DESIGN.md §6.3 is it: `ambit.approvals.md`, read on both sides
+of the comparison, so a line grants only in the comparison that adds it
+([ADR-0008](adr/0008-approving-an-authority-increase.md)). Measured on this
+change, which is itself a pull request that legitimately adds authority:
+`diff HEAD src` reported five increases and exited 1 with no ledger, and exited
+0 with the five approval lines written — the only difference between the two
+runs being `ambit.approvals.md`. The five are `findApprovalsFile`,
+`isProjectBoundary` and `loadApprovals` (`fs_read`, reading the ledger) and
+`gitRaw` and `renamedFiles` (`process`, running `git diff --find-renames`).
+
+Five lines is the honest cost of per-symbol granularity for a change of this
+size: every new function that performs I/O is a new symbol holding authority.
+A sixth was avoided rather than approved — `reviewIncreases` first reported
+`state_write` for mutating an array retrieved from a local `Map`, which is the
+mutation analysis being conservative about a value's provenance rather than a
+defect (measured directly: `Map.set` on a locally created map is `pure`;
+`map.get(k).push(x)` is `state_write`). Rewriting it to hold a cursor instead
+of shifting the bucket made the function `pure` and removed the line.
+
+`pnpm exec biome ci .` returns 1 in one local shell because of a
+user-installed command wrapper, not because of this repository —
+`pnpm exec biome --version` fails the same way. Run the binary directly
+(`./node_modules/.bin/biome ci .`) to see the real exit code, which is 0. CI
+runs `pnpm exec biome ci .` in GitHub Actions, where no such wrapper exists.
+
 ## Ambit's own source (`check src --coverage`)
 
 | Figure | After the Hono adapter | Before `ambit.config.ts` | After `ambit.config.ts` | After M0.5 | After the CI gate | After the Next.js adapter | After the approval ledger |

@@ -2,7 +2,7 @@
 
 - Status: Accepted (2026-09-09)
 - Decides: `docs/DESIGN.md` §4.2 "Local mutation and `pure`"
-- Evidence: `docs/status.md` — the before/after `unknown` measurement
+- Evidence: [`docs/measurements/2026-09-11-coverage-and-latency.md`](../measurements/2026-09-11-coverage-and-latency.md) — the before/after `unknown` measurement
 
 ## Context
 
@@ -42,7 +42,7 @@ not hiding what cannot be guaranteed, but continuing to count an unobservable
 action as `unknown` is inaccuracy in the opposite direction from hiding — it
 shows the guaranteed range as narrower than it is — and it distorts §4.3's
 practice of treating the `unknown` rate as a primary KPI. The before/after
-measurements are recorded in `docs/status.md`.
+measurements are recorded in `docs/measurements/`.
 
 Under 3, `state_write` would not exist at all, and a function doing
 `param.push(x)` could declare `@effects pure` while that remained only an
