@@ -1,7 +1,7 @@
 # Known limitations
 
-Implementation status of `ambit check` — what the analysis actually sees
-today, and where it stops. This file records current behavior, not design
+Implementation status of the analysis — what `ambit check` and `ambit diff`
+actually see today, and where they stop. This file records current behavior, not design
 intent; the specification is [DESIGN.md](DESIGN.md), and design-level open
 questions live in [`docs/open-questions.md`](open-questions.md).
 

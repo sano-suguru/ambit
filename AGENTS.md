@@ -3,10 +3,13 @@
 Guidance for coding agents working in this repository. `CLAUDE.md` is a
 one-line import of this file — edit this file, not that one.
 
-Ambit is a contract layer on top of TypeScript for AI-generated code:
-JSDoc tags (`@effects` / `@capabilities` / `@budget` / `@entrypoint` /
-`@boundary`) declare side effects, permissions, and budget, and `ambit check`
-stops contract violations. The full specification is `docs/DESIGN.md`. Read
+Ambit detects when a change expands the authority executable code can
+exercise, and makes that expansion reviewable (`docs/DESIGN.md` §1). JSDoc
+tags (`@effects` / `@capabilities` / `@budget` / `@entrypoint` / `@boundary`)
+declare that authority on ordinary TypeScript, `ambit check` stops code that
+exceeds what is declared, and `ambit diff` fails a change that grants
+authority the base commit did not. The full specification is
+`docs/DESIGN.md`. Read
 the relevant section before changing contract semantics, propagation rules,
 diagnostics, backend behavior, or supported TypeScript behavior — do not
 rely on a summary of it here.
