@@ -395,3 +395,55 @@ describe("backend conformance: Unicode positions (§3.5 gate 1)", () => {
     expect(tag?.col).toBe(text.indexOf("@effects") + 1);
   });
 });
+
+/**
+ * DESIGN.md §4.1 (a), "The inline-callback owner". A backend has to produce
+ * this entry, and has to produce the per-body split beside it: without the
+ * split, one id standing for several bodies is a merge into silence, and §6.3
+ * has nothing to count.
+ */
+describe("backend conformance: the inline-callback owner (§4.1 (a))", () => {
+  const FILE = "inline-callbacks.ts";
+  const OWNER = "inline-callbacks.ts#<inline callbacks>";
+
+  it("gives a file's unowned inline callbacks one entry, declarable by nobody", async () => {
+    const owner = await fn(FILE, OWNER);
+    expect(owner).toBeDefined();
+    expect(owner?.undeclarable).toBe(true);
+    expect(owner?.jsDoc).toBeUndefined();
+    // The bodies are scattered through the file, so the one position true of
+    // all of them is the file's own start.
+    expect(owner?.location).toMatchObject({ line: 1, col: 1 });
+  });
+
+  it("partitions its calls by body, and the partition reproduces the flat list", async () => {
+    const owner = await fn(FILE, OWNER);
+    // Four owned bodies: two `router.post` handlers and two `router.use`
+    // arguments. The one inside `register` is that function's, not the
+    // owner's.
+    expect(owner?.bodies).toHaveLength(4);
+    expect(owner?.bodies?.flat()).toEqual(owner?.calls);
+  });
+
+  it("leaves a callback inside a named function to that function", async () => {
+    const register = await fn(FILE, "inline-callbacks.ts#register");
+    expect(register).toBeDefined();
+    expect(register?.bodies).toBeUndefined();
+  });
+
+  it("creates no entry for a file with no unowned inline callback", async () => {
+    const file = await fileOf("recursion.ts");
+    expect(file.functions.map((f) => f.id)).not.toContain("recursion.ts#<inline callbacks>");
+  });
+
+  it("splits authority per body, and their union is the entry's own", async () => {
+    const { files } = await extract();
+    const state = propagate(summarizeExtractedFiles(files));
+    const owner = state.get(OWNER as never);
+    expect(owner?.bodies).toHaveLength(4);
+    // Exactly one of the four reaches the network, through `ping`.
+    const holders = owner?.bodies?.filter((body) => body.observed.effects.has("network"));
+    expect(holders).toHaveLength(1);
+    expect(owner?.observed.effects.has("network")).toBe(true);
+  });
+});

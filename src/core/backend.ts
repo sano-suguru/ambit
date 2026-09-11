@@ -271,8 +271,34 @@ export interface ExtractedFunction {
    * `AMB-E003` instead (with the config key that would work).
    */
   readonly configOnly?: true;
+  /**
+   * Set on the entry that owns a file's unowned inline callbacks (DESIGN.md
+   * §4.1 (a), "The inline-callback owner"). The third tier: analyzed and
+   * compared like any other function, and declarable by nobody — there is no
+   * declaration site for JSDoc and no single function for a config key to
+   * name, so neither `ambit init` nor `ambit init --config` proposes one.
+   *
+   * Apart from {@link configOnly}, which marks a declaration JSDoc cannot
+   * carry but config still can.
+   */
+  readonly undeclarable?: true;
   readonly jsDoc: RawJsDoc | undefined;
   readonly calls: readonly CallSite[];
+  /**
+   * {@link calls} partitioned by the body each call is in, one group per owned
+   * body — set on the inline-callback owner (DESIGN.md §4.1 (a)) and on
+   * nothing else, so a file with a single inline callback has one group.
+   * Concatenating the groups reproduces {@link calls} exactly.
+   *
+   * Absent for every ordinary function, which owns one body: a comparison
+   * reads an absent field as "one body, holding everything this record
+   * holds", so nothing about an ordinary record changes. What it buys is the
+   * only thing a merged owner would otherwise lose — authority is compared as
+   * a multiset over the owned bodies (§6.3), so a second body gaining an
+   * effect a first body already had is an increase, exactly as it would be if
+   * the two bodies were two named functions.
+   */
+  readonly bodies?: readonly (readonly CallSite[])[];
 }
 
 /**

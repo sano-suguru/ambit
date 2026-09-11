@@ -58,6 +58,50 @@ export interface AuthorityRecord {
    * whose body does not reach has no path, and none is synthesized (§5.3).
    */
   readonly paths: readonly AuthorityPath[];
+  /**
+   * What each **owned body** holds on its own, for a symbol that owns more
+   * than one (DESIGN.md §4.1 (a)'s inline-callback owner). Absent for every
+   * ordinary function, and read as one body holding the record's own
+   * effective authority when absent, so an ordinary record is unchanged.
+   *
+   * `ambit diff` compares authority as a multiset over these (§6.3): an
+   * authority is *added* when more bodies hold it than did. For one body that
+   * is exactly today's set comparison — 0 to 1 is an increase, 1 to 1 is not
+   * — so the rule is the same one, stated over a set of bodies rather than
+   * assuming there is one. Without it a symbol standing for several bodies
+   * would report nothing when a second body gained an effect a first already
+   * had, which is the merge into silence §6.4 forbids.
+   *
+   * The union of these is the record's own `observed` / `required`; nothing
+   * here widens what the symbol holds.
+   */
+  readonly bodies?: readonly AuthorityBody[];
+}
+
+/**
+ * One owned body's authority — see {@link AuthorityRecord.bodies}.
+ *
+ * A body has no declaration of its own (it has no declaration site at all),
+ * so there is no `declared` half: what it holds is what it was inferred to
+ * do.
+ */
+export interface AuthorityBody {
+  readonly effects: readonly KnownEffect[];
+  readonly capabilities: readonly string[];
+  /** Propagation reached a call it could not resolve from this body. */
+  readonly unknown: boolean;
+  /**
+   * The operations **in this body alone** the analysis could not resolve, in
+   * the same shape and order as the record's own {@link
+   * AuthorityRecord.unresolved} — of which these are the parts.
+   *
+   * Carried for the same reason the rest of this interface is: without it,
+   * two bodies that are both `unknown` read as interchangeable, and an opaque
+   * operation moving from one handler to another would be a merge into
+   * silence (§6.4's third shape). `unknown` is a boolean about the propagated
+   * result and does not answer "what, here, did I fail to read".
+   */
+  readonly unresolved: readonly UnresolvedOperation[];
 }
 
 /**
@@ -219,4 +263,27 @@ export function effectiveAuthority(record: AuthorityRecord): readonly AuthorityR
 /** Whether the function holds any authority at all — what makes a *new* symbol worth failing on. */
 export function holdsAuthority(record: AuthorityRecord): boolean {
   return effectiveAuthority(record).length > 0;
+}
+
+/**
+ * The bodies a record's authority is compared over (DESIGN.md §6.3).
+ *
+ * A record with no `bodies` owns one, and what that body holds is the
+ * record's own *effective* authority — declared where a declaration exists,
+ * inferred otherwise, exactly as {@link effectiveEffects} defines it. That is
+ * what makes the multiset comparison a restatement of the old set comparison
+ * rather than a second rule beside it: widening a tag still reads as an
+ * increase, because the one body's authority is the declared set.
+ */
+export function authorityBodies(record: AuthorityRecord): readonly AuthorityBody[] {
+  return (
+    record.bodies ?? [
+      {
+        effects: effectiveEffects(record),
+        capabilities: effectiveCapabilities(record),
+        unknown: record.effects.unknown || record.capabilities.unknown,
+        unresolved: record.unresolved,
+      },
+    ]
+  );
 }

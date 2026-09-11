@@ -359,14 +359,19 @@ claim:
   code against the contract currently written, so widening the contract makes it
   green again — *The accident*, above. Reviewing the increase is `ambit diff`'s
   job, and the next bullet is what that misses.
-- **That `ambit diff` sees every increase.** It compares the symbols both sides
-  extracted, and a handler written inline in argument position —
-  `router.post("/x", async (ctx) => { … })` — is not an extracted function, so
-  authority added inside its body is reported by nothing, in `diff` and
-  `diff --strict` alike. Binding the handler to a name makes it an ordinary
-  symbol again. A function renamed within a file, or moved in a way git did not
-  report as a rename, reads as a deletion plus a new symbol instead — an
-  over-report, which is the direction the comparison is built to fail in
+- **That `ambit diff` names the function every increase came from.** It
+  compares the symbols both sides extracted, and a handler written inline in
+  argument position — `router.post("/x", async (ctx) => { … })` — has no name
+  to be one. Every such handler in a file is compared together, under
+  `routes.ts#<inline callbacks>`, counting how many of them hold each
+  authority — so an increase inside one is reported, but against the file, and
+  the call path may point at a sibling that already held it. Authority moving
+  *between* two of them changes no count and is not an increase; it is reported
+  as authority the analysis cannot attribute, which `--strict` fails on. Binding the
+  handler to a name makes it an ordinary symbol again. A function renamed
+  within a file, or moved in a way git did not report as a rename, reads as a
+  deletion plus a new symbol instead — an over-report, which is the direction
+  the comparison is built to fail in
   ([limitations](docs/limitations.md#what-ambit-diff-can-and-cannot-see)).
   `check --coverage`'s `unknown-rate` is what says how much was visible in the
   first place; a green `diff` on its own does not.
@@ -419,11 +424,11 @@ exit 0 is the fastest evidence a change did what it claimed:
 
 ```console
 warning: extractProject declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:55)
-warning: loadProjectConfig declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:184)
+warning: loadProjectConfig declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:195)
 ...
-files=40 functions=340 declared=14
+files=40 functions=347 declared=14
 declared-by: jsdoc=14 config=0
-unknown-rate=37.9% (129/340 functions) boundary-rate=0.0% (0/340 functions)
+unknown-rate=38.9% (135/347 functions) boundary-rate=0.0% (0/345 functions)
 ```
 
 `pnpm test`, `pnpm exec tsc --noEmit` and `biome ci .` are the rest of the

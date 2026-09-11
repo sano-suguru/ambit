@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { AuthorityRecord, SymbolId } from "../src/core/index.ts";
 import {
+  attributionUnmatched,
   authorityDecreases,
   authorityIncreases,
   deletedSymbols,
   diffAuthority,
   hasAuthorityIncrease,
+  hasUnresolvedWidening,
   movedSymbols,
   pathFor,
   unchangedSymbols,
   unknownGained,
+  unresolvedGains,
 } from "../src/core/index.ts";
 
 /**
@@ -29,6 +32,7 @@ function record(
     entrypoint?: boolean;
     unresolved?: AuthorityRecord["unresolved"];
     paths?: AuthorityRecord["paths"];
+    bodies?: AuthorityRecord["bodies"];
   } = {},
 ): AuthorityRecord {
   return {
@@ -48,6 +52,7 @@ function record(
     },
     unresolved: parts.unresolved ?? [],
     paths: parts.paths ?? [],
+    ...(parts.bodies ? { bodies: parts.bodies } : {}),
   };
 }
 
@@ -354,5 +359,401 @@ describe("diffAuthority with renamed files", () => {
     );
     expect(movedSymbols(diff)).toHaveLength(0);
     expect(unchangedSymbols(diff)).toHaveLength(1);
+  });
+});
+
+/**
+ * DESIGN.md §6.3: authority is compared as a multiset over the bodies a
+ * symbol owns. A record carrying no `bodies` owns one, whose authority is the
+ * record's own — which is why every case above, written without the field,
+ * means what it used to.
+ */
+describe("a symbol that owns more than one body", () => {
+  const body = (effects: readonly string[] = [], capabilities: readonly string[] = []) =>
+    ({ effects, capabilities, unknown: false, unresolved: [] }) as NonNullable<
+      AuthorityRecord["bodies"]
+    >[number];
+
+  it("counts a second holder of an effect the first already had as an increase", () => {
+    const diff = diffAuthority(
+      [
+        record("r.ts#<inline callbacks>", {
+          observed: ["network"],
+          bodies: [body(["network"]), body()],
+        }),
+      ],
+      [
+        record("r.ts#<inline callbacks>", {
+          observed: ["network"],
+          bodies: [body(["network"]), body(["network"])],
+        }),
+      ],
+    );
+    // The record's own `observed` is identical on both sides. Only the number
+    // of bodies holding it moved, and that is the increase a merged owner
+    // would otherwise report as nothing.
+    expect(authorityIncreases(diff)[0]?.added).toEqual([{ kind: "effect", name: "network" }]);
+  });
+
+  it("reports a body that stopped holding one as a decrease, never a failure", () => {
+    const diff = diffAuthority(
+      [
+        record("r.ts#<inline callbacks>", {
+          observed: ["network"],
+          bodies: [body(["network"]), body(["network"])],
+        }),
+      ],
+      [
+        record("r.ts#<inline callbacks>", {
+          observed: ["network"],
+          bodies: [body(["network"]), body()],
+        }),
+      ],
+    );
+    expect(hasAuthorityIncrease(diff)).toBe(false);
+    expect(authorityDecreases(diff)[0]?.removed).toEqual([{ kind: "effect", name: "network" }]);
+  });
+
+  it("refuses to call a body swap unchanged, because it cannot tell it from a reorder", () => {
+    // The whole of §6.4's third shape. `[network, pure]` becoming
+    // `[pure, network]` is one of two stories: the handlers were reordered, or
+    // the authority moved from the first to the second. The bodies have no
+    // names, so the two are the same pair of sequences — and one of them is a
+    // public route that can now reach the network. Calling it unchanged would
+    // be the guess §3.4 forbids.
+    const diff = diffAuthority(
+      [
+        record("r.ts#<inline callbacks>", {
+          observed: ["network"],
+          bodies: [body(["network"]), body()],
+        }),
+      ],
+      [
+        record("r.ts#<inline callbacks>", {
+          observed: ["network"],
+          bodies: [body(), body(["network"])],
+        }),
+      ],
+    );
+    expect(hasAuthorityIncrease(diff)).toBe(false);
+    expect(attributionUnmatched(diff).map((entry) => entry.symbol)).toEqual([
+      "r.ts#<inline callbacks>",
+    ]);
+    expect(hasUnresolvedWidening(diff)).toBe(true);
+    expect(unchangedSymbols(diff)).toHaveLength(0);
+  });
+
+  it("says so even when an increase was also found in the same symbol", () => {
+    // One edit can raise one authority and relocate another. The increase's
+    // report says nothing about the relocation, so the two are reported apart.
+    const diff = diffAuthority(
+      [
+        record("r.ts#<inline callbacks>", {
+          observed: ["network"],
+          bodies: [body(["network"]), body()],
+        }),
+      ],
+      [
+        record("r.ts#<inline callbacks>", {
+          observed: ["network", "db_write"],
+          bodies: [body(), body(["db_write", "network"])],
+        }),
+      ],
+    );
+    expect(authorityIncreases(diff)[0]?.added).toEqual([{ kind: "effect", name: "db_write" }]);
+    expect(attributionUnmatched(diff)).toHaveLength(1);
+  });
+
+  it("catches authority changing hands when no whole body stayed the same", () => {
+    // `[{network}, {db_write}]` becoming `[{network, db_write}, {}]`. Both
+    // counts stay at one, and no body is unchanged, so matching whole bodies
+    // sees nothing — but `db_write` went from the second handler to the first.
+    const diff = diffAuthority(
+      [
+        record("r.ts#<inline callbacks>", {
+          observed: ["network", "db_write"],
+          bodies: [body(["network"]), body(["db_write"])],
+        }),
+      ],
+      [
+        record("r.ts#<inline callbacks>", {
+          observed: ["network", "db_write"],
+          bodies: [body(["db_write", "network"]), body()],
+        }),
+      ],
+    );
+    expect(hasAuthorityIncrease(diff)).toBe(false);
+    expect(authorityDecreases(diff)).toHaveLength(0);
+    expect(attributionUnmatched(diff)).toHaveLength(1);
+    expect(unchangedSymbols(diff)).toHaveLength(0);
+    expect(hasUnresolvedWidening(diff)).toBe(true);
+  });
+
+  it("catches the same shape in capabilities", () => {
+    const diff = diffAuthority(
+      [
+        record("r.ts#<inline callbacks>", {
+          capRequired: ["http:get:a.example", "http:post:b.example"],
+          bodies: [body([], ["http:get:a.example"]), body([], ["http:post:b.example"])],
+        }),
+      ],
+      [
+        record("r.ts#<inline callbacks>", {
+          capRequired: ["http:get:a.example", "http:post:b.example"],
+          bodies: [body([], ["http:get:a.example", "http:post:b.example"]), body()],
+        }),
+      ],
+    );
+    expect(hasAuthorityIncrease(diff)).toBe(false);
+    expect(attributionUnmatched(diff)).toHaveLength(1);
+  });
+
+  it("stays silent when a body gained something no other body had", () => {
+    // The control for the two above: `db_write` is held by one more body than
+    // it was, so it did not change hands — it is an ordinary increase, and
+    // saying "it may have moved" beside that report would be noise.
+    const diff = diffAuthority(
+      [
+        record("r.ts#<inline callbacks>", {
+          observed: ["network"],
+          bodies: [body(["network"]), body()],
+        }),
+      ],
+      [
+        record("r.ts#<inline callbacks>", {
+          observed: ["network", "db_write"],
+          bodies: [body(["db_write", "network"]), body()],
+        }),
+      ],
+    );
+    expect(authorityIncreases(diff)[0]?.added).toEqual([{ kind: "effect", name: "db_write" }]);
+    expect(attributionUnmatched(diff)).toHaveLength(0);
+  });
+
+  it("stays silent when every authority-bearing body sits where one already did", () => {
+    // A body holding nothing inserted between two that are unchanged: the
+    // common prefix and suffix match index for index, and what is left holds
+    // no authority, so nothing moved. This is what keeps adding a route from
+    // reporting the routes below it.
+    const diff = diffAuthority(
+      [
+        record("r.ts#<inline callbacks>", {
+          observed: ["network"],
+          bodies: [body(), body(["network"])],
+        }),
+      ],
+      [
+        record("r.ts#<inline callbacks>", {
+          observed: ["network"],
+          bodies: [body(), body(), body(["network"])],
+        }),
+      ],
+    );
+    expect(attributionUnmatched(diff)).toHaveLength(0);
+    expect(unchangedSymbols(diff)).toHaveLength(1);
+  });
+
+  it("stays silent for an ordinary one-body symbol, which has no attribution question", () => {
+    const diff = diffAuthority(
+      [record("a.ts#f", { observed: ["network"] })],
+      [record("a.ts#f", { observed: ["network"] })],
+    );
+    expect(attributionUnmatched(diff)).toHaveLength(0);
+  });
+
+  it("catches a grant narrowing while it changes hands", () => {
+    // `admin: http:get:*` → `public: http:get:api.example.com`. The total
+    // narrowed, so `removed` names `http:get:*` and nothing increased — but a
+    // public route can now reach a host only an admin route could, and that is
+    // what the third shape is for. Read as raw tokens this looks like one
+    // capability disappearing and another appearing; read as §4.4's
+    // containment, `http:get:api.example.com` is held by one body on each side
+    // and by a different one.
+    const diff = diffAuthority(
+      [
+        record("r.ts#<inline callbacks>", {
+          capRequired: ["http:get:*"],
+          bodies: [body([], ["http:get:*"]), body()],
+        }),
+      ],
+      [
+        record("r.ts#<inline callbacks>", {
+          capRequired: ["http:get:api.example.com"],
+          bodies: [body(), body([], ["http:get:api.example.com"])],
+        }),
+      ],
+    );
+    expect(hasAuthorityIncrease(diff)).toBe(false);
+    expect(authorityDecreases(diff)[0]?.removed).toEqual([
+      { kind: "capability", name: "http:get:*" },
+    ]);
+    expect(attributionUnmatched(diff)).toHaveLength(1);
+    expect(hasUnresolvedWidening(diff)).toBe(true);
+    expect(unchangedSymbols(diff)).toHaveLength(0);
+  });
+
+  it("catches a grant widening while it changes hands, which is also an increase", () => {
+    const diff = diffAuthority(
+      [
+        record("r.ts#<inline callbacks>", {
+          capRequired: ["http:get:api.example.com"],
+          bodies: [body([], ["http:get:api.example.com"]), body()],
+        }),
+      ],
+      [
+        record("r.ts#<inline callbacks>", {
+          capRequired: ["http:get:*"],
+          bodies: [body(), body([], ["http:get:*"])],
+        }),
+      ],
+    );
+    expect(authorityIncreases(diff)[0]?.added).toEqual([
+      { kind: "capability", name: "http:get:*" },
+    ]);
+    expect(attributionUnmatched(diff)).toHaveLength(1);
+  });
+
+  it("stays silent when a grant narrows without changing hands", () => {
+    // The control: the same body keeps it, so nothing moved and the narrowing
+    // is reported as the decrease it is.
+    const diff = diffAuthority(
+      [
+        record("r.ts#<inline callbacks>", {
+          capRequired: ["http:get:*"],
+          bodies: [body([], ["http:get:*"]), body()],
+        }),
+      ],
+      [
+        record("r.ts#<inline callbacks>", {
+          capRequired: ["http:get:api.example.com"],
+          bodies: [body([], ["http:get:api.example.com"]), body()],
+        }),
+      ],
+    );
+    expect(hasAuthorityIncrease(diff)).toBe(false);
+    expect(attributionUnmatched(diff)).toHaveLength(0);
+  });
+
+  it("keeps capability containment, so narrowing a grant is still not an increase", () => {
+    const diff = diffAuthority(
+      [
+        record("r.ts#<inline callbacks>", {
+          capRequired: ["http:get:*"],
+          bodies: [body([], ["http:get:*"]), body()],
+        }),
+      ],
+      [
+        record("r.ts#<inline callbacks>", {
+          capRequired: ["http:get:api.example.com"],
+          bodies: [body([], ["http:get:api.example.com"]), body()],
+        }),
+      ],
+    );
+    expect(hasAuthorityIncrease(diff)).toBe(false);
+  });
+
+  it("counts a second body that became unresolvable, which one boolean could not", () => {
+    const unknownBody = { effects: [], capabilities: [], unknown: true, unresolved: [] };
+    const diff = diffAuthority(
+      [record("r.ts#<inline callbacks>", { unknown: true, bodies: [unknownBody, body()] })],
+      [record("r.ts#<inline callbacks>", { unknown: true, bodies: [unknownBody, unknownBody] })],
+    );
+    expect(unknownGained(diff)).toHaveLength(1);
+  });
+});
+
+/**
+ * DESIGN.md §6.4's third shape is about *attribution*, not only about
+ * authority: an operation the analysis could not read moving from one
+ * anonymous handler to another is the same sentence about a different place,
+ * and the counts do not move.
+ */
+describe("an unresolvable operation moving between anonymous bodies", () => {
+  const opaque = (operation: string) => [
+    { reason: "external-module" as const, operation, count: 1 },
+  ];
+  const unknownBody = (unresolved: AuthorityRecord["unresolved"] = []) => ({
+    effects: [],
+    capabilities: [],
+    unknown: true,
+    unresolved,
+  });
+  const plainBody = { effects: [], capabilities: [], unknown: false, unresolved: [] };
+
+  it("is reported when the `unknown` body and the resolved one swap places", () => {
+    const diff = diffAuthority(
+      [record("r.ts#<inline callbacks>", { unknown: true, bodies: [unknownBody(), plainBody] })],
+      [record("r.ts#<inline callbacks>", { unknown: true, bodies: [plainBody, unknownBody()] })],
+    );
+    expect(hasAuthorityIncrease(diff)).toBe(false);
+    expect(unknownGained(diff)).toHaveLength(0);
+    expect(attributionUnmatched(diff)).toHaveLength(1);
+    expect(hasUnresolvedWidening(diff)).toBe(true);
+  });
+
+  it("is reported when the same opaque operation moves, at the same count", () => {
+    const base = record("r.ts#<inline callbacks>", {
+      unknown: true,
+      unresolved: opaque("client.delete"),
+      bodies: [unknownBody(opaque("client.delete")), plainBody],
+    });
+    const head = record("r.ts#<inline callbacks>", {
+      unknown: true,
+      unresolved: opaque("client.delete"),
+      bodies: [plainBody, unknownBody(opaque("client.delete"))],
+    });
+    const diff = diffAuthority([base], [head]);
+    // The owner's own multiset is identical, so §6.4's second shape says
+    // nothing — which is correct, and is why the third shape has to exist.
+    expect(unresolvedGains(diff)).toHaveLength(0);
+    expect(attributionUnmatched(diff)).toHaveLength(1);
+  });
+
+  it("is reported when two different opaque operations swap, both bodies unknown", () => {
+    const bodies = (first: string, second: string) => [
+      unknownBody(opaque(first)),
+      unknownBody(opaque(second)),
+    ];
+    const both = [
+      { reason: "external-module" as const, operation: "client.delete", count: 1 },
+      { reason: "external-module" as const, operation: "client.read", count: 1 },
+    ];
+    const diff = diffAuthority(
+      [
+        record("r.ts#<inline callbacks>", {
+          unknown: true,
+          unresolved: both,
+          bodies: bodies("client.delete", "client.read"),
+        }),
+      ],
+      [
+        record("r.ts#<inline callbacks>", {
+          unknown: true,
+          unresolved: both,
+          bodies: bodies("client.read", "client.delete"),
+        }),
+      ],
+    );
+    // Both bodies are `unknown` on both sides, so the boolean cannot tell them
+    // apart; their own operations can.
+    expect(unknownGained(diff)).toHaveLength(0);
+    expect(unresolvedGains(diff)).toHaveLength(0);
+    expect(attributionUnmatched(diff)).toHaveLength(1);
+  });
+
+  it("says nothing twice when the operation was added rather than moved", () => {
+    // §6.4's second shape already names it, so the third does not repeat it.
+    const diff = diffAuthority(
+      [record("r.ts#<inline callbacks>", { unknown: true, bodies: [unknownBody(), plainBody] })],
+      [
+        record("r.ts#<inline callbacks>", {
+          unknown: true,
+          unresolved: opaque("client.delete"),
+          bodies: [unknownBody(), unknownBody(opaque("client.delete"))],
+        }),
+      ],
+    );
+    expect(unresolvedGains(diff)).toHaveLength(1);
+    expect(attributionUnmatched(diff)).toHaveLength(0);
   });
 });

@@ -72,7 +72,13 @@ export function summarizeExtractedFiles(
         boundary: parseDeclaredBoundary(fn.jsDoc),
         entrypoint: fn.jsDoc?.tags.has("entrypoint") ?? false,
       };
-      const declaredContract = config?.contractFor(fn.id);
+      // An entry that owns several bodies is declarable by nobody (DESIGN.md
+      // §4.1 (a)). A config key naming it is deliberately not looked up, so
+      // it stays in `unmatchedExactKeys()` and is reported: a contract there
+      // would be one sentence standing for several functions the author
+      // cannot see separately, which is the guarantee surface growing by
+      // notation alone (P4).
+      const declaredContract = fn.undeclarable ? undefined : config?.contractFor(fn.id);
       const merged = mergeContract(jsDoc, declaredContract, specs.get(fn.id), aliases);
       summaries.push({
         id: fn.id,
@@ -82,8 +88,10 @@ export function summarizeExtractedFiles(
         ...(fn.jsDocRange ? { jsDocRange: fn.jsDocRange } : {}),
         ...(fn.implicitConstructor ? { implicitConstructor: true as const } : {}),
         ...(fn.configOnly ? { configOnly: true as const } : {}),
+        ...(fn.undeclarable ? { undeclarable: true as const } : {}),
         ...merged,
         calls: fn.calls.flatMap(toCalls),
+        ...(fn.bodies ? { bodies: fn.bodies.map((body) => body.flatMap(toCalls)) } : {}),
       });
     }
   }

@@ -75,6 +75,19 @@ function buildRecord(
       unknown: propagated.required.unknown,
     },
     unresolved: unresolvedOperations(summary),
+    ...(propagated.bodies
+      ? {
+          bodies: propagated.bodies.map((body, index) => ({
+            effects: KNOWN_EFFECTS.filter((effect) => body.observed.effects.has(effect)),
+            capabilities: body.required.capabilities.map(formatCapability).toSorted(),
+            unknown: body.observed.unknown || body.required.unknown,
+            // The same computation as the record's own `unresolved`, over this
+            // body's calls alone — so the bodies' lists partition it exactly,
+            // and a comparison can tell two `unknown` bodies apart.
+            unresolved: unresolvedOperations({ ...summary, calls: summary.bodies?.[index] ?? [] }),
+          })),
+        }
+      : {}),
     paths: [
       ...effectPaths(propagated, observed, state),
       ...capabilityPaths(summary.id, required, state),

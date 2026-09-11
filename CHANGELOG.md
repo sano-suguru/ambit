@@ -16,6 +16,61 @@ report.
 
 ### Added
 
+- **`file.ts#<inline callbacks>`, a new declaration path** — a function
+  expression written directly as a call argument with no enclosing extracted
+  function (the idiomatic Koa/Express/Fastify/Hono route handler) used to be
+  analyzed by nothing at all: authority added inside one was reported nowhere,
+  in either `diff` mode. Every such function in a file is now analyzed under
+  one entry with that path, so it produces a `kind: "authority"` record, enters
+  `ambit diff`, and appears in `--coverage`'s function count. **A change to
+  §4.1 (a)'s `symbol` notation**, and a third tier beside JSDoc-declarable and
+  config-declarable: the owner is declarable by nobody — a contract comment on
+  one of the callbacks stays inert (`AMB-E003`), and an `ambit.config.ts` key
+  naming the owner declares nothing and is reported as matching no symbol.
+  `ambit init` proposes nothing for it. Measured on
+  `outline/outline@35dd15b9`, whose 226 inline routes were the silence this
+  closes
+  ([2026-09-11](docs/measurements/2026-09-11-inline-callback-owner.md)). What it
+  does **not** add is per-handler identity: an increase names the file, and
+  which of its handlers holds what is a question §6.4's third shape reports as
+  unanswerable rather than answers.
+- **`bodies` on the `kind: "authority"` NDJSON record** — present only on an
+  entry that owns more than one body (today only the owner above), carrying
+  each body's own `{effects, capabilities, unknown, unresolved}`. Absent on
+  every ordinary record, and read as one body holding the record's own
+  effective authority, so no existing record's bytes change. It is what §6.3's
+  comparison counts and what §6.4's third shape is computed from.
+
+### Changed
+
+- **`ambit diff` compares authority as a multiset over the bodies a symbol
+  owns** (§6.3). For the one body almost every symbol owns this is the set
+  comparison it has always been, and no previously-reported increase changes.
+  For the inline-callback owner it means a second handler gaining an authority
+  a first already held is an increase — without it, one entry standing for many
+  handlers would be a merge into silence. §6.4's first shape (`unknown`
+  gained) is counted the same way.
+- **A third shape in §6.4: what the bodies hold moved, and they cannot be
+  matched.** A symbol owning several anonymous bodies can hold the same things
+  on both sides in different places — one route losing `network` while another
+  gains it, or an opaque `delete` moving from an admin route to a public one —
+  and that is the same pair of sequences a reorder produces. Nothing grew, so
+  it is not an increase and no approval is about it; it is reported, and
+  `ambit diff --strict` fails on it with the other two shapes. The comparison
+  matches the common prefix and suffix of the two body sequences index for
+  index, then reads each thing a body holds as a presence sequence over what is
+  left: held by as many bodies as before but arranged differently means it
+  moved; held by a different number means it was added or removed, which the
+  other sections already report. A capability's presence follows §4.4's
+  containment, like every other capability comparison, so a grant that narrows
+  *and* changes hands is reported as both.
+- **`ambit diff --strict` fails on some edits it used to pass.** Bodies that
+  were never walked are now analyzed, and many of them reach calls no stub
+  table covers, so a §6.4 report can appear where none did. Measured on all
+  three third-party subjects: adding one line to a test file takes `--strict`
+  from exit 0 to exit 1. **Default `ambit diff` is unaffected** — exit 0 on all
+  three unmodified trees, in both modes, with zero increases.
+
 - **`ambit diff --strict`** — fails the comparison when the analysis reached
   less of the tree than it did on the base side: a symbol that stopped being
   resolved, or a symbol whose own body gained an operation that could not be

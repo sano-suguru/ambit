@@ -79,6 +79,15 @@ export function proposeContracts(
     const effects = KNOWN_EFFECTS.filter((effect) => propagated.observed.effects.has(effect));
     const tag = `@effects ${effects.length === 0 ? "pure" : effects.join(", ")}`;
 
+    // The inline-callback owner stands for several bodies at once and has no
+    // declaration site for any of them, so there is no edit — in JSDoc or in
+    // config — that would attach the inferred set to what produced it. A
+    // proposal naming it would be a patch nobody can apply (DESIGN.md §4.1
+    // (a), "The inline-callback owner"). The `unknown` branch above still
+    // reports the calls that stopped the inference, because that is a report
+    // about call sites and not a proposal about a declaration.
+    if (summary.undeclarable) continue;
+
     // Declarations no JSDoc comment can carry: an accessor or an anonymous
     // default export (DESIGN.md §4.1 (a)), and a class that writes no
     // constructor (its construction has a declaration path and no declaration

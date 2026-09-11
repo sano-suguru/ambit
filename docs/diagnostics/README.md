@@ -96,6 +96,7 @@ declared inside another function, or a declaration with no body.
 | overload signature, `abstract` member, `.ts`-file `declare` | Move the contract to the implementation. An overload set is one runtime function, and the implementation is it (§4.1, "Overloads and bodyless declarations") |
 | `declare function` with no implementation anywhere | Nothing to move it to. That code needs a stub (`src/stubs/`); until it has one, calls to it are honestly `unknown` |
 | a contract written on a `class` | Move it to the constructor. A comment about the class is not a verified statement about constructing it |
+| inline callback argument | The callback's calls *are* analyzed — under its file's `<inline callbacks>` entry (§4.1 (a)) — but neither JSDoc nor a config key can declare that entry, because it stands for every such callback in the file. Bind the handler to a name to give it a symbol of its own |
 | anything else in the `skipped` list | The node cannot carry a contract at all. See [`docs/analysis-limitations.md`](../analysis-limitations.md) |
 
 A call into an overload set with no implementation in the project is `unknown`

@@ -28,14 +28,14 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 |---|---:|---:|
 | **External adopters** | **0** | **1** |
 | Authority increases an external team rejected or explicitly approved | 0 | > 0 |
-| `unknown` rate, real third-party code (corpus median, 4,200 functions) | 52.6% | lower — no target (see below) |
+| `unknown` rate, real third-party code (corpus median, 4,200 functions) | 52.9% | lower — no target (see below) |
 | `unknown` rate, adopting-team-equivalent fixture (`realistic-api`) | 1.9% (1/53) | no target (see below) |
-| `unknown` rate, Ambit's own source (`check src`) | 37.9% (129/340) | — |
+| `unknown` rate, Ambit's own source (`check src`) | 38.9% (135/347) | — |
 | Authority Ambit sees in a third-party backend's data layer ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)) | 940 stubbed call sites, up from 120 | — |
 | Third-party backends `ambit diff` is silent on when nothing changed | **3** — Unleash ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)), immich ([2026-09-11](measurements/2026-09-11-second-third-party-validation-immich.md)), outline ([2026-09-11](measurements/2026-09-11-third-third-party-validation-outline.md)) | — |
-| `unknown` rate, second third-party backend (immich `server/src`, 3,061 functions) | 79.5% (2,432/3,061) | no target (see below) |
-| `unknown` rate, third third-party backend (outline `server`, 1,951 functions) | 69.0% (1,347/1,951) | no target (see below) |
-| Tests | 552 passing, 33 files | green |
+| `unknown` rate, second third-party backend (immich `server/src`, 3,191 functions) | 79.9% (2,550/3,191) | no target (see below) |
+| `unknown` rate, third third-party backend (outline `server`, 2,245 functions) | 72.8% (1,635/2,245) | no target (see below) |
+| Tests | 604 passing, 34 files | green |
 | `tsc --noEmit` / `biome ci .` | pass / pass | pass |
 | `check src` latency, 40 files | ~1.1 s | §3.5's 3 s allowance |
 | Incremental / resident analysis | no | yes (§6.2) |
@@ -83,8 +83,8 @@ node src/cli/main.ts check src --coverage                    # exit 0
 node src/cli/main.ts check test/fixtures/realistic-api --coverage   # exit 0
 node src/cli/main.ts check test/fixtures/next-app --coverage        # exit 0
 node src/cli/main.ts diff HEAD src                           # exit 0, ledger's approvals in place
-node scripts/bench-corpus.ts                                 # median 52.6%
-npm pack --dry-run                                           # 96 files, 161.8 kB packed
+node scripts/bench-corpus.ts                                 # median 52.9%
+npm pack --dry-run                                           # 98 files, 192.1 kB packed
 ```
 
 `pnpm exec biome ci .` returns 1 in one local shell because of a user-installed
@@ -100,12 +100,12 @@ Each of these was measured, and the run is archived.
   `test/corpus/corpus.json` — five server-side TypeScript projects (`hono`,
   `trpc-server`, `elysia`, `got`, `drizzle-orm`), pinned by commit SHA and by
   the git tree object of each measured subtree — went from a 76.7% median
-  `unknown` rate to 52.6%, in the order the measurement itself named:
+  `unknown` rate to 52.9%, in the order the measurement itself named:
   default-lib classification, by-reference callbacks (§4.2 rule 4), inlined
   self-walked bodies, then the locality rule on argument-position mutators.
 - **`ambit diff` gives reviewable signal on a backend nobody here wrote.**
-  Unleash (`Unleash/unleash@044461b`, `src/lib`, 596 files, 3,523 functions,
-  dependencies installed) was cloned untouched and put through the adopter's
+  Unleash (`Unleash/unleash@044461b`, `src/lib`, 596 files, 3,523 functions at
+  the time, dependencies installed) was cloned untouched and put through the adopter's
   workflow. The untouched tree reports **no** increase, so the gate has no
   standing noise; four authority-expansion edits an agent might make were then
   applied one at a time. `fetch`, `node:fs.writeFileSync` and
@@ -126,7 +126,7 @@ Each of these was measured, and the run is archived.
 - **The lessons from the first third-party backend generalize to a second
   one, and that run found the blocker the first could not.**
   `immich-app/immich@2a62622` — NestJS 12, ESM, kysely, bullmq on ioredis, a
-  pnpm-workspace monorepo, 460 analyzed files, 3,061 functions — was cloned
+  pnpm-workspace monorepo, 460 analyzed files, 3,061 functions at the time — was cloned
   untouched and put through the same workflow. Every name in its top-ten
   unresolved histogram is a receiver named from its declared type, which is the
   rule the Unleash run added, and `fetch`, `node:fs` / `node:child_process` and
@@ -147,20 +147,38 @@ Each of these was measured, and the run is archived.
   gate's properties and found the failure the first two could not.**
   `outline/outline@35dd15b9` — Koa 3 with inline route handlers, Sequelize 6,
   `bull` on ioredis, `@aws-sdk/client-s3`, yarn 4, 474 analyzed files, 1,951
-  functions — was cloned untouched and put through the same workflow. Zero
-  standing noise in both modes; `fetch`, `node:fs` / `node:child_process` and
-  their un-prefixed spellings reported with the whole call path; history diffs
-  proportional to the change; `unknown` at 69.0%, the **lowest** of the three
-  and on the subject with the worst miss. Nothing from either earlier run was
-  contradicted. Two findings are new and neither is closed: authority added
-  inside an **argument-position route handler** is reported nowhere at all
-  (exit 0 in both modes, `--coverage` byte-identical), and a §6.4 entry reads
-  `? <unnamed>` when the receiver is a project class inheriting the method from
-  a package — an ActiveRecord ORM's whole surface. A third finding was fixed:
-  `check` and `diff` **did not terminate** when two declarations shared a
-  symbol id, which a class declaring `run()` beside `static run()` produces.
-  The run is
+  functions at the time — was cloned untouched and put through the same
+  workflow. Zero standing noise in both modes; `fetch`, `node:fs` /
+  `node:child_process` and their un-prefixed spellings reported with the whole
+  call path; history diffs proportional to the change. Nothing from either
+  earlier run was contradicted, and three findings were new. Two are now
+  fixed: `check` and `diff` **did not terminate** when two declarations shared
+  a symbol id, which a class declaring `run()` beside `static run()` produces;
+  and authority added inside an **argument-position route handler** was
+  reported nowhere at all, which the inline-callback owner closes (below). One
+  is open: a §6.4 entry reads `? <unnamed>` when the receiver is a project
+  class inheriting the method from a package — an ActiveRecord ORM's whole
+  surface. The run is
   [2026-09-11](measurements/2026-09-11-third-third-party-validation-outline.md).
+- **A route registered as an inline handler is no longer invisible.** Every
+  function expression written directly as a call argument with no extracted
+  ancestor is analyzed under one entry per file,
+  `file.ts#<inline callbacks>`, and authority is compared as a multiset over
+  the bodies it owns — so a handler gaining `fetch` is an increase even when a
+  sibling in the same file already reaches the network (a per-file *set* would
+  merge 495 such pairs on outline alone). outline's recorded E6 edit goes from
+  exit 0 with no line anywhere to exit 1. **What this closes is the coverage
+  hole, not per-handler identity**: authority moving from one handler to
+  another leaves every count where it was, and §6.4's third shape reports that
+  the bodies cannot be matched rather than calling it unchanged. On all three subjects the unmodified
+  tree still reports **zero** increases at exit 0 in both modes, and every one
+  of outline's 1,951 previously-emitted authority records is byte-identical.
+  What moved is `--coverage` — bodies that were never walked are now analyzed,
+  and `unknown` rises on all three — and `diff --strict`, which now fails on a
+  one-line edit to a test file. The run is
+  [2026-09-11](measurements/2026-09-11-inline-callback-owner.md);
+  [ADR-0013](adr/0013-the-inline-callback-owner.md) says why one entry per
+  file.
 - **The gate is real and it has cost something.** `ambit diff HEAD~1 src` runs
   as a **gating** CI step with `continue-on-error` removed. The change that
   introduced the approval ledger was itself a legitimate authority increase:
@@ -184,21 +202,24 @@ Each of these was measured, and the run is archived.
 - **That anyone wants this.** Zero external adopters, zero pilot teams, zero
   observed incidents prevented. This is the single most important row above, and
   no amount of test coverage substitutes for it.
-- **That `ambit diff` sees a change to a route written in the idiomatic style
-  of Koa, Express, Fastify or Hono.** A handler registered as an
-  argument-position arrow at the top level of a file carries no contract and
-  has no extracted ancestor, so authority added inside it produces no line and
-  exit 0 in both modes — measured on outline, whose 226 routes are all written
-  that way. `docs/DESIGN.md` §6.4 names this outcome as the one that must not
-  happen, so the code is behind the specification. What a stable declaration
-  path for such a function should be is undecided
-  ([`docs/open-questions.md`](open-questions.md)); the workaround is to bind
-  the handler to a name. **This is the blocker that has to close before an
-  external adopter on such a framework can rely on the gate.**
+- **That a file-level report on an inline handler is reviewable enough.** An
+  increase inside a route registered as an argument-position arrow now fails
+  the gate, but it names the file rather than the handler, and on a count
+  increase the witness path names *a* body holding the authority, which need
+  not be the one that changed. Authority moving *between* two such handlers is
+  not an increase at all — it is reported as §6.4's third shape, "the bodies
+  cannot be matched", which keeps it out of silence but leaves the reader to
+  find the handler in the git diff. No adopter has said whether that is enough
+  ([`docs/open-questions.md`](open-questions.md)).
+- **That `ambit diff --strict` is usable on a repository with inline test
+  callbacks.** Those bodies are now analyzed and mostly reach calls no stub
+  table covers, so one added line in a test file takes `--strict` from exit 0
+  to exit 1 on all three third-party subjects, as a §6.4 report. Default
+  `ambit diff` is unaffected.
 - **That the corpus number generalizes.** The corpus deliberately does not
   install its dependencies, so a call into a package whose types are absent stays
   unresolved. The measurement can only be pessimistic, never flattering — but it
-  also means 52.6% is not what an adopting team with a populated `node_modules`
+  also means 52.9% is not what an adopting team with a populated `node_modules`
   would see, in either direction.
 - **Linux.** The M0.5 comparison ran on darwin/arm64 only. Nothing is claimed
   about Linux either way.
@@ -212,38 +233,35 @@ Each of these was measured, and the run is archived.
 
 ## Current bottleneck
 
-**A route handler written inline is a hole in the gate, and there is still no
-adopter to point the next fix at.**
+**There is no adopter to point the next fix at.**
 
-The third third-party run changed which of these comes first. `ambit diff` is
-silent — exit 0 in both modes, no line anywhere — when authority is added
-inside a handler registered as an argument-position arrow, which is how Koa,
-Express, Fastify and Hono are idiomatically written and how all 226 of
-outline's routes are written. Closing it needs a declaration path for an
-anonymous argument-position function, and the three candidate notations each
-have a measured or structural failure mode
-([`docs/open-questions.md`](open-questions.md)). Until it closes, "no authority
-increased" means less than it reads as on such a repository.
+The blocker the third third-party run put first — `ambit diff` silent on
+authority added inside an inline route handler — is closed
+([ADR-0013](adr/0013-the-inline-callback-owner.md)). What it leaves behind is
+not another silence but two questions only a user can answer: whether a
+file-level increase is reviewable, and whether `--strict` is still usable on a
+repository whose tests are written as inline callbacks. Both are listed under
+"What is not proven" above, and neither can be settled here.
 
-Behind it, unchanged:
+So the bottleneck is the one it was before:
 
 **`unknown` on real third-party code, and the absence of an adopter to point the
 next fix at.**
 
-52.6% median means that on real code, more than half of all functions still
+52.9% median means that on real code, more than half of all functions still
 depend on a path the analysis did not reach. The largest remaining contributor
 is `external-module`: calls into packages whose types are not installed. What
 would move it next is measurable — the corpus prints the whole unresolved-name
 histogram — but which of those names *matters* is a question only an adopter can
 answer, and there is none.
 
-On Ambit's own source the same figure is 38.5%, dominated by calls into the
+On Ambit's own source the same figure is 38.9%, dominated by calls into the
 `typescript` compiler API from the connection layer: the one file §3.4 means to
 be replaceable.
 
 The 2026-09-11 third-party run narrowed the question without closing it. On a
 real backend with its dependencies installed, the unresolved-name histogram is
-no longer anonymous — it names `knex.QueryBuilder.*` (448 sites at the top),
+no longer anonymous — it names `knex.QueryBuilder.*` (458 sites at the top),
 `express.Response.*`, `supertest.Test.*` — so *which* names matter is now
 answerable there. What it also showed is that `unknown` and the gate are less
 coupled than the rate suggests: a *known* effect added inside an `unknown`

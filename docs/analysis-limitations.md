@@ -414,11 +414,30 @@ accessor in a literal that rule does not reach is skipped, not extracted. A
 contract comment on any of these is still `AMB-E003`; see "`ambit.config.ts`"
 above.
 
+A third shape is extracted, propagates, and can be declared from **nowhere**:
+a file's inline callbacks, under the single segment `<inline callbacks>`
+(DESIGN.md §4.1 (a)). What it owns is every function expression written
+directly as a call argument with no function-like or class-like ancestor —
+the module-scope `router.post("x", async (ctx) => { … })` — collectively, one
+entry per file. A contract comment on one of the callbacks is `AMB-E003` as
+before, and an `ambit.config.ts` key naming the owner is reported as matching
+no symbol.
+
+One entry per file rather than one per callback because an anonymous sibling
+has no name to be told apart by; what replaces the name is that §6.3 compares
+the owner's authority as a multiset over the bodies it owns, so two handlers
+holding the same effect are two holders and a third is an increase. Each
+callback is still walked as *itself*, not as a body of the file, so a mutation
+that escapes the callback is not mistaken for a local one.
+
 A call inside any other function-like node — an object-literal member the
-notation cannot name, a nested function declaration, an inline callback
-argument, or anything else with no extracted ancestor — is still walked, and
-its effects are attributed to the nearest enclosing *extracted* function. Such
-a call is invisible only when no extracted ancestor exists.
+notation cannot name, a nested function declaration, an inline callback inside
+one of the above, or anything else with no extracted ancestor — is still
+walked, and its effects are attributed to the nearest enclosing *extracted*
+function or inline-callback owner. Such a call is invisible only when neither
+exists. One shape where neither does is a module-scope IIFE — `(async () => {
+await fetch(…) })()` — whose function is not in argument position; its calls
+are attributed to nothing, as every top-level statement's still are.
 
 The identifier-name restriction is not arbitrary. A declaration path is
 `"."`-joined, so a computed, string, or numeric key has no spelling that
@@ -452,8 +471,9 @@ Carrying a contract and being reachable as a call target are gated by the same
 rule for object-literal members, so those two lists coincide there. They still
 differ elsewhere: a call through a parameter-typed receiver cannot be followed
 even when the member it would reach is extracted and declares a contract, and
-an inline callback argument's calls are attributed to its enclosing function
-even though the callback itself can declare nothing.
+an inline callback argument's calls are attributed to its enclosing function,
+or to its file's inline-callback owner, even though the callback itself can
+declare nothing.
 
 ## Reading `--coverage`
 
