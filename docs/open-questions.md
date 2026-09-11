@@ -69,13 +69,46 @@ exit: when it fires, the question is decided, the answer goes in the
   Next.js, and Hono. How far dedicated stubs and entry-point declarations can
   absorb them.
   *Trigger:* an adopter's framework whose handlers do not resolve.
+- **How a §6.4 gain is connected to the caller it is reachable from.** The
+  report names the function whose own body gained the unresolved operation and
+  nothing above it, so a reviewer sees `TagRepository.getAll` rather than the
+  endpoint behind it. Measured on both third-party subjects, for every
+  dependency no table covers. **Propagating it is the wrong shape**: an
+  unresolved operation is not authority, and marking every caller `unresolved`
+  would say the caller's own body holds something it does not. What is worth
+  deciding instead is whether the entry should carry a *witness path* — one
+  route from a changed caller down to the leaf — as explanation beside the
+  body-local fact, not as a claim about the caller.
+  *Trigger:* a third independent backend where a leaf-only §6.4 entry is again
+  what stops a reviewer. Two subjects have shown the shape; the third must not
+  be chosen for this question, or the answer is the question restated.
+- **What environment `ambit diff` reconstructs.** Both sides are analyzed
+  against the *working tree's* `node_modules` (§6), so a change that upgrades a
+  dependency analyzes the base commit's source against the new package's types.
+  That is deliberate — it is what keeps a difference in environment out of a
+  report about contracts — but it means `diff` answers "what did this source
+  change let the code do", not "what can the code do now that it could not
+  before". Authority a dependency *upgrade* introduces has no answer here, and
+  §8's supply-chain work assumes one.
+  *Trigger:* `ambit sbom` or "a dependency update widens effects" (`ROADMAP.md`,
+  M4) being implemented, or an adopter reporting an upgrade whose authority
+  change `diff` did not name.
 - **`unknown` fatigue.** Beyond per-directory `strict`, the total volume of
   warnings and the measurement denominator in practice.
   *Trigger:* an adopter turning `--strict` off rather than fixing what it
   reports.
 - **Monorepos.** Multiple tsconfigs, project references, config discovery,
-  `unknown` at project boundaries, and update propagation.
-  *Trigger:* an adopter with a monorepo.
+  `unknown` at project boundaries, and update propagation. One part of this is
+  now decided and out: `ambit diff <ref> <subdir>` links the working tree's
+  `node_modules` from the repository root down to the checked directory, so a
+  package inside a workspace compares against the same environment it runs in
+  (§6, measured on
+  [immich](measurements/2026-09-11-second-third-party-validation-immich.md)).
+  What is left is the workspace **root** as the checked directory — which
+  tsconfig is found there, which `node_modules` below it the base side needs,
+  and how project boundaries are reported.
+  *Trigger:* already fired for the subdirectory case, which is closed above.
+  For the rest, an adopter running `ambit diff` at a workspace root.
 
 ## Runtime
 

@@ -211,6 +211,14 @@ sites against 479 with it, and an `any-typed` reason (77 sites) that the side
 with `node_modules` does not have at all — `external-module` 64 against 331,
 `unresolved-symbol` 236 against 17.
 
+Every directory from the repository root down to the checked one is linked,
+not the root alone, because a package inside a workspace keeps its
+dependencies beside itself. What is **not** covered is a `node_modules`
+*below* the checked directory — running `ambit diff` at a workspace root, where
+each package installs its own. That invocation has other unsettled parts
+(config discovery, multiple tsconfigs) and is in
+[`docs/open-questions.md`](open-questions.md) under Monorepos.
+
 ## `ambit.config.ts`
 
 Out-of-code contracts (DESIGN.md §4.1) are implemented for all five tags. Two

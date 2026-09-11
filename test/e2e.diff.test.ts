@@ -1,8 +1,12 @@
 import { execFile } from "node:child_process";
+import { lstatSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { runDiff } from "../src/cli/diff.ts";
+import { addWorktree, removeWorktree } from "../src/cli/worktree.ts";
 import { authorityIncreases } from "../src/core/index.ts";
 
 const execFileAsync = promisify(execFile);
@@ -133,4 +137,72 @@ describe("ambit diff against this repository's history", () => {
       expect(supported.exitCode, `diff should act on ${flag.join(" ")}`).not.toBe(2);
     }
   }, 240_000);
+});
+
+/**
+ * The base checkout's dependencies, in a workspace.
+ *
+ * A package inside a workspace keeps its `node_modules` beside itself rather
+ * than at the repository root — pnpm workspaces do not hoist — so linking only
+ * the root leaves the base side resolving nothing the head side resolves, and
+ * the comparison then reports the difference between two environments as
+ * authority. Measured on `immich-app/immich@2a62622` at 257 fabricated
+ * increases on an unmodified tree; asserted here on a repository this test
+ * makes, because the shape is what matters and a fixture cannot hold a
+ * `node_modules`.
+ */
+describe("the base worktree's node_modules", () => {
+  async function workspace(): Promise<string> {
+    const root = await mkdtemp(path.join(os.tmpdir(), "ambit-worktree-test-"));
+    const real = realpathSync(root);
+    await execFileAsync("git", ["init", "-q"], { cwd: real });
+    mkdirSync(path.join(real, "pkg", "src"), { recursive: true });
+    writeFileSync(path.join(real, "pkg", "src", "a.ts"), "export const a = 1;\n");
+    await execFileAsync("git", ["add", "-A"], { cwd: real });
+    await execFileAsync(
+      "git",
+      ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base"],
+      { cwd: real },
+    );
+    // Untracked, as an install is.
+    mkdirSync(path.join(real, "node_modules", "root-only"), { recursive: true });
+    mkdirSync(path.join(real, "pkg", "node_modules", "dep"), { recursive: true });
+    return real;
+  }
+
+  it("links every node_modules from the repository root down to the checked package", async () => {
+    const repo = await workspace();
+    const worktree = await addWorktree(repo, "HEAD", path.join("pkg", "src"));
+    try {
+      for (const relative of ["", "pkg"]) {
+        const link = path.join(worktree.root, relative, "node_modules");
+        expect(lstatSync(link).isSymbolicLink(), `${relative || "."} should be linked`).toBe(true);
+        expect(realpathSync(link)).toBe(realpathSync(path.join(repo, relative, "node_modules")));
+      }
+      // The one the head side actually resolves through.
+      expect(lstatSync(path.join(worktree.root, "pkg", "node_modules", "dep")).isDirectory()).toBe(
+        true,
+      );
+      // The links point into the adopter's install, and the worktree is
+      // removed with `rm -rf`. Following one would delete their dependencies.
+      await removeWorktree(worktree);
+      expect(lstatSync(path.join(repo, "pkg", "node_modules", "dep")).isDirectory()).toBe(true);
+    } finally {
+      await removeWorktree(worktree);
+      await rm(repo, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("skips a directory the base ref does not have, rather than failing", async () => {
+    const repo = await workspace();
+    mkdirSync(path.join(repo, "added-later", "node_modules"), { recursive: true });
+    const worktree = await addWorktree(repo, "HEAD", "added-later");
+    try {
+      expect(lstatSync(path.join(worktree.root, "node_modules")).isSymbolicLink()).toBe(true);
+      expect(() => lstatSync(path.join(worktree.root, "added-later"))).toThrow();
+    } finally {
+      await removeWorktree(worktree);
+      await rm(repo, { recursive: true, force: true });
+    }
+  }, 60_000);
 });
