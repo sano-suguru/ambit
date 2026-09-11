@@ -101,7 +101,7 @@ contract is always a way to pass it. That is what the second gate reads:
 
 ```console
 $ node src/cli/main.ts diff HEAD test/fixtures/accident; echo "exit=$?"
-base HEAD (58d9a0b) vs the working tree, over test/fixtures/accident
+base HEAD (81ea225) vs the working tree, over test/fixtures/accident
 
 1 authority increased without approval:
 
@@ -392,8 +392,8 @@ diagnostic ids, the NDJSON field shape, and everything else on the guaranteed
 surface can still move. What that surface is, and what is explicitly not on it,
 is [DESIGN.md §9.2](docs/DESIGN.md#92-the-guaranteed-surface); every change to
 it is announced in [CHANGELOG.md](CHANGELOG.md). `check src` over Ambit's own source — 40 files,
-339 functions — takes 1.13–1.51 s across five runs; `diff HEAD src`, which
-analyzes two trees, takes 2.03–2.25 s across five runs. Nothing is cached, so a
+340 functions — takes 1.17–1.38 s across five runs; `diff HEAD src`, which
+analyzes two trees, takes 2.01–2.55 s across five runs. Nothing is cached, so a
 re-check costs the same. The analysis backend has been measured on a
 300-file project (458 ms, 348 MiB peak) as part of choosing it; the CLI on top
 of it has not. What is implemented and what is not, milestone by milestone with
@@ -419,11 +419,11 @@ exit 0 is the fastest evidence a change did what it claimed:
 
 ```console
 warning: extractProject declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:55)
-warning: loadProjectConfig declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:165)
+warning: loadProjectConfig declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:184)
 ...
-files=40 functions=339 declared=14
+files=40 functions=340 declared=14
 declared-by: jsdoc=14 config=0
-unknown-rate=37.8% (128/339 functions) boundary-rate=0.0% (0/339 functions)
+unknown-rate=37.9% (129/340 functions) boundary-rate=0.0% (0/340 functions)
 ```
 
 `pnpm test`, `pnpm exec tsc --noEmit` and `biome ci .` are the rest of the
