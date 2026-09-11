@@ -16,6 +16,24 @@ report.
 
 ### Added
 
+- **`ambit diff --strict`** — fails the comparison when the analysis reached
+  less of the tree than it did on the base side: a symbol that stopped being
+  resolved, or a symbol whose own body gained an operation that could not be
+  resolved. Both are reported at exit 0 without the flag, as before, so a
+  default run's exit codes are unchanged. `diff` previously exited 2 on
+  `--strict` as an option it did not act on. Neither shape is an authority
+  increase, neither is written into `ambit.approvals.md`, and no diagnostic id
+  is minted for either (`docs/DESIGN.md` §6.4,
+  [ADR-0012](docs/adr/0012-reporting-an-unresolvable-gain.md)).
+- **`unresolved` on the `kind: "authority"` NDJSON record** — the operations in
+  a function's own body the analysis could not resolve, as a multiset of
+  `{reason, operation?, count}` sorted for byte-stable output. Body-local, never
+  propagated, and empty for a `@boundary` function. It is what makes the second
+  shape above comparable; `effects.unknown` is unchanged and is not derived from
+  it (§5.1).
+- Two rows in §6's exit-code table, and the amendment of one: `unknown`
+  increased is now "without `--strict`", and both shapes exit 1 with it.
+
 - **`AMB-I002`** — `ambit init` now says *why* it cannot propose a contract.
   For an undeclared function that reached `unknown` and holds the unresolvable
   call in its own body, it reports those calls — name, position, reason — and

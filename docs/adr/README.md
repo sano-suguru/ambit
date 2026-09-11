@@ -106,3 +106,4 @@ is left out rather than padded.
 | [0009](0009-package-name-and-single-package.md) | The npm package is `ambit-ts`, and it stays a single package | Accepted (2026-09-10) |
 | [0010](0010-when-governance-takes-effect.md) | The RFC procedure starts at 1.0 or the first external adopter | Accepted (2026-09-10) — confirms 0001, 0009 |
 | [0011](0011-reporting-why-a-contract-cannot-be-proposed.md) | `ambit init` reports why it cannot propose a contract, and proposes no `@boundary` | Accepted (2026-09-11) |
+| [0012](0012-reporting-an-unresolvable-gain.md) | An unresolvable gain is reported, and gated only on request | Accepted (2026-09-11) — extends 0008 |

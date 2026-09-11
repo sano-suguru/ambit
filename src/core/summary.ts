@@ -127,6 +127,40 @@ export function callLeavesUnknown(call: Call): boolean {
 }
 
 /**
+ * The two call kinds {@link callLeavesUnknown} accepts, as a type. Written as
+ * a predicate over that function rather than as a second condition, so the set
+ * reported on and the set `propagate` derives `unknown` from cannot drift
+ * apart.
+ */
+export type BlockingCall = UnresolvedCall | MutationCall;
+
+export function isBlockingCall(call: Call): call is BlockingCall {
+  return callLeavesUnknown(call);
+}
+
+/**
+ * Why one operation could not be resolved — an {@link UnresolvedReason}, plus
+ * the one blocking shape that is not an `UnresolvedCall`.
+ *
+ * A mutator handed a callback by reference (`xs.sort(cmp)`) has no
+ * `UnresolvedReason` of its own, but it makes the caller `unknown` for the
+ * same reason `callback-parameter` does — the actual argument is what decides
+ * (DESIGN.md §4.2 rule 4) — so it is labelled in the same namespace rather
+ * than left out.
+ *
+ * Lives here rather than beside either consumer because `ambit init`'s
+ * `AMB-I002` and §5.1's `unresolved` field must name the same set: one reports
+ * why a contract cannot be proposed, the other is what `ambit diff` compares
+ * (§6.4), and a reason in one and not the other would be a hole in whichever
+ * lacked it.
+ */
+export type UnresolvedOperationReason = UnresolvedReason | "callback-by-reference";
+
+export function unresolvedReasonOf(call: BlockingCall): UnresolvedOperationReason {
+  return call.kind === "unresolved" ? call.reason : "callback-by-reference";
+}
+
+/**
  * Whether a function declared `@effects`, and what.
  *
  * `{ kind: "none" }` is distinct from a declared empty set: it means no tag

@@ -2,6 +2,7 @@ import { type Capability, formatCapability } from "./capability.ts";
 import type { ContractOperation, ContractViaEntry } from "./diagnostic.ts";
 import type { KnownEffect } from "./effects.ts";
 import type { SourceLocation } from "./location.ts";
+import type { UnresolvedOperationReason } from "./summary.ts";
 import type { SymbolId } from "./symbol-id.ts";
 
 /**
@@ -28,6 +29,25 @@ export interface AuthorityRecord {
   readonly entrypoint: boolean;
   readonly effects: AuthorityEffects;
   readonly capabilities: AuthorityCapabilities;
+  /**
+   * The operations in **this function's own body** the analysis could not
+   * resolve, as a sorted multiset (DESIGN.md §5.1, §6.4).
+   *
+   * Body-local and never propagated. `effects.unknown` is the propagated
+   * claim and is not derived from this: a function whose own body resolves
+   * completely is still `unknown` when a callee is, and then this list is
+   * empty. The two answer different questions — "is what I know about this
+   * function complete" and "what, here, did I fail to read".
+   *
+   * Empty for a `@boundary` function. Its body is excluded from analysis by
+   * declaration (§4.6), so a call inside it is isolated rather than
+   * unresolved, and listing it would price an explicit decision as a failure.
+   *
+   * This is what makes §6.4's second shape comparable at all: without it a
+   * record carries a boolean, and a symbol that is `unknown` on both sides
+   * compares equal however many opaque operations were added to it.
+   */
+  readonly unresolved: readonly UnresolvedOperation[];
   /**
    * For an authority this function actually reaches, the call path that
    * carries it — the same hops `--format github` folds into an annotation
@@ -62,6 +82,66 @@ export interface AuthorityCapabilities {
   readonly declared: readonly string[] | null;
   readonly required: readonly string[];
   readonly unknown: boolean;
+}
+
+/**
+ * One kind of unresolvable operation in a function's body, and how many of it
+ * there are.
+ *
+ * Identity is `(reason, operation)` and deliberately carries **no position**:
+ * re-indenting a file or moving a call within a function must report nothing,
+ * which is the property that keeps `ambit diff` silent on an unmodified tree
+ * (DESIGN.md §6.4).
+ *
+ * `count` is part of the value rather than a display detail. A second call to
+ * the same unresolvable operation is a second operation, and a comparison that
+ * dropped the count would read a function's third opaque write as no change —
+ * an unanalyzed addition reported as nothing, which §3.4 forbids.
+ *
+ * `operation` is the qualified name the stub tables would key on, omitted
+ * where the call has none: a callback parameter, an `any` receiver, `eval`.
+ * No placeholder stands in for a name that does not exist (§5.3).
+ */
+export interface UnresolvedOperation {
+  readonly reason: UnresolvedOperationReason;
+  readonly operation?: string;
+  readonly count: number;
+}
+
+/**
+ * The identity of an unresolvable operation, as a string a map can key on.
+ *
+ * The reason comes first and is a fixed token containing no `":"`, so the
+ * joiner never collides with a qualified name that contains one.
+ */
+export function unresolvedOperationKey(operation: UnresolvedOperation): string {
+  return `${operation.reason}:${operation.operation ?? ""}`;
+}
+
+/**
+ * One unresolvable operation as a reader recognizes it: the name where the
+ * call has one, the reason either way, and the count only where it is not one
+ * — `axios.get x3` says something, `axios.get x1` says only that a reader has
+ * to divide by one.
+ */
+export function formatUnresolvedOperation(operation: UnresolvedOperation): string {
+  const named = operation.operation ?? `<unnamed>`;
+  const times = operation.count === 1 ? "" : ` x${operation.count}`;
+  return `${named}${times} (${operation.reason})`;
+}
+
+/**
+ * Sort operations into the one order two runs over the same tree both
+ * produce, so a diff never reports ordering as change (DESIGN.md §5.1).
+ */
+export function sortUnresolvedOperations(
+  operations: readonly UnresolvedOperation[],
+): readonly UnresolvedOperation[] {
+  return operations.toSorted((a, b) => {
+    const left = unresolvedOperationKey(a);
+    const right = unresolvedOperationKey(b);
+    return left < right ? -1 : left > right ? 1 : 0;
+  });
 }
 
 /** Which lattice an authority token belongs to — the two do not share a namespace. */

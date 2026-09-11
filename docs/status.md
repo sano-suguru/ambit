@@ -165,13 +165,22 @@ no longer anonymous — it names `knex.QueryBuilder.*` (448 sites at the top),
 answerable there. What it also showed is that `unknown` and the gate are less
 coupled than the rate suggests: a *known* effect added inside an `unknown`
 symbol fails the comparison already, because what is compared is the effect set
-and being `unknown` beside it changes neither side. What has no line at all is
+and being `unknown` beside it changes neither side. What had no line at all was
 the gain the analysis cannot resolve — an outbound call through a client no
-table covers. Where the symbol was known before, that prints as `unknownGained`
-and exits 0; where it was already `unknown`, nothing prints, because a symbol
-carries a boolean rather than the set of operations behind it. That is the next
-decision, and it is filed with its measured noise in
-[`docs/open-questions.md`](open-questions.md).
+table covers, added to a symbol that was already `unknown`.
+
+That one is now decided and implemented (§6.4,
+[ADR-0012](adr/0012-reporting-an-unresolvable-gain.md)): the authority record
+carries the operations a function's own body could not resolve, `ambit diff`
+reports a gain in them, and `diff --strict` is what makes it fail. Measured on
+the same backend: 3 symbols over `HEAD~20..HEAD` — the number taken by hand
+before the design — disjoint from the 3 `unknownGained` already named, and
+silent on the untouched tree with the flag and without it
+([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md), the
+last section). What that does **not** close is the one thing an adopter would
+want next: `--strict` is only usable where its reports can be closed, and a
+package no bundled table covers has no exit short of `@boundary`
+([`docs/limitations.md`](limitations.md)).
 
 ## Next measurement
 

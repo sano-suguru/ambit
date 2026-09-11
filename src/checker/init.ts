@@ -1,17 +1,15 @@
 import path from "node:path";
 import type {
-  Call,
+  BlockingCall,
   Diagnostic,
   DiagnosticEngine,
   DiagnosticFix,
   FixEdit,
   KnownEffect,
-  MutationCall,
   SymbolId,
-  UnresolvedCall,
-  UnresolvedReason,
+  UnresolvedOperationReason,
 } from "../core/index.ts";
-import { callLeavesUnknown, KNOWN_EFFECTS } from "../core/index.ts";
+import { isBlockingCall, KNOWN_EFFECTS, unresolvedReasonOf } from "../core/index.ts";
 import type { PropagatedFunction } from "./propagate.ts";
 
 /**
@@ -73,7 +71,7 @@ export function proposeContracts(
       // No contract, and none can be proposed — but staying silent about
       // *why* leaves the reader with nothing at all. AMB-I002 reports the
       // calls that stopped the inference, for the functions that hold one.
-      const blockers = summary.calls.filter(isBlocking);
+      const blockers = summary.calls.filter(isBlockingCall);
       if (blockers.length > 0) proposals.push(unresolvedReport(propagated, blockers, engine));
       continue;
     }
@@ -185,7 +183,7 @@ function unresolvedReport(
 ): Diagnostic {
   const { summary } = propagated;
   const lines = blockers.map((call) => {
-    const reason = reasonOf(call);
+    const reason = unresolvedReasonOf(call);
     // The name is what the stub tables would key on, and a great many
     // unresolved calls have none — a callback parameter, an `any` receiver,
     // `eval`. Those lead with the location rather than with a placeholder
@@ -213,33 +211,6 @@ function unresolvedReport(
 }
 
 /**
- * What a blocking call is called in the report.
- *
- * A mutator handed a callback by reference (`xs.sort(cmp)`) is not an
- * `UnresolvedCall` and has no {@link UnresolvedReason}, but it makes the
- * caller `unknown` for the same reason `callback-parameter` does — the actual
- * argument is what decides (§4.2 rule 4) — so it is labelled in the same
- * namespace rather than left out of the report.
- */
-type BlockingReason = UnresolvedReason | "callback-by-reference";
-
-/**
- * The two call kinds `callLeavesUnknown` accepts, as a type. Written as a
- * predicate over that function rather than as a second condition, so the set
- * this reports on and the set `propagate` derives `unknown` from cannot drift
- * apart.
- */
-type BlockingCall = UnresolvedCall | MutationCall;
-
-function isBlocking(call: Call): call is BlockingCall {
-  return callLeavesUnknown(call);
-}
-
-function reasonOf(call: BlockingCall): BlockingReason {
-  return call.kind === "unresolved" ? call.reason : "callback-by-reference";
-}
-
-/**
  * The route each reason implies. Written as what the reason *is*, not as a
  * recommendation: three of them are not the reader's work at all, and the one
  * that is a choice — isolating a third-party call behind `@boundary` — is
@@ -247,10 +218,10 @@ function reasonOf(call: BlockingCall): BlockingReason {
  * separately from succeeding at analysis and Ambit must not sell it as
  * progress (ADR-0011).
  *
- * Typed as a total record so a new {@link UnresolvedReason} cannot be added
+ * Typed as a total record so a new {@link UnresolvedOperationReason} cannot be added
  * without deciding what to say about it.
  */
-const ROUTES: Readonly<Record<BlockingReason, string>> = {
+const ROUTES: Readonly<Record<UnresolvedOperationReason, string>> = {
   "external-module":
     'declared in a package under node_modules — a stub for that package resolves it, or `@boundary reason="<package>"` isolates it, which --coverage tallies separately from analysis (§4.3)',
   "import-binding":

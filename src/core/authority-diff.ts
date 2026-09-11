@@ -1,4 +1,9 @@
-import type { AuthorityPath, AuthorityRecord, AuthorityRef } from "./authority.ts";
+import type {
+  AuthorityPath,
+  AuthorityRecord,
+  AuthorityRef,
+  UnresolvedOperation,
+} from "./authority.ts";
 import {
   capabilityRef,
   effectiveCapabilities,
@@ -6,6 +11,8 @@ import {
   effectRef,
   formatAuthorityRef,
   holdsAuthority,
+  sortUnresolvedOperations,
+  unresolvedOperationKey,
 } from "./authority.ts";
 import { capabilityCovers, parseCapability } from "./capability.ts";
 import type { KnownEffect } from "./effects.ts";
@@ -45,6 +52,18 @@ export interface SymbolAuthorityDiff {
    */
   readonly unknownGained: boolean;
   readonly unknownLost: boolean;
+  /**
+   * Operations the new side's body could not resolve and the old side's
+   * either did not hold or held fewer of — DESIGN.md §6.4's second shape.
+   * `count` is the difference, not the new side's total.
+   *
+   * Not authority, and never merged into {@link added}: what it reports is
+   * that the verified extent of this symbol got smaller, which §4.3 keeps
+   * apart from a permission. Computed only where the two sides are a real
+   * comparison; a *new* symbol's whole body is unresolved-to-the-base by
+   * definition, and it is {@link unknownGained} that says so.
+   */
+  readonly unresolvedGained: readonly UnresolvedOperation[];
   /** The new side's record, for rendering the path of an increase. Absent for a deleted symbol. */
   readonly head?: AuthorityRecord;
   /** The old side's record. Absent for a new symbol. */
@@ -169,6 +188,7 @@ function compareSymbol(
       unchanged: [],
       unknownGained: false,
       unknownLost: isUnknown(base),
+      unresolvedGained: [],
       base,
     };
   }
@@ -181,6 +201,7 @@ function compareSymbol(
       unchanged: [],
       unknownGained: isUnknown(head),
       unknownLost: false,
+      unresolvedGained: [],
       head,
     };
   }
@@ -210,9 +231,34 @@ function compareSymbol(
     unchanged,
     unknownGained: isUnknown(head) && !isUnknown(base),
     unknownLost: isUnknown(base) && !isUnknown(head),
+    unresolvedGained: gainedUnresolved(base.unresolved, head.unresolved),
     head,
     base,
   };
+}
+
+/**
+ * Multiset difference over unresolvable operations: for each `(reason,
+ * operation)` the head side holds, how many more of it there are than on the
+ * base side (DESIGN.md §6.4).
+ *
+ * Plain subtraction, in the one direction. An operation the head side holds
+ * *fewer* of is the analysis reaching further than it did, which is the
+ * direction this command does not watch — the same rule §6 states for
+ * authority that only decreased.
+ */
+function gainedUnresolved(
+  base: readonly UnresolvedOperation[],
+  head: readonly UnresolvedOperation[],
+): readonly UnresolvedOperation[] {
+  if (head.length === 0) return [];
+  const before = new Map(base.map((operation) => [unresolvedOperationKey(operation), operation]));
+  const gained = head.flatMap((operation) => {
+    const had = before.get(unresolvedOperationKey(operation))?.count ?? 0;
+    const delta = operation.count - had;
+    return delta > 0 ? [{ ...operation, count: delta }] : [];
+  });
+  return sortUnresolvedOperations(gained);
 }
 
 function authorityOf(record: AuthorityRecord): readonly AuthorityRef[] {
@@ -302,10 +348,22 @@ export function deletedSymbols(diff: AuthorityDiff): readonly SymbolAuthorityDif
   return diff.symbols.filter((entry) => entry.status === "deleted");
 }
 
-/** Symbols present on both sides whose authority is exactly the same. */
+/**
+ * Symbols present on both sides that this comparison has nothing to say about.
+ *
+ * Authority equal on both sides is necessary but not sufficient: a symbol
+ * named under §6.4 — the analysis stopped reaching it, or its body gained an
+ * operation that cannot be resolved — is counted out, because the footer's
+ * "N unchanged" sits below those sections and must not contradict them.
+ */
 export function unchangedSymbols(diff: AuthorityDiff): readonly SymbolAuthorityDiff[] {
   return diff.symbols.filter(
-    (entry) => comparable(entry) && entry.added.length === 0 && entry.removed.length === 0,
+    (entry) =>
+      comparable(entry) &&
+      entry.added.length === 0 &&
+      entry.removed.length === 0 &&
+      !entry.unknownGained &&
+      entry.unresolvedGained.length === 0,
   );
 }
 
@@ -316,6 +374,27 @@ export function unchangedSymbols(diff: AuthorityDiff): readonly SymbolAuthorityD
  */
 export function unknownGained(diff: AuthorityDiff): readonly SymbolAuthorityDiff[] {
   return diff.symbols.filter((entry) => entry.unknownGained);
+}
+
+/**
+ * Symbols whose own body gained an operation the analysis could not resolve
+ * (DESIGN.md §6.4, second shape).
+ *
+ * Reported always, and a failure only under `ambit diff --strict`: an
+ * unresolvable operation is not authority (§4.3), so it does not belong in
+ * `ambit.approvals.md` and cannot be approved by a line there.
+ */
+export function unresolvedGains(diff: AuthorityDiff): readonly SymbolAuthorityDiff[] {
+  return diff.symbols.filter((entry) => entry.unresolvedGained.length > 0);
+}
+
+/**
+ * Whether the comparison widened what the analysis cannot see, in either of
+ * §6.4's two shapes — what `ambit diff --strict` exits 1 on and what the
+ * default run reports at exit 0.
+ */
+export function hasUnresolvedWidening(diff: AuthorityDiff): boolean {
+  return unknownGained(diff).length > 0 || unresolvedGains(diff).length > 0;
 }
 
 export function hasAuthorityIncrease(diff: AuthorityDiff): boolean {

@@ -12,11 +12,14 @@ import {
   diffAuthority,
   displayName,
   formatApprovalLine,
+  formatUnresolvedOperation,
+  hasUnresolvedWidening,
   movedSymbols,
   pathFor,
   reviewIncreases,
   unchangedSymbols,
   unknownGained,
+  unresolvedGains,
 } from "../core/index.ts";
 import { analyze } from "./analyze.ts";
 import { loadApprovals } from "./approvals.ts";
@@ -107,6 +110,28 @@ export function hasUnapprovedIncrease(result: DiffResult): boolean {
 }
 
 /**
+ * How the comparison was invoked, for the parts of the output that depend on
+ * it rather than on what was compared.
+ *
+ * Only `--strict` is here, and only because §6.4's two shapes are reported
+ * either way and fail only under it: the reader has to be told which of the
+ * two runs they are looking at, or a green exit reads as "nothing to see".
+ */
+export interface DiffOptions {
+  readonly strict?: boolean;
+}
+
+/**
+ * Whether `--strict` fails this comparison: the analysis stopped reaching a
+ * symbol, or a symbol's body gained an operation it cannot resolve
+ * (DESIGN.md §6.4). Always `false` without the flag — both shapes are reported
+ * at exit 0 by default.
+ */
+export function failsStrict(result: DiffResult, options: DiffOptions = {}): boolean {
+  return options.strict === true && hasUnresolvedWidening(result.diff);
+}
+
+/**
  * The comparison, for a human reading a pull request.
  *
  * What increased comes first and is the only part rendered in full: each
@@ -116,12 +141,14 @@ export function hasUnapprovedIncrease(result: DiffResult): boolean {
  * expanded — the point of the command is that nobody has to read every
  * contract to find the one that changed.
  */
-export function formatDiffText(result: DiffResult): string {
+export function formatDiffText(result: DiffResult, options: DiffOptions = {}): string {
   const { diff, review } = result;
   const decreases = authorityDecreases(diff);
   const deleted = deletedSymbols(diff);
   const moved = movedSymbols(diff);
   const unknown = unknownGained(diff);
+  const unresolved = unresolvedGains(diff);
+  const strict = options.strict === true;
   const where = result.subdir === "" ? "the repository root" : result.subdir;
 
   const lines: string[] = [
@@ -195,6 +222,39 @@ export function formatDiffText(result: DiffResult): string {
       `Analysis reached something it could not resolve in ${count(unknown.length, "symbol")} where it previously did not.`,
       "This is not authority and is not counted as an increase; those symbols' effects may be incomplete:",
       ...unknown.map((entry) => `  ${entry.symbol}`),
+      "",
+    );
+  }
+
+  // §6.4's second shape. The symbol was already unresolved, so nothing about
+  // it "increased" — what changed is that there is now more of it the analysis
+  // did not read, and the operations that made it so are named.
+  if (unresolved.length > 0) {
+    lines.push(
+      `${count(unresolved.length, "symbol")} gained an operation the analysis could not resolve:`,
+      "",
+      ...unresolved.flatMap((entry) => [
+        `  ${entry.symbol}${entry.head ? ` (${entry.head.location.file}:${entry.head.location.line})` : ""}`,
+        ...entry.unresolvedGained.map(
+          (operation) => `    ? ${formatUnresolvedOperation(operation)}`,
+        ),
+      ]),
+      "",
+      "This is not authority (DESIGN.md §4.3), so no approval covers it and none is",
+      "asked for. What closes it is a stub, a verifiable declaration, or explicit",
+      "isolation behind @boundary (§4.3, §6.4).",
+      "",
+    );
+  }
+
+  if (strict && (unknown.length > 0 || unresolved.length > 0)) {
+    // Named for what is actually above it. Only one of §6.4's two shapes
+    // firing is the common case, and "the two sections above" would send the
+    // reader looking for a section that is not there.
+    const sections = unknown.length > 0 && unresolved.length > 0 ? "two sections" : "section";
+    lines.push(
+      `--strict: the ${sections} above ${sections === "section" ? "fails" : "fail"} this comparison (DESIGN.md §6.4).`,
+      "Without --strict they are reported and the comparison passes.",
       "",
     );
   }
@@ -297,7 +357,7 @@ function count(n: number, noun: string): string {
  * A decrease and a deletion are reported by the text output and do not fail a
  * build (§6), so an annotation on them would be noise on a diff.
  */
-export function formatDiffGithub(result: DiffResult): string {
+export function formatDiffGithub(result: DiffResult, options: DiffOptions = {}): string {
   let out = "";
   for (const item of result.review.unapproved) {
     out += increaseAnnotation(result, item, "error", [
@@ -308,6 +368,54 @@ export function formatDiffGithub(result: DiffResult): string {
     out += increaseAnnotation(result, item, "notice", [
       `approved in this change: ${item.approval.reason}`,
     ]);
+  }
+  if (options.strict === true) out += wideningAnnotations(result);
+  return out;
+}
+
+/**
+ * §6.4's two shapes as annotations, under `--strict` only.
+ *
+ * Withheld without the flag deliberately, and the default output is
+ * byte-identical to what it was before §6.4 existed. Both shapes are common on
+ * a codebase that declares nothing, and a `notice` on every pull request that
+ * touched an `unknown` function is how an annotation source gets muted — which
+ * would cost the increases too, since they share the channel. A repository that
+ * wants the signal asks for it, and then it is an `error`, because under
+ * `--strict` that is what it is.
+ */
+function wideningAnnotations(result: DiffResult): string {
+  let out = "";
+  for (const entry of unknownGained(result.diff)) {
+    const head = entry.head;
+    if (!head) continue;
+    out += githubAnnotation({
+      severity: "error",
+      file: workspacePath(result.dir, head.location.file),
+      line: head.location.line,
+      col: head.location.col,
+      title: "ambit diff",
+      body: [
+        `${displayName(head.symbol)} is no longer resolved by the analysis since ${result.ref}`,
+        "this is not authority (DESIGN.md §4.3); --strict fails on it (§6.4)",
+      ],
+    });
+  }
+  for (const entry of unresolvedGains(result.diff)) {
+    const head = entry.head;
+    if (!head) continue;
+    out += githubAnnotation({
+      severity: "error",
+      file: workspacePath(result.dir, head.location.file),
+      line: head.location.line,
+      col: head.location.col,
+      title: "ambit diff",
+      body: [
+        `${displayName(head.symbol)} gained ${count(entry.unresolvedGained.length, "operation")} the analysis could not resolve since ${result.ref}`,
+        ...entry.unresolvedGained.map((operation) => `? ${formatUnresolvedOperation(operation)}`),
+        "a stub, a verifiable declaration, or @boundary closes it (§4.3, §6.4)",
+      ],
+    });
   }
   return out;
 }
