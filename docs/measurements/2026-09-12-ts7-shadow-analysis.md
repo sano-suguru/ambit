@@ -58,8 +58,40 @@ mean "the shadow backend never ran" is the failure DESIGN.md §3.4 forbids.
   and the shadow backend does not (`resolution:literal-receiver`)
 - duration of the `analyze()` call alone (the harness's own fact extraction is
   not timed): three runs — TS6 678/719/769 ms, TS7 395/398/411 ms — **0.53x to
-  0.58x**. TS7 is faster, in the direction ADR-0001 measured, and it still buys
-  no gate
+  0.58x**, so roughly 1.7–1.9x faster. TS7 is faster, in the direction ADR-0001
+  measured, and it still buys no gate — see below for why the factor is not
+  ADR-0001's 3–4x
+
+### The speedup is smaller than ADR-0001's, and not because of dilution
+
+ADR-0001 measured the native engine 3–4x faster. Here it is 1.7–1.9x. The
+obvious explanation — that Ambit's pure-JavaScript downstream (summarize,
+propagate, diagnose) is the same on both sides and dilutes the compiler's
+advantage — is **wrong**, and the measurement says so. `extractProject` alone,
+three runs each on `src`:
+
+| | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| `typescript-legacy` | 1041 ms | 716 ms | 626 ms |
+| `typescript-native` | 494 ms | 376 ms | 391 ms |
+
+Extraction on its own is ~0.58x — the same factor as the whole `analyze()`
+call. The downstream is small enough not to matter; the advantage is smaller
+*inside the extraction itself*.
+
+What changed between ADR-0001's probe and this backend is how much is asked of
+the checker. `scripts/m05-probe/native.ts` walks each file once and resolves
+each callee; this backend asks for types, signatures, symbol parents,
+declaration handles and their resolutions, many times per call site. A
+plausible reading is that the native API's per-query cost (it answers out of
+process) dominates as the query count rises — **but that is a hypothesis, not a
+measurement**: no request count or transport time was collected on this run.
+`API({ collectTiming: true })` would answer it, and has not been run here.
+
+The conclusion that does follow is the one that matters for §3.5: the faster
+engine gets *less* advantageous as Ambit's analysis gets more query-heavy, so
+performance is weaker as a migration argument than ADR-0001's number suggested,
+not stronger.
 
 ### Effect of the `backend?: TsBackend` option on Ambit's own coverage
 
@@ -76,6 +108,26 @@ One site: `options.backend.extractProject(dir)`. The default path still calls
 `legacyTsBackend.extractProject` by name and still resolves, which is why
 `resolved` (678), `stub`, `pure`, `mutation` and the `unknown` rate are all
 unchanged. Exit code 0 both ways.
+
+### What these numbers do not mean
+
+**100% authority parity is not "TS7 is ready".** It says the two backends'
+*downstream results* agree on this tree, not that their semantic frontends are
+equivalent. The layer above it is where they differ — callee resolution 96.5%,
+direct effects 96.7%, 137 divergences — and on a different repository the chain
+
+    callee resolution differs
+    → stub match differs
+    → direct effect differs
+    → propagation differs
+    → an authority false negative
+
+is exactly how an upstream difference becomes a downstream one. Nothing here
+measured that chain on code outside `src` and the fixtures.
+
+The honest reading of this note is: there is now a measuring instrument, and its
+first reading found three semantic bugs. It is not a migration verdict, and the
+numbers must not be quoted as one.
 
 ## Parity — fixture corpus
 
@@ -197,9 +249,34 @@ shapes is classified `not-yet-ported` rather than counted as a disagreement.
   the values themselves and are the signal to trust; classification is a
   reading aid for triaging a long list.
 
-## Next highest-value step
+## Next steps, in order
 
-Port `installedTypeQualifiedNameOf` / `packageTypeNameOf` (the receiver's
-declared package type). It is 63 of the 137 remaining divergences on `src` and
-would take callee-resolution and direct-effect parity there to ~99%, leaving
-only the three genuinely open items above.
+1. **Port `installedTypeQualifiedNameOf` / `packageTypeNameOf`** (the
+   receiver's declared package type). 63 of the 137 divergences on `src` — the
+   largest single gap by a wide margin, and not a cosmetic one: a
+   receiver-origin name is what turns `pool.query(...)` into `pg.Pool.query`
+   and therefore into a `db_read` stub match. `KNOWN_DIVERGENCES` already
+   carries a rule for `kind=stub` vs `kind=unresolved`, which is that failure
+   mode. On this tree it does not reach the authority set; on a repository with
+   an ORM it would.
+2. Port the constructed-receiver and factory-receiver origins.
+3. Port `re-export-hop` (2 high-risk divergences on `cross-module`).
+4. **Run the shadow backend in CI**, as a nightly or opt-in job rather than in
+   `pnpm test`: install the native compiler, run `backend-conformance` and
+   `src`, check the high-risk count against the last run, upload the JSON. What
+   `pnpm test` protects today is the *comparator*; nothing protects the shadow
+   backend from regressing, which is the gap that turns this from telemetry
+   back into a one-off snapshot.
+5. **Replace the substring classifier with structured data.** The backend
+   should report *why* it could not do something — an `unsupportedFeature:
+   "installed-type-receiver"` on the call site — and `compare.ts` should
+   classify on that field. Classification should read data, not parse rendered
+   text.
+6. Make the call-site key more semantic than `(symbol, location, ordinal)`:
+   the syntactic kind and the callee's textual shape would survive a source
+   order that differs between backends, which the ordinal does not and the
+   identity self-check cannot catch.
+7. Widen the corpus to real third-party repositories, the way
+   `docs/measurements/2026-09-11-*` did for `ambit diff`.
+
+Only after 1–7 is there anything to say about TS7 as an authoritative backend.

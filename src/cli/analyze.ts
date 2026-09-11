@@ -44,6 +44,14 @@ export interface AnalyzeOptions {
    * second backend through the identical pipeline and compare Ambit's own
    * semantics rather than two compilers' ASTs. Passing one does not make it
    * authoritative: §3.5's default is changed by an RFC, not by a parameter.
+   *
+   * It is also not reachable from outside this repository. `analyze` is not
+   * re-exported by `src/index.ts` and no subpath in `package.json`'s `exports`
+   * leads to it, so the guaranteed surface §9.2 lists is unchanged and no
+   * consumer can substitute a backend. Should `analyze` ever be published, this
+   * option must not go with it: a measurement-only entry point belongs beside
+   * it rather than inside it, or the library's authority boundary widens where
+   * the CLI's did not.
    */
   readonly backend?: TsBackend;
 }
