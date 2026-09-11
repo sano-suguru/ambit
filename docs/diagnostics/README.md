@@ -211,9 +211,10 @@ Separate from `AMB-E005` because nothing declared this requirement; the body
 performs it directly, so there is no callee whose contract is too wide.
 
 What is matched: `http:<method>:<host>` for the bundled HTTP entry points
-(`fetch`, `undici`'s `fetch`, `node:http`/`node:https`'s `get`/`request`). The
-method comes from a literal `method` in an options object literal and defaults
-to `get`; the host is taken as written, port included and userinfo dropped.
+(`fetch`, `undici`'s `fetch`, `ky`, `node:http`/`node:https`'s `get`/`request`,
+the last of these under either spelling of the module specifier). The method
+comes from a literal `method` in an options object literal and defaults to
+`get`, except where the operation's own name already fixes it (`ky.post`); the host is taken as written, port included and userinfo dropped.
 
 A URL the source does not fix produces no requirement to compare, and is
 `AMB-W003` instead. **No `db:` capability is derived from a SQL statement** —

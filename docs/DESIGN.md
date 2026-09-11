@@ -309,7 +309,7 @@ If effects are "what it does", capabilities are "what it may do it to".
 
 **What the static side matches**
 
-The checker matches only `http:<method>:<host>`, and only at the HTTP entry points in the bundled stubs (`fetch`, and `get` / `request` of `node:http` / `node:https`). A host is determined only if it is a literal string, or if the static leading part of a template literal terminates the authority; where the static part ends partway through the authority (`` `https://api.${env}.example.com/` ``), a prefix match may not claim a host. An undetermined target is `unknown` rather than "no requirement", and the diagnostic says it is the runtime's responsibility. The host is taken as written (including the port, excluding userinfo); default ports are neither filled in nor elided.
+The checker matches only `http:<method>:<host>`, and only at the HTTP entry points in the bundled stubs (`fetch`, `ky`, and `get` / `request` of `node:http` / `node:https`). A host is determined only if it is a literal string, or if the static leading part of a template literal terminates the authority; where the static part ends partway through the authority (`` `https://api.${env}.example.com/` ``), a prefix match may not claim a host. An undetermined target is `unknown` rather than "no requirement", and the diagnostic says it is the runtime's responsibility. The host is taken as written (including the port, excluding userinfo); default ports are neither filled in nor elided.
 
 **Table names are not read out of SQL statements** to derive `db:` capabilities. The ability to decide table-level permissions for arbitrary SQL is not assumed, and changing where it is read from does not change the claim.
 

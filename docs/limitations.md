@@ -217,16 +217,21 @@ to write a comment — is
 ## Effect inference
 
 Effects are inferred from four bundled tables in `src/stubs/`: Node.js builtins
-and `fetch` (52 entries), database and LLM clients (49 rules over `pg`,
-`mysql2`, `knex`, `@prisma/client`, `openai`, `@anthropic-ai/sdk`), pure
-built-ins (36 methods), and in-place mutators (19 methods). Everything else is
-`unknown`.
+and HTTP clients (59 entries over `fetch`, `undici`, `ky`, and the builtins),
+database and LLM clients (49 rules over `pg`, `mysql2`, `knex`,
+`@prisma/client`, `openai`, `@anthropic-ai/sdk`), pure built-ins (36 methods),
+and in-place mutators (19 methods). Everything else is `unknown`.
+
+A builtin is answered under both spellings of its module specifier: `import {
+writeFileSync } from "fs"` and `from "node:fs"` reach the same row, because
+Node resolves a bare builtin specifier to the builtin before it looks at
+`node_modules`, so the two cannot be different modules.
 
 Three consequences an adopter should count on:
 
-- **Only those six client packages are covered.** Drizzle, MongoDB, Redis, an
-  S3 client, a queue client, an HTTP client that is not `fetch` or `undici`
-  (`ky`, `axios`, `got`) — all `unknown`.
+- **Only the packages named above are covered.** Drizzle, MongoDB, Redis, an
+  S3 client, a queue client, an HTTP client that is not `fetch`, `undici` or
+  `ky` (`axios`, `got`) — all `unknown`.
 - **A client must be one a package's own types describe.** Four shapes reach
   the table: a `const` initialized by `new <ImportedClass>(…)` or by an
   imported factory (`createPool(…)`), and — through the receiver's declared

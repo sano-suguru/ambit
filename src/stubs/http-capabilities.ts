@@ -1,4 +1,5 @@
 import type { Capability, LiteralArgument } from "../core/index.ts";
+import { withNodePrefix } from "./node-builtins.ts";
 
 /**
  * The static half of DESIGN.md §4.4's dual enforcement: which bundled
@@ -35,6 +36,20 @@ const HTTP_CAPABILITY_RULES: ReadonlyMap<string, HttpCapabilityRule> = new Map([
   ["node:https.get", { urlArgument: 0, defaultAction: "get" }],
   ["node:http.request", { urlArgument: 0, optionsArgument: 1, defaultAction: "get" }],
   ["node:https.request", { urlArgument: 0, optionsArgument: 1, defaultAction: "get" }],
+  // ky, whose effect rows are in `src/stubs/node-builtins.ts`. The bare call
+  // takes its method from the options object exactly as `fetch` does. The
+  // request methods do not: `ky.post(url, {method: "get"})` still POSTs,
+  // because ky merges `{method}` *last* (`ky[method] = (input, options) =>
+  // Ky.create(input, validateAndMerge(defaults, options, {method}))`,
+  // `ky@1.14.3/distribution/index.js`), so reading the options object here
+  // would derive a capability the call does not require.
+  ["ky.default", { urlArgument: 0, optionsArgument: 1, defaultAction: "get" }],
+  ["ky.get", { urlArgument: 0, defaultAction: "get" }],
+  ["ky.post", { urlArgument: 0, defaultAction: "post" }],
+  ["ky.put", { urlArgument: 0, defaultAction: "put" }],
+  ["ky.patch", { urlArgument: 0, defaultAction: "patch" }],
+  ["ky.delete", { urlArgument: 0, defaultAction: "delete" }],
+  ["ky.head", { urlArgument: 0, defaultAction: "head" }],
 ]);
 
 export interface HttpCapabilityRequirement {
@@ -55,7 +70,9 @@ export function lookupHttpCapability(
   qualifiedName: string,
   literalArguments: readonly (LiteralArgument | undefined)[] | undefined,
 ): HttpCapabilityRequirement | undefined {
-  const rule = HTTP_CAPABILITY_RULES.get(qualifiedName);
+  // Keyed on the prefixed spelling of a builtin, which is not necessarily the
+  // one the source wrote (`src/stubs/node-builtins.ts`, {@link withNodePrefix}).
+  const rule = HTTP_CAPABILITY_RULES.get(withNodePrefix(qualifiedName));
   if (!rule) return undefined;
 
   const host = hostOf(literalArguments?.[rule.urlArgument]);

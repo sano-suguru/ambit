@@ -94,10 +94,15 @@ Each of these was measured, and the run is archived.
   the controller. A knex `del()` added inside an existing read method was
   **missed** — and fixing the cause (naming a receiver from the package type
   that describes it) took that repository's stubbed call sites from 120 to 940
-  and turned the miss into exit 1 naming the operation. Two misses survive, both of them
-  operations no table names: `ky`, the HTTP client that repository actually
-  uses, and the same `fs` / `child_process` edit written without the `node:`
-  prefix — the spelling that repository uses throughout. The run is
+  and turned the miss into exit 1 naming the operation. The two misses that
+  survived that change were operations no table named — `ky`, the HTTP client
+  that repository actually uses, and the same `fs` / `child_process` edit
+  written without the `node:` prefix, the spelling that repository uses
+  throughout — and both are now closed: seven `ky` rows, and a lookup that
+  reads the two spellings of a builtin specifier as the one module they are.
+  Re-run on the same checkout, each edit exits **1** with the path to the
+  controller, and that repository's stubbed call sites went 940 → **953** with
+  `diff HEAD` still silent on the untouched tree. The run is
   [2026-09-11](measurements/2026-09-11-third-party-diff-validation.md).
 - **The gate is real and it has cost something.** `ambit diff HEAD~1 src` runs
   as a **gating** CI step with `continue-on-error` removed. The change that

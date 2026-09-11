@@ -30,6 +30,16 @@
   },
   "overrides": [
     {
+      "includes": ["test/fixtures/node-builtin-specifier/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "useNodejsImportProtocol": "off"
+          }
+        }
+      }
+    },
+    {
       "includes": ["test/**"],
       "linter": {
         "rules": {

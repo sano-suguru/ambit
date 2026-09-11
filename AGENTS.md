@@ -200,10 +200,13 @@ Non-obvious constraints:
 - `tsconfig.json` must name `"types": ["node"]`. TypeScript 6 stopped
   including `node_modules/@types/*` automatically; without the line, every
   `node:` import and Node global in this repository is an error. The same line
-  is in the four fixture tsconfigs whose sources use Node builtins
-  (`backend-smoke`, `cross-module`, `init`, `propagation`).
-  `test/fixtures/realistic-api` deliberately declares `"types": []` — it must
-  type-check with nothing installed — so do not add it there.
+  is in the five fixture tsconfigs whose sources use Node builtins
+  (`backend-smoke`, `cross-module`, `init`, `node-builtin-specifier`,
+  `propagation`). `test/fixtures/realistic-api` deliberately declares
+  `"types": []` — it must type-check with nothing installed — so do not add it
+  there. `node-builtin-specifier` additionally turns `useNodejsImportProtocol`
+  off in `biome.json`: the un-prefixed specifier is what that fixture asserts
+  on, so formatting it away would delete the subject.
 - Never add a second TypeScript to `package.json`, under an alias or
   otherwise. `typescript@7` also declares `bin: { tsc }`, so the two collide
   on `node_modules/.bin/tsc` and `pnpm exec tsc` silently changes compiler —
