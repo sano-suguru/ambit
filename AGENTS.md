@@ -11,6 +11,39 @@ the relevant section before changing contract semantics, propagation rules,
 diagnostics, backend behavior, or supported TypeScript behavior — do not
 rely on a summary of it here.
 
+## Non-negotiables
+
+These override everything below when they conflict. Everything after this
+section explains them.
+
+1. **Never turn `unknown` into safe without positive evidence.** A failure to
+   start, an unsupported setting, or an unresolved call is never reported as
+   "no violations" (§3.4).
+2. **State as fact only what code or tests demonstrate.** `docs/DESIGN.md` is
+   recorded intent; future possibilities are neither.
+3. **Measure before claiming an improvement.** Quote numbers you ran. Never
+   predict one, and never assign a performance number to a backend that has
+   not been run.
+4. **Run the verification suite before reporting completion** — `pnpm test`,
+   `pnpm exec tsc --noEmit`, `biome ci .`, and for analysis changes
+   `check src --coverage` and `scripts/bench-corpus.ts`. If you could not
+   verify, say so.
+5. **Never weaken or delete a test to make a change pass, and never pin a
+   defect with one.** A test asserting wrong behavior makes the defect read
+   as the specification.
+6. **Fix a defect you root-caused in code you are touching.** Recording it
+   instead is not a deliverable. If the write-up would be longer than the
+   patch, write the patch.
+7. **Never renumber a `docs/DESIGN.md` chapter.** `src/` and `test/` cite them
+   by number in the hundreds.
+8. **Keep the compiler out of `src/core/` and `src/stubs/`.** Only
+   `src/checker/backend/legacy-ts.ts` may import `typescript`.
+9. **Do not add speculative architecture.** "May be useful later" is not a
+   justification; "`docs/DESIGN.md` says so and the code does not do it" always
+   is.
+10. **When code and `docs/DESIGN.md` disagree, surface it.** Do not silently
+    normalize either one.
+
 ## Decision priorities
 
 State as fact only what code or tests demonstrate. Treat `docs/DESIGN.md`
@@ -26,9 +59,9 @@ it against: would this sentence still be true if all the code were
 discarded? If yes, it belongs in `docs/DESIGN.md`. If no, it's
 implementation status, and belongs in `README.md` or `test/`, not in
 `docs/DESIGN.md` — see Documents below. Where the spec requires something
-the code does not yet do, fix the code. File it under `docs/DESIGN.md` §12
-(Open Questions) only when the gap is an open design question rather than
-missing work — see Scope below. Don't paper over the gap with a note that
+the code does not yet do, fix the code. File it under
+`docs/open-questions.md` only when the gap is an open design question rather
+than missing work — see Scope below. Don't paper over the gap with a note that
 the code is still catching up.
 
 `docs/DESIGN.md` §2 sets the project's design-principle priority order
@@ -83,10 +116,11 @@ than the patch would have been, write the patch.
 Deferring needs a reason that survives being said out loud. There is no
 one else to escalate to on a solo project, so the only honest reasons are
 that the fix turns on a design question with no settled answer — one that
-needs its own investigation, which is what `docs/DESIGN.md` §12 is for —
+needs its own investigation, which is what `docs/open-questions.md` is for —
 or that it is genuinely a different problem from the one in front of you.
 "Out of scope" is a conclusion, not a reason. When you do defer, the
-record is one line: an issue, or a §12 bullet. Never an essay.
+record is one line: an issue, or a bullet in `docs/open-questions.md`.
+Never an essay.
 
 ## Architecture
 
@@ -137,7 +171,7 @@ Non-obvious constraints:
 - Relative imports use the `.ts` extension, not `.js`.
 - Supported runtime is the current Active LTS major of Node.js only
   (`engines.node` in `package.json`), not every version that happens
-  to run — see `docs/DESIGN.md` §3.1 and §12. `volta.node` and CI's
+  to run — see `docs/DESIGN.md` §3.1 and `docs/open-questions.md`. `volta.node` and CI's
   `node-version` pin one representative patch within that range; only
   `engines` is the actual promise.
 - `@types/node`'s major tracks the supported Active LTS major (currently
@@ -149,7 +183,8 @@ Non-obvious constraints:
   realistic-api` counts unchanged.** 6.0.3 was measured against that rule and
   changed nothing (`docs/measurements/m0.5-backend-comparison.md`). It is the analysis engine behind
   `src/checker/backend/legacy-ts.ts`, adopted by `docs/DESIGN.md` §3.5, and it
-  doubles as the build-time compiler for `tsc --noEmit` — see §12 for why that
+  doubles as the build-time compiler for `tsc --noEmit` — see
+  `docs/open-questions.md` for why that
   pairing is provisional. 7.x is a different engine (Go), not a newer version
   of this one.
 - `tsconfig.json` must name `"types": ["node"]`. TypeScript 6 stopped
@@ -236,11 +271,15 @@ directly — fixtures alone cannot catch a shape only the real codebase has.
 - Agent working rules → this file
 - External-facing explanation → `README.md`
 - Framework integration guides → `docs/integrations/`
-- Implementation limitations in detail (README's overflow) →
+- What Ambit cannot do, for someone deciding whether to adopt →
   `docs/limitations.md`
-- Milestone-by-milestone implementation status, with measured numbers →
-  `docs/status.md`
-- Milestones, success metrics, Phase 1 exit criterion → `ROADMAP.md`
+- The same at the AST corner-case level, for whoever maintains the checker →
+  `docs/analysis-limitations.md`
+- Current measured numbers, and the verdict they support → `docs/status.md`
+- The measurement runs behind those numbers, dated → `docs/measurements/`
+- What is undecided → `docs/open-questions.md`
+- What has to be proved next → `ROADMAP.md`
+- How a change is proposed, verified and recorded → `CONTRIBUTING.md`
 
 Do not write product specification into this file.
 
@@ -270,7 +309,8 @@ and must not be written up as though they were.
 ## Language
 
 Write in English: `README.md`, `docs/DESIGN.md`, `docs/adr/`,
-`docs/integrations/`, `docs/limitations.md`, `ROADMAP.md`, diagnostic message
+`docs/integrations/`, `docs/limitations.md`, `docs/analysis-limitations.md`,
+`docs/open-questions.md`, `ROADMAP.md`, `CONTRIBUTING.md`, diagnostic message
 text, `docs/diagnostics/`, source comments and test names in `src/`, `test/`
 and `scripts/`, this file. Write in Japanese: `docs/goals/`, RFCs,
 commit messages, issues. Keep `effects`, `capabilities`,

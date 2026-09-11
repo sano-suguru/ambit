@@ -15,7 +15,7 @@ measurement is a later file.
 **`continue-on-error: true` is now removed.** What was missing was an approval
 mechanism, and DESIGN.md §6.3 is it: `ambit.approvals.md`, read on both sides
 of the comparison, so a line grants only in the comparison that adds it
-([ADR-0008](adr/0008-approving-an-authority-increase.md)). Measured on this
+([ADR-0008](../adr/0008-approving-an-authority-increase.md)). Measured on this
 change, which is itself a pull request that legitimately adds authority:
 `diff HEAD src` reported five increases and exited 1 with no ledger, and exited
 0 with the five approval lines written — the only difference between the two
@@ -590,7 +590,7 @@ after the change is **37.5%** (120/320): the same 120 `unknown` functions as
 before, over a denominator three larger, being the three resolvable helpers the
 change added to `src/checker/init.ts`. It is a diagnostic id, so it is a §9.2
 change with a `CHANGELOG.md` entry. The reasoning for carrying no fix is
-[ADR-0011](adr/0011-reporting-why-a-contract-cannot-be-proposed.md).
+[ADR-0011](../adr/0011-reporting-why-a-contract-cannot-be-proposed.md).
 
 One behavioural consequence worth flagging: `Date.now()` and `Math.random()`
 now carry `env` rather than `unknown`, so a caller declaring `@effects pure`
