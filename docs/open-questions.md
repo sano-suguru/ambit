@@ -227,22 +227,23 @@ exit: when it fires, the question is decided, the answer goes in the
   carry a second backend as a product — meaningful only once §3.5's conditions
   are met.
   *Trigger:* an adopter whose tsconfig `ambit check` refuses to start on.
-- **`any-typed` on an installed package's receiver, where TypeScript 7 resolves
-  it.** With `drizzle-orm`'s dependencies installed, the adopted backend reports
-  `reason=any-typed` at 105 call sites where the TypeScript 7 shadow backend
-  resolves the declared package type — including four `mysql2` sites where the
-  shadow side matches a stub and reports `db_read, db_write` and the adopted
-  side reports nothing
-  (`docs/measurements/2026-09-12-ts7-shadow-hardening.md`, the `--with-deps`
-  A/B). Reproduce with `node scripts/shadow-corpus.ts drizzle-orm --with-deps`.
-  Undecided, and three readings are open: a module-resolution difference under
-  the corpus tsconfig (`moduleResolution: Bundler`, `types: []`, packages with
-  an `exports` map), a checker difference between 6.0.3 and 7.0.2, or an
-  artifact of installing only the packages the subtree imports. Which one it is
-  decides whether this is a defect in the product backend — losing `db_read` on
-  real ORM code is the failure Ambit exists to prevent — or a property of the
-  measurement. It must be settled before any of the corpus divergence counts
-  are quoted.
+- **`baseUrl` and a bare specifier: whose resolution should an effect analysis
+  follow?** `typescript@6.0.3` applies the deprecated `baseUrl` fallback to a
+  bare specifier under `moduleResolution: Bundler`; `typescript@7.0.2` does not.
+  Measured on `drizzle-orm` with its dependencies installed: with `baseUrl` set
+  to the source root, 6.0.3 resolves `import { Connection } from 'mysql2'`
+  inside `src/mysql2/session.ts` to drizzle's own `src/mysql2/` directory and
+  the receiver reads `any`, while 7.0.2 reaches the installed package
+  (`docs/measurements/2026-09-12-any-typed-divergence.md`). Both answers are
+  defensible and they answer different questions: the project's own `tsc` under
+  that `tsconfig.json` resolves the way 6.0.3 does, and a bundler at runtime
+  resolves the way 7.0.2 does. Ambit reports what a call site *does*, which
+  argues for the runtime answer; Ambit also has to agree with the type check the
+  project already runs, which argues for the other. Undecided. What is not
+  undecided is that a project setting `baseUrl` with a source directory named
+  after a dependency — the ordinary shape of an adapter layer — is analyzed
+  differently by the two backends, so this has to be settled before TypeScript 7
+  could be anything but a shadow.
 
 - **The adopted backend truncates a JSDoc `@see` URL's scheme.** On `hono`,
   `@see https://developers.cloudflare.com/...` is extracted as
