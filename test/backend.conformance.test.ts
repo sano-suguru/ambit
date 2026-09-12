@@ -259,6 +259,69 @@ describe("backend conformance: generics (§3.5 gate 1)", () => {
   });
 });
 
+/**
+ * §4.2 rule 4 at the shape callback APIs actually declare. `cb?: (v: T) => R`
+ * types both the parameter and the argument as
+ * `((v: T) => R) | null | undefined`, and a union reports no call signatures of
+ * its own however callable its constituents are. A backend that asks the union
+ * directly answers "not callable", skips the reference, and lets the opaque
+ * callback past the guard — measured on `drizzle-orm`, six sites where
+ * `promise.then(onFulfilled, onRejected)` summarized as `known-pure`
+ * (`docs/measurements/2026-09-12-optional-callback-opacity.md`).
+ */
+describe("backend conformance: optional callback slots (§3.5 gate 1)", () => {
+  it("marks an optional callback passed by reference as opaque", async () => {
+    const calls = await callsOf(
+      "optional-callbacks.ts",
+      "optional-callbacks.ts#forwardsOptionalCallbacks",
+    );
+    const then = calls.find((c) => c.pureBuiltinName === "Promise.then");
+    expect(then?.callbackByReference).toBe(true);
+    expect(then?.unresolvedReason).toBe("builtin-method");
+  });
+
+  /**
+   * The direction §3.4 forbids, asserted where it would be lost: a site whose
+   * callbacks cannot be walked must not summarize as a proven-pure builtin.
+   */
+  it("refuses a known-pure verdict for that site", async () => {
+    const { files } = await extract();
+    const summaries = summarizeExtractedFiles(files);
+    const summary = summaries.find(
+      (s) => s.id === "optional-callbacks.ts#forwardsOptionalCallbacks",
+    );
+    const then = summary?.calls.find(
+      (c) => "qualifiedName" in c && c.qualifiedName === "Promise.then",
+    );
+    expect(then?.kind).toBe("unresolved");
+  });
+
+  /**
+   * The narrowing has to stay narrow: `null` and `undefined` in a callback
+   * slot are not callables, and counting them would make every
+   * `promise.then(null, handler)` read as opaque twice over.
+   */
+  it("does not count a null or undefined argument as a callable", async () => {
+    const calls = await callsOf("optional-callbacks.ts", "optional-callbacks.ts#passesNoCallback");
+    const then = calls.find((c) => c.pureBuiltinName === "Promise.then");
+    expect(then?.callbackByReference).toBeUndefined();
+  });
+
+  /**
+   * An optional slot handed a reference this project extracted is a target,
+   * not opacity — the effects come from the callback's own summary.
+   */
+  it("follows an optional callback that names an extracted function", async () => {
+    const calls = await callsOf(
+      "optional-callbacks.ts",
+      "optional-callbacks.ts#passesExtractedCallback",
+    );
+    const then = calls.find((c) => c.pureBuiltinName === "Promise.then");
+    expect(then?.callbackTargets).toEqual(["optional-callbacks.ts#double"]);
+    expect(then?.callbackByReference).toBeUndefined();
+  });
+});
+
 describe("backend conformance: unions (§3.5 gate 1)", () => {
   /**
    * Both union members declare `run`, so the call type-checks and
