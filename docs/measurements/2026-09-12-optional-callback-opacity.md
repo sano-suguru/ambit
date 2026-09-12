@@ -133,10 +133,13 @@ reproduce with and without dependencies installed.
 ## Fix
 
 `src/checker/backend/legacy-ts.ts`: one predicate for both questions.
-`isCallableParameterType` is renamed `isCallableType` — it is now asked of a
-declared parameter type and of an argument type, and the two answers have to
-agree, because at an optional slot they are the same type — and
-`callableArgumentsOf` calls it instead of its inline check.
+`callableArgumentsOf` calls it instead of its inline check, and
+`isCallableParameterType` is renamed `mayBeCallable` — it is now asked of a
+declared parameter type and of an argument type, which at an optional slot are
+the same type, so the two answers have to agree. The name says *may*
+deliberately: a union answers yes when any constituent is callable and
+`any`/`unknown` answers yes with no call signatures at all, so a true answer
+means "this could be a callback, scan it", never "this is a function".
 
 Regression coverage is `test/fixtures/backend-conformance/optional-callbacks.ts`
 plus four assertions in `test/backend.conformance.test.ts`. It is in the
@@ -173,7 +176,7 @@ function:
 ```
 - callableArgumentsOf | {"calleeQualifiedName":"typescript.Type.getCallSignatures",
                          "unresolvedReason":"external-module"}
-+ callableArgumentsOf | {"resolvedCallee":"…legacy-ts.ts#isCallableType"}
++ callableArgumentsOf | {"resolvedCallee":"…legacy-ts.ts#mayBeCallable"}
 ```
 
 The inline `type.getCallSignatures()` was an unresolved call into `typescript`;
