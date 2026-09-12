@@ -235,7 +235,7 @@ export function computeFingerprint(rootDir: string, engine: TsBackend): ProjectF
     tsconfigPath,
     tsconfigHash: hash(tsconfigText ?? ""),
     configHash: hash(configParts.join("\n\u0000\n")),
-    resolutionHash: hash(resolutionParts.join("\n \n")),
+    resolutionHash: hash(resolutionParts.join("\n\u0000\n")),
     undecidable,
   };
 }
@@ -667,9 +667,21 @@ async function runGeneration(input: GenerationInput): Promise<Generation> {
   const fingerprint = computeFingerprint(rootDir, backend);
   // In this phase the answer has no consequence: every update is a full
   // rebuild, so `false` is what the path does anyway. It is computed and
-  // recorded rather than skipped because the value is what phase 3 branches on,
-  // and a fingerprint first exercised by the code that depends on it is a
-  // fingerprint nobody has watched fail.
+  // recorded rather than skipped because a fingerprint first exercised by the
+  // code that depends on it is a fingerprint nobody has watched fail.
+  //
+  // **What it will gate is extraction reuse, which is phase 4 — not phase 3.**
+  // Saying "phase 3 branches on this" would be a trap: `undecidable` carries a
+  // permanent entry until `openProject` can report the resolved compiler
+  // options, so reuse is refused on every update, and a phase 3 written inside
+  // this branch would never execute. It does not need to. Phase 3 re-extracts
+  // the whole project and scopes only the fixed point, and the impact set it
+  // scopes to comes from comparing the new summaries against the previous
+  // generation's — Ambit's own data, not a claim about what the compiler may
+  // reuse. Where this fingerprint would have said "reuse nothing", the
+  // comparison finds every summary changed on its own, the impact set is the
+  // whole tree, and the scoped fixed point degenerates into `propagate`:
+  // slower than it could be, and never wrong.
   const reusePermitted =
     input.previousFingerprint !== undefined &&
     fingerprintPermitsReuse(input.previousFingerprint, fingerprint) &&

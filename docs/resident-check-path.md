@@ -291,6 +291,25 @@ One generation of `session.update(changes)`. The phase names are §6.2's.
    rebuild**: drop the
    store and run the first-check path. Full rebuild shares no code with the
    incremental path, so a bug in one cannot hide in the other.
+
+   **What the verdict gates is extraction, and that makes it phase 4's, not
+   phase 3's.** The distinction matters because `undecidable` carries a
+   permanent entry — the resolved compiler options, which nothing can read
+   until `openProject` exists — so reuse is refused on every update until
+   phase 4. A phase 3 written *inside* the permitting branch would therefore
+   never run, and could not be measured.
+
+   It does not have to be. Phase 3 re-extracts the whole project and scopes
+   only the fixed point, and what it scopes to is the changed-summary set `S`,
+   computed by comparing the new summaries against the previous generation's.
+   That comparison is over Ambit's own data and asks a different question from
+   the fingerprint's: not "may the compiler's work be reused" but "did this
+   function's summary move". Where the fingerprint would have said "reuse
+   nothing", the comparison finds every summary changed by itself, `I` is the
+   whole tree, and the scoped fixed point degenerates into `propagate` —
+   slower than it could be, and never wrong. So phase 3 is correct and
+   measurable while the fingerprint still refuses everything, and phase 4 is
+   where the verdict starts deciding something.
 2. **`project-update`**. `TsProjectSession.update(changes)`. The legacy backend
    rebuilds its program with `oldProgram` and re-extracts the changed files plus
    their reverse-import closure. **The store's `reverseImports` is authoritative
@@ -473,7 +492,7 @@ resident path that reintroduces it has failed whatever else it achieves.
 
 Phases 0, 1 and 2 are done. What building them corrected is recorded under
 **Corrections from the implementation** below.
-| 3 | The scoped fixed point in `propagate.ts`; extraction still whole-project | Suite still passes; `impact` appears in the timings |
+| 3 | The scoped fixed point in `propagate.ts`; extraction still whole-project. **Not gated on `fingerprintPermitsReuse`** — see the lifecycle's step 1 | Suite still passes; `impact` appears in the timings |
 | 4 | `openProject` in the legacy backend; reverse-import closure re-extraction | Suite still passes; `extraction` shrinks |
 | 5 | Benchmark, `docs/measurements/`, `docs/status.md` | Measured numbers exist |
 | 6 | CLI exposure — separate work, separate `CHANGELOG.md` entry | — |
