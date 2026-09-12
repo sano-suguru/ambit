@@ -108,3 +108,4 @@ is left out rather than padded.
 | [0011](0011-reporting-why-a-contract-cannot-be-proposed.md) | `ambit init` reports why it cannot propose a contract, and proposes no `@boundary` | Accepted (2026-09-11) |
 | [0012](0012-reporting-an-unresolvable-gain.md) | An unresolvable gain is reported, and gated only on request | Accepted (2026-09-11) — extends 0008 |
 | [0013](0013-the-inline-callback-owner.md) | A file's inline callbacks are one entry, compared as a multiset over its bodies | Accepted (2026-09-11) — extends 0008 |
+| [0014](0014-the-resident-check-path.md) | The resident path caches extraction per file and re-propagates over the impact range | Accepted (2026-09-12) |
