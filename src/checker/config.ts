@@ -6,6 +6,7 @@
  * already produced ids for, so nothing here needs to know what a
  * `ts.Node` is (§3.4).
  */
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -87,7 +88,22 @@ export async function loadConfig(startDir: string): Promise<LoadedConfig | undef
 
   let module: { readonly default?: unknown };
   try {
-    module = (await import(pathToFileURL(configPath).href)) as { readonly default?: unknown };
+    // The query is the file's own content hash, and it is load-bearing rather
+    // than cosmetic: Node's ESM loader caches a module by URL for the life of
+    // the process, so a second `loadConfig` on an edited config file in the
+    // same process would return the *first* version's exports. One-shot
+    // `ambit check` never noticed, but DESIGN.md §6.2's resident path is a
+    // process that loads the config again after it changed — and §6.2's table
+    // requires an `ambit.config.ts` change to re-derive every contract. A
+    // cached module would satisfy that by re-deriving from stale data, which
+    // is the failure §3.4 forbids wearing the shape of a success.
+    //
+    // Keyed by content rather than by a counter so an *unchanged* config is
+    // still imported once: re-evaluating a module has side effects of its
+    // own, and repeating them per check would be a cost the cold path never
+    // had.
+    const url = `${pathToFileURL(configPath).href}?v=${createHash("sha256").update(sourceText).digest("hex").slice(0, 16)}`;
+    module = (await import(url)) as { readonly default?: unknown };
   } catch (error) {
     throw new ConfigError(`cannot load ${configPath}: ${messageOf(error)}`);
   }

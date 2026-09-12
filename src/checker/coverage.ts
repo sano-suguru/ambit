@@ -169,7 +169,7 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
     functionsEntrypoint: entrypoints.length,
     entrypointsWithoutCapabilities,
     functionsSkipped,
-    skippedByKind: skippedFunctions,
+    skippedByKind: canonicalCounts(skippedFunctions),
     functionUnknownRate,
     functionBoundaryRate,
     callSitesTotal:
@@ -185,7 +185,24 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
     callSitesInlined,
     callSitesMutation,
     callSitesUnresolved,
-    unresolvedByReason,
+    unresolvedByReason: canonicalCounts(unresolvedByReason),
     topUnresolvedNames,
   };
+}
+
+/**
+ * A count map in a canonical key order, so that serializing it produces the
+ * same bytes whatever order the counts were accumulated in.
+ *
+ * Both maps this is applied to are filled in the order files were walked and
+ * kinds encountered, and both reach the output through `Object.fromEntries`
+ * and through the text formatter, which serialize insertion order. DESIGN.md
+ * §6.2's equivalence law is over bytes, and a resident path that re-sums these
+ * from per-file slices would otherwise have to reproduce an encounter order to
+ * be equal — which is a property of the walk, not of the tree.
+ *
+ * Sorted by code point for the reason `sortDiagnostics` is.
+ */
+function canonicalCounts<K extends string>(counts: ReadonlyMap<K, number>): ReadonlyMap<K, number> {
+  return new Map([...counts].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }

@@ -43,6 +43,19 @@ report.
 
 ### Changed
 
+- **`ambit check` emits diagnostics in a canonical order** — by file, then by
+  line, then by column, then by diagnostic id — instead of the order the
+  backend happened to discover files in. `--coverage`'s `skipped=` and
+  `unresolved-by-reason:` breakdowns are ordered by key for the same reason.
+  No diagnostic, severity, exit code or field changes; **the records are the
+  same records in a different order**, and a consumer that reads the NDJSON
+  line by line is unaffected. `ambit init`'s proposals are ordered the same way,
+  and one field's *contents* changed order too: `fixes[].impact.callersAffected`
+  is now sorted by symbol id rather than following the analysis's own iteration.
+  §9.2 guarantees the field shape and not the record order, so this is announced
+  rather than owed: the order is now a function of the findings, which is what
+  lets `docs/DESIGN.md` §6.2's resident path be compared against a cold run byte
+  for byte.
 - **`ambit diff` compares authority as a multiset over the bodies a symbol
   owns** (§6.3). For the one body almost every symbol owns this is the set
   comparison it has always been, and no previously-reported increase changes.

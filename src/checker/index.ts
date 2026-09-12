@@ -5,4 +5,6 @@ export * from "./coverage.ts";
 export * from "./diagnose.ts";
 export * from "./init.ts";
 export * from "./propagate.ts";
+export * from "./report.ts";
+export * from "./resident.ts";
 export * from "./summarize.ts";

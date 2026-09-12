@@ -1,30 +1,18 @@
-import type { CoverageReport } from "../checker/coverage.ts";
 import {
-  buildAuthorityRecords,
+  type AnalysisResult,
+  buildReport,
   type ConfigTarget,
-  computeCoverage,
-  diagnose,
-  diagnoseContractDivergence,
-  diagnoseRuntimeWrappers,
-  diagnoseUncarriedContracts,
-  diagnoseUnmatchedConfigKeys,
   legacyTsBackend,
   loadConfig,
   propagate,
-  proposeContracts,
   type ResolvedConfig,
   resolveConfig,
   summarizeExtractedFiles,
 } from "../checker/index.ts";
-import type { AuthorityRecord, Diagnostic, TsBackend } from "../core/index.ts";
+import type { TsBackend } from "../core/index.ts";
 
 /** One run of the analysis over one directory. */
-export interface Analysis {
-  readonly diagnostics: readonly Diagnostic[];
-  /** Per-function authority (DESIGN.md §5.1), the input `ambit diff` compares. */
-  readonly authority: readonly AuthorityRecord[];
-  readonly coverage: CoverageReport;
-}
+export type Analysis = AnalysisResult;
 
 export interface AnalyzeOptions {
   /** `init`: report contract proposals instead of violations. */
@@ -65,6 +53,10 @@ export interface AnalyzeOptions {
  * directory even slightly differently would report the difference as a change
  * in authority.
  *
+ * This is also the oracle the resident path (DESIGN.md §6.2) is tested
+ * against, so it stays a pure function of the directory: nothing here is
+ * allowed to become a cache.
+ *
  * Throws on any failure. A caller turns that into exit 2 — an analysis that
  * could not run must never be reported as "checked, nothing wrong"
  * (DESIGN.md §3.4).
@@ -100,76 +92,25 @@ export async function analyze(dir: string, options: AnalyzeOptions = {}): Promis
   }
   const summaries = summarizeExtractedFiles(project.files, config);
   const state = propagate(summaries);
-  const engine = { name: backend.name, version: backend.version };
-  const diagnostics = options.propose
-    ? proposeContracts(state, engine, options.proposeConfig ? configTarget(config, dir) : undefined)
-    : applyStrict(
-        [
-          ...diagnose(state, engine),
-          ...diagnoseUncarriedContracts(project.uncarriedContracts, engine),
-          ...diagnoseRuntimeWrappers(
-            project.files.flatMap((file) => file.runtimeWrappers),
-            state,
-            engine,
-          ),
-          ...(config ? diagnoseContractDivergence(state, config.displayPath, engine) : []),
-          ...(config
-            ? diagnoseUnmatchedConfigKeys(
-                config.unmatchedExactKeys(),
-                config.displayPath,
-                config.sourceText,
-                engine,
-              )
-            : []),
-        ],
-        options.strict ?? false,
-        config,
-      );
 
-  return {
-    diagnostics,
-    authority: buildAuthorityRecords(state),
-    coverage: computeCoverage({
-      filesAnalyzed: project.files.length,
-      skippedFunctions: project.skippedFunctions,
-      summaries,
-      state,
-    }),
-  };
-}
-
-/**
- * The diagnostics `--strict` promotes to errors: the two that say "analysis
- * reached something it could not resolve" (DESIGN.md §4.2 rule 3 — "Ambit's
- * `strict: true` can promote it to an error"). Deliberately not every warning:
- * `--strict` means "an unverified path is not acceptable here", which is a
- * different claim from promoting, say, an entrypoint's missing capability set.
- */
-const STRICT_PROMOTED_IDS: ReadonlySet<string> = new Set(["AMB-W001", "AMB-W003"]);
-
-/**
- * `--strict` promotes everywhere; `strict` in `ambit.config.ts` promotes only
- * inside the globs it lists (DESIGN.md §4.3: "`strict` can be set per
- * directory in `ambit.config.ts`. Tighten new code while leaving legacy code
- * at warnings"). The two are a union, so `--strict` on the command line is never
- * narrowed by a config that lists fewer directories.
- *
- * Matched on the diagnostic's own file, which is why the config-level
- * diagnostics (AMB-W005/W006) are unaffected in practice: theirs is the
- * config file, which no `strict` glob names.
- */
-function applyStrict(
-  diagnostics: readonly Diagnostic[],
-  strict: boolean,
-  config: ResolvedConfig | undefined,
-): readonly Diagnostic[] {
-  if (!strict && config === undefined) return diagnostics;
-  return diagnostics.map((diagnostic) =>
-    STRICT_PROMOTED_IDS.has(diagnostic.id) &&
-    (strict || config?.isStrictFile(diagnostic.location.file) === true)
-      ? { ...diagnostic, severity: "error" as const }
-      : diagnostic,
-  );
+  return buildReport({
+    state,
+    summaries,
+    uncarriedContracts: project.uncarriedContracts,
+    runtimeWrappers: project.files.flatMap((file) => file.runtimeWrappers),
+    // Read after every lookup has run, which is what `unmatchedExactKeys`
+    // requires — `contractFor` records matches as a side effect.
+    unmatchedExactKeys: config ? config.unmatchedExactKeys() : [],
+    filesAnalyzed: project.files.length,
+    skippedFunctions: project.skippedFunctions,
+    engine: { name: backend.name, version: backend.version },
+    config,
+    strict: options.strict ?? false,
+    ...(options.propose ? { propose: true as const } : {}),
+    ...(options.propose && options.proposeConfig
+      ? { proposeTarget: configTarget(config, dir) }
+      : {}),
+  });
 }
 
 /**
