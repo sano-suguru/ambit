@@ -299,17 +299,21 @@ One generation of `session.update(changes)`. The phase names are §6.2's.
    phase 4. A phase 3 written *inside* the permitting branch would therefore
    never run, and could not be measured.
 
-   It does not have to be. Phase 3 re-extracts the whole project and scopes
-   only the fixed point, and what it scopes to is the changed-summary set `S`,
-   computed by comparing the new summaries against the previous generation's.
-   That comparison is over Ambit's own data and asks a different question from
-   the fingerprint's: not "may the compiler's work be reused" but "did this
-   function's summary move". Where the fingerprint would have said "reuse
-   nothing", the comparison finds every summary changed by itself, `I` is the
-   whole tree, and the scoped fixed point degenerates into `propagate` —
-   slower than it could be, and never wrong. So phase 3 is correct and
-   measurable while the fingerprint still refuses everything, and phase 4 is
-   where the verdict starts deciding something.
+   It does not have to be, and **the reason is not that a refused fingerprint
+   makes every summary count as changed** — it does not. A compiler option can
+   differ while a given function still extracts, resolves and summarizes to
+   exactly what it did before, and that function belongs in neither `S` nor
+   `I`.
+
+   Phase 3 is independent because it **reuses no compiler or extraction result
+   at all**. It re-extracts and re-summarizes the whole project from the new
+   snapshot, then compares those Ambit-owned summaries against the previous
+   generation's. Only a summary whose propagation inputs actually moved enters
+   `S`; a summary that did not move needs no invalidation merely because the
+   project fingerprint refused compiler-level reuse. That is also where the
+   value is: a tsconfig edit that changes nothing semantic gives `S = ∅` and
+   costs one extraction, not one whole fixed point. Phase 4 is where the
+   fingerprint begins gating extraction reuse.
 2. **`project-update`**. `TsProjectSession.update(changes)`. The legacy backend
    rebuilds its program with `oldProgram` and re-extracts the changed files plus
    their reverse-import closure. **The store's `reverseImports` is authoritative
@@ -380,6 +384,23 @@ ids from `state`, and iterate `I` until neither `observed` nor `required` moves.
 Callees outside `I` are read at their committed values. Then run the per-body
 derivation once, after the fixed point, for the elements of `I` owning two or
 more bodies — the same order `propagate` uses.
+
+**What the comparison has to cover, and the risk if it does not.** `S` is
+decided by one equality test over `FunctionSummary`, so *that comparator* is
+where phase 3 can go wrong — not the fingerprint. If any field a propagated
+value depends on is left out of it, an unchanged verdict is returned for a
+summary whose inputs moved, the function never enters `I`, and its committed
+value is reused while being stale. The fields that must be in it, from
+`src/core/summary.ts`: `declared`, `capabilities`, `budget`, `boundary`,
+`entrypoint`, `calls` **in order** — including each call's `kind` and, per
+kind, `callee` / `effects` / `requiredCapability` / `capabilityTargetUnknown` /
+`reason` / `escaping` / `unknownCallback` — and the partitioning of `bodies`.
+`location` and `tagLocations` are in it too, because a diagnostic's reported
+position is part of the bytes §6.2 compares. The honest default for a field
+nobody has reasoned about is *included*: an over-wide comparator costs a
+recomputation, and a narrow one costs a wrong answer. The differential suite is
+what has to catch a gap here, which is why every phase 3 row is added to it
+before the narrowing it justifies.
 
 **Why it terminates.** Values outside `I` are fixed; values inside only grow
 under union; the effect set is finite and the capability set is drawn from the

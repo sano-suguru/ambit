@@ -674,14 +674,18 @@ async function runGeneration(input: GenerationInput): Promise<Generation> {
   // Saying "phase 3 branches on this" would be a trap: `undecidable` carries a
   // permanent entry until `openProject` can report the resolved compiler
   // options, so reuse is refused on every update, and a phase 3 written inside
-  // this branch would never execute. It does not need to. Phase 3 re-extracts
-  // the whole project and scopes only the fixed point, and the impact set it
-  // scopes to comes from comparing the new summaries against the previous
-  // generation's — Ambit's own data, not a claim about what the compiler may
-  // reuse. Where this fingerprint would have said "reuse nothing", the
-  // comparison finds every summary changed on its own, the impact set is the
-  // whole tree, and the scoped fixed point degenerates into `propagate`:
-  // slower than it could be, and never wrong.
+  // this branch would never execute.
+  //
+  // It does not need to, and the reason is not that a refused fingerprint makes
+  // every summary count as changed — it does not. A compiler option can differ
+  // while a given function extracts, resolves and summarizes to exactly what it
+  // did before. Phase 3 is independent because it **reuses no compiler or
+  // extraction result at all**: it re-extracts and re-summarizes the whole
+  // project from the new snapshot, then compares those Ambit-owned summaries
+  // against the previous generation's. Only a summary whose propagation inputs
+  // actually moved enters the changed set; one that did not move needs no
+  // invalidation merely because the fingerprint refused compiler-level reuse.
+  // Phase 4 is where this verdict begins gating anything.
   const reusePermitted =
     input.previousFingerprint !== undefined &&
     fingerprintPermitsReuse(input.previousFingerprint, fingerprint) &&
