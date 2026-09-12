@@ -409,6 +409,47 @@ export interface UncarriedContract {
 }
 
 /**
+ * One source file under the analysis root, whether or not it declared
+ * anything — the per-file record the resident check path (DESIGN.md §6.2)
+ * keys its store by.
+ *
+ * Separate from {@link ExtractedFile} rather than folded into it, because the
+ * two answer different questions and cover different files. An
+ * `ExtractedFile` exists only where the file contributed a function or a
+ * runtime wrapper; a barrel that only re-exports contributes neither and is
+ * absent from `files` — yet editing it changes how every importer's calls
+ * resolve. A store built from `files` alone would hold no import edge for it,
+ * so the edit would invalidate nothing and every importer would keep a stale
+ * resolution. **Every source file under the root gets one of these**, and
+ * what it exists for is {@link imports}.
+ *
+ * All of it is strings and numbers: no compiler object crosses the boundary
+ * here any more than anywhere else (DESIGN.md §3.4).
+ */
+export interface ExtractedModule {
+  /** Root-relative, the same spelling {@link ExtractedFile.filePath} uses. */
+  readonly filePath: string;
+  /**
+   * The files this one imports that lie under the analysis root, root-relative
+   * and deduplicated, in source order.
+   *
+   * Resolved targets, not specifiers: a specifier naming a package, a `.d.ts`,
+   * or a file outside the root is not an edge the analysis holds — and a
+   * specifier that resolved to nothing at all leaves no entry, which is
+   * precisely why DESIGN.md §6.2 makes a file *addition* re-check everything
+   * rather than close over the edges already held.
+   *
+   * Type-only imports are included. Over-invalidating costs time; the table in
+   * §6.2 is a minimum, and under-invalidating is what it forbids.
+   */
+  readonly imports: readonly string[];
+  /** This file's share of {@link ExtractedProject.skippedFunctions}. */
+  readonly skippedFunctions: ReadonlyMap<SkippedFunctionKind, number>;
+  /** This file's share of {@link ExtractedProject.uncarriedContracts}, in order. */
+  readonly uncarriedContracts: readonly UncarriedContract[];
+}
+
+/**
  * Everything `extractProject` produces for one run: the extracted files, how
  * many function-like nodes it saw but did not extract (by kind), and any
  * contract written on one of those nodes.
@@ -425,6 +466,21 @@ export interface ExtractedProject {
   readonly files: readonly ExtractedFile[];
   readonly skippedFunctions: ReadonlyMap<SkippedFunctionKind, number>;
   readonly uncarriedContracts: readonly UncarriedContract[];
+  /**
+   * One entry per source file under the root, including files that
+   * contributed nothing to {@link files} — see {@link ExtractedModule}.
+   *
+   * Required for the same reason the two aggregates above are: a backend that
+   * omitted it would report "this file imports nothing" and "this backend does
+   * not track imports" identically, and the resident path would then
+   * under-invalidate on an edit rather than over-invalidate on one.
+   *
+   * The aggregates are *not* derived from it here. `analyze`, `computeCoverage`
+   * and `filesAnalyzed` keep reading the project-level fields exactly as they
+   * did; the resident store is what re-sums the per-file slices, and the two
+   * summing to the same thing is what `test/extracted-modules.test.ts` asserts.
+   */
+  readonly modules: readonly ExtractedModule[];
 }
 
 /**
@@ -442,4 +498,38 @@ export interface TsBackend {
   readonly name: string;
   readonly version: string;
   extractProject(rootDir: string): Promise<ExtractedProject>;
+  /**
+   * Hold the engine's state open across updates, for the resident check path
+   * (DESIGN.md §6.2).
+   *
+   * Optional, and the rest of the interface is untouched: a backend without it
+   * is driven through a full-rebuild adapter that calls `extractProject` and
+   * reports a whole project every time (ADR-0014's architecture A), so
+   * everything above the boundary stays backend-independent and
+   * `test/backend.conformance.test.ts` keeps passing unchanged.
+   *
+   * The session's own vocabulary lives in `src/checker/resident.ts`, not here:
+   * `src/core` describes what crosses the connection boundary, not how a caller
+   * drives it. What crosses is {@link ResidentExtractedUpdate}, and it carries
+   * no compiler object like everything else on this boundary.
+   */
+  openProject?(rootDir: string): Promise<{
+    update(changed: readonly ResidentFileChange[]): Promise<ResidentExtractedUpdate>;
+    close(): void;
+  }>;
+}
+
+/** See `FileChange` in `src/checker/resident.ts`. */
+export type ResidentFileChange =
+  | { readonly kind: "changed"; readonly path: string }
+  | { readonly kind: "added"; readonly path: string }
+  | { readonly kind: "deleted"; readonly path: string };
+
+/** See `ExtractedUpdate` in `src/checker/resident.ts`. */
+export interface ResidentExtractedUpdate {
+  readonly files: readonly ExtractedFile[];
+  readonly modules: readonly ExtractedModule[];
+  readonly removed: readonly string[];
+  readonly full: boolean;
+  readonly projectUpdateMs?: number;
 }

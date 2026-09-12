@@ -53,6 +53,28 @@ describe("architecture constraint: only the connection layer depends on typescri
   });
 });
 
+describe("architecture constraint: the resident path holds nothing the compiler owns", () => {
+  // DESIGN.md §6.2: "A compiler node, type, signature, or internal id is valid
+  // for the snapshot that produced it and is discarded with it — a rule the
+  // connection layer already enforces at the `ambit check` boundary, and which
+  // the resident path must not weaken by holding such a value in state that
+  // outlives one update."
+  //
+  // The rule above already covers every file outside `src/checker/backend/`.
+  // This one names `resident.ts` on its own because it is the file the
+  // temptation applies to: it is the only place that keeps state between
+  // updates, so a `ts.Program` held "just for `oldProgram`" would look
+  // reasonable there and nowhere else.
+  it("src/checker/resident.ts does not import typescript", async () => {
+    const file = path.join(PROJECT_ROOT, "src/checker/resident.ts");
+    const content = await readFile(file, "utf8");
+    expect(TYPESCRIPT_IMPORT.test(content)).toBe(false);
+    // Positive control: the file exists and is the resident path, not an empty
+    // placeholder that would pass the assertion by having no imports at all.
+    expect(content).toContain("export class ResidentSession");
+  });
+});
+
 describe("architecture constraint: the M0.5 comparison probes stay out of the product", () => {
   // DESIGN.md §3.5's gate probes live under `scripts/` and load a second
   // TypeScript compiler from `.m05-native/`, outside this package's

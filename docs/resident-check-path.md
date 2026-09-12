@@ -6,7 +6,10 @@ architecture is [ADR-0014](adr/0014-the-resident-check-path.md). Nothing here is
 a new guarantee — §9.2 puts the existence of a resident path outside the
 guaranteed surface, and this document adds no claim to it.
 
-Status: **not implemented.** `docs/status.md` is where that changes.
+Status: **phases 0–2 implemented, phases 3–6 not.** `docs/status.md` carries
+what that means in detail; this file stays the design, and where the
+implementation forced a correction the text below says so rather than being
+quietly left behind.
 
 ## What is true today
 
@@ -60,7 +63,8 @@ One new layer. Everything above it stays the pure function it already is.
 | `src/checker/backend/legacy-ts.ts` | Implements `openProject`, passing `oldProgram` |
 | `src/checker/propagate.ts` | One additional entry point for the scoped fixed point. `propagate` itself is untouched and stays the oracle |
 | `src/checker/summarize.ts`, `diagnose.ts`, `authority.ts`, `coverage.ts` | Unchanged |
-| `src/cli/analyze.ts` | Unchanged. The cold path is what the resident path is tested against |
+| `src/checker/report.ts` | New. The `report` phase — diagnostics, authority records, coverage — composed once and called by both paths (correction 8) |
+| `src/cli/analyze.ts` | Delegates the `report` phase to `report.ts`; otherwise unchanged. The cold path is what the resident path is tested against |
 
 **No CLI flag.** A flag is guaranteed surface (§9.2) and needs its own
 `CHANGELOG.md` entry; the consumers of this work are the tests and the
@@ -108,11 +112,15 @@ type FileChange =
 interface ExtractedUpdate {
   /** Re-extracted files. A file absent here keeps the entry the store holds. */
   readonly files: readonly ExtractedFile[];
+  /** One per re-extracted source file, including files absent from `files`. */
+  readonly modules: readonly ExtractedModule[];
   /** Files deleted from the project. Not "stopped contributing" — a file that
    *  declares nothing still has an `ExtractedModule` and still has import edges. */
   readonly removed: readonly string[];
   /** True when `files` is the whole project and the store is replaced, not patched. */
   readonly full: boolean;
+  /** Absent where the backend cannot separate project construction from extraction. */
+  readonly projectUpdateMs?: number;
 }
 ```
 
@@ -165,20 +173,21 @@ interface ResidentStore {
 }
 
 interface FileEntry {
-  readonly order: number;                      // only if phase 0 leaves any output order-dependent
-  readonly extracted: ExtractedFile;
+  readonly module: ExtractedModule;
+  readonly extracted?: ExtractedFile;          // absent for a file that declares nothing
   readonly summaries: readonly FunctionSummary[];
-  readonly matchedConfigKeys: readonly string[];
+  // `matchedConfigKeys` is phase 3's — see correction 3
 }
 
 interface ProjectFingerprint {
   readonly engineName: string;
   readonly engineVersion: string;
   readonly tsconfigPath: string | undefined;
-  readonly tsconfigHash: string;    // the tsconfig text and its `extends` chain, plus the resolved
-                                    // options WITHOUT `fileNames` — see below
+  readonly tsconfigHash: string;    // the tsconfig text. The `extends` chain and the resolved
+                                    // options WITHOUT `fileNames` are phase 4's — see below
   readonly configHash: string;      // ambit.config.ts source text
   readonly resolutionHash: string;  // package.json / lockfile texts
+  readonly undecidable: readonly string[];  // non-empty means rebuild, whatever the rest says
 }
 ```
 
@@ -209,9 +218,19 @@ Discarded with every generation:
   declaration in any other. Rebuilding it is a syntactic walk with no checker in
   it, which is why this is affordable.
 - **`ResolvedConfig`.** It accumulates `matchedKeys`, so it is rebuilt per
-  generation, and `unmatchedExactKeys()` is *not* used on this path: the store
-  unions `FileEntry.matchedConfigKeys` across every file and subtracts that from
-  the config's exact keys.
+  generation. From phase 3 on, `unmatchedExactKeys()` is *not* usable on this
+  path — the store must union `FileEntry.matchedConfigKeys` across every file
+  and subtract that from the config's exact keys, which needs `contractFor` to
+  report which key it matched (correction 3). While every update is a full
+  rebuild, `unmatchedExactKeys()` is read after a whole run and is correct.
+- **Node's ESM module cache, for the config and everything it imports.**
+  `loadConfig` imports `ambit.config.ts`, and `import()` caches by URL for the
+  life of the process, so an edited config would come back as its previous
+  version. A config that imports nothing is re-imported under a query carrying
+  its own content hash; one that imports anything is evaluated in a worker
+  thread, whose module registry is its own — a content query on the config
+  alone re-evaluates the config out of cached dependencies. `configHash` covers
+  the same closure (correction 7).
 
 ## Two reverse graphs, never merged
 
@@ -272,6 +291,29 @@ One generation of `session.update(changes)`. The phase names are §6.2's.
    rebuild**: drop the
    store and run the first-check path. Full rebuild shares no code with the
    incremental path, so a bug in one cannot hide in the other.
+
+   **What the verdict gates is extraction, and that makes it phase 4's, not
+   phase 3's.** The distinction matters because `undecidable` carries a
+   permanent entry — the resolved compiler options, which nothing can read
+   until `openProject` exists — so reuse is refused on every update until
+   phase 4. A phase 3 written *inside* the permitting branch would therefore
+   never run, and could not be measured.
+
+   It does not have to be, and **the reason is not that a refused fingerprint
+   makes every summary count as changed** — it does not. A compiler option can
+   differ while a given function still extracts, resolves and summarizes to
+   exactly what it did before, and that function belongs in neither `S` nor
+   `I`.
+
+   Phase 3 is independent because it **reuses no compiler or extraction result
+   at all**. It re-extracts and re-summarizes the whole project from the new
+   snapshot, then compares those Ambit-owned summaries against the previous
+   generation's. Only a summary whose propagation inputs actually moved enters
+   `S`; a summary that did not move needs no invalidation merely because the
+   project fingerprint refused compiler-level reuse. That is also where the
+   value is: a tsconfig edit that changes nothing semantic gives `S = ∅` and
+   costs one extraction, not one whole fixed point. Phase 4 is where the
+   fingerprint begins gating extraction reuse.
 2. **`project-update`**. `TsProjectSession.update(changes)`. The legacy backend
    rebuilds its program with `oldProgram` and re-extracts the changed files plus
    their reverse-import closure. **The store's `reverseImports` is authoritative
@@ -342,6 +384,23 @@ ids from `state`, and iterate `I` until neither `observed` nor `required` moves.
 Callees outside `I` are read at their committed values. Then run the per-body
 derivation once, after the fixed point, for the elements of `I` owning two or
 more bodies — the same order `propagate` uses.
+
+**What the comparison has to cover, and the risk if it does not.** `S` is
+decided by one equality test over `FunctionSummary`, so *that comparator* is
+where phase 3 can go wrong — not the fingerprint. If any field a propagated
+value depends on is left out of it, an unchanged verdict is returned for a
+summary whose inputs moved, the function never enters `I`, and its committed
+value is reused while being stale. The fields that must be in it, from
+`src/core/summary.ts`: `declared`, `capabilities`, `budget`, `boundary`,
+`entrypoint`, `calls` **in order** — including each call's `kind` and, per
+kind, `callee` / `effects` / `requiredCapability` / `capabilityTargetUnknown` /
+`reason` / `escaping` / `unknownCallback` — and the partitioning of `bodies`.
+`location` and `tagLocations` are in it too, because a diagnostic's reported
+position is part of the bytes §6.2 compares. The honest default for a field
+nobody has reasoned about is *included*: an over-wide comparator costs a
+recomputation, and a narrow one costs a wrong answer. The differential suite is
+what has to catch a gap here, which is why every phase 3 row is added to it
+before the narrowing it justifies.
 
 **Why it terminates.** Values outside `I` are fixed; values inside only grow
 under union; the effect set is finite and the capability set is drawn from the
@@ -449,9 +508,12 @@ resident path that reintroduces it has failed whatever else it achieves.
 | Phase | Content | Done when |
 |---|---|---|
 | 0 | Canonical diagnostic ordering, independent of file discovery order; one sentence in §5.1 | `check src --format json` is byte-identical across runs; existing tests pass |
-| 1 | `ExtractedFile` gains `imports` / `skippedFunctions` / `uncarriedContracts`; `ExtractedProject`'s aggregates become derivations | `check src --coverage` counts unchanged |
+| 1 | `ExtractedProject` gains `modules` — see **Components**, not `ExtractedFile`, and the aggregates stay where they are | `check src --coverage` counts unchanged |
 | 2 | `resident.ts` with the store and a full-rebuild-only `update` (architecture A) | The differential suite passes on every mutation — slowly is fine |
-| 3 | The scoped fixed point in `propagate.ts`; extraction still whole-project | Suite still passes; `impact` appears in the timings |
+
+Phases 0, 1 and 2 are done. What building them corrected is recorded under
+**Corrections from the implementation** below.
+| 3 | The scoped fixed point in `propagate.ts`; extraction still whole-project. **Not gated on `fingerprintPermitsReuse`** — see the lifecycle's step 1 | Suite still passes; `impact` appears in the timings |
 | 4 | `openProject` in the legacy backend; reverse-import closure re-extraction | Suite still passes; `extraction` shrinks |
 | 5 | Benchmark, `docs/measurements/`, `docs/status.md` | Measured numbers exist |
 | 6 | CLI exposure — separate work, separate `CHANGELOG.md` entry | — |
@@ -460,12 +522,140 @@ Phase 2 building a resident session that recomputes everything is the point of
 the order: the equivalence suite goes green before any speed change lands, so the
 first update that breaks equality names itself.
 
+
+## Corrections from the implementation
+
+Written when phases 0–2 landed. Each is a place the design above was wrong or
+under-specified; the design has been edited in place and this list says what
+changed, so a reader of an earlier draft is not left with a stale picture.
+
+1. **Phase 0 canonicalized more than diagnostics.** `skippedByKind` and
+   `unresolvedByReason` reach the output through `Object.fromEntries` and
+   through the text formatter, both of which serialize a `Map`'s insertion
+   order — which is the order files were walked. So are
+   `fixes[].impact.callersAffected`, which came from iterating the propagated
+   state. All three are now ordered by a key of the finding. Without it the
+   resident path, re-summing the counts from per-file slices, would have had to
+   reproduce a walk order to be byte-equal.
+   The order `check src --format json` prints **did** change, so a
+   `CHANGELOG.md` line was owed after all — the "Undecided" entry above is
+   settled.
+
+2. **`FileEntry.order` is not needed.** The design made it conditional on phase
+   0 leaving something order-dependent. Nothing is, so the field does not
+   exist.
+
+3. **`FileEntry.matchedConfigKeys` is deferred to phase 3.**
+   `ResolvedConfig.contractFor` records a match into a private set and does not
+   report *which* key matched, so filling the field needs an addition to that
+   API — and nothing reads it while every update is a full rebuild. The store
+   holds a per-generation `unmatchedExactKeys` instead, taken from
+   `unmatchedExactKeys()` after a whole run, which is correct for exactly as
+   long as phase 2 lasts. **Teaching `ResolvedConfig` to report the matched key
+   is the first step of phase 3**, before any subset of files is re-summarized.
+
+4. **`FileEntry.extracted` is optional.** A file that declares no function and
+   registers no runtime wrapper has no `ExtractedFile` at all — which is the
+   barrel case the `ExtractedModule` record exists for. The design's own
+   argument required this; its type signature did not say so.
+
+5. **`ProjectFingerprint` gains `undecidable: readonly string[]`.** The design
+   said "what the fingerprint cannot decide, it rebuilds" and then wrote a
+   record of hashes with nowhere to put "I do not know". The list is that place,
+   and a non-empty list means rebuild whatever every other field says. Two
+   entries are populated today: a `tsconfig.json` with an `extends` chain, and —
+   always — the resolved compiler options, which are not reachable without a
+   backend session. **The second is removed by phase 4's `openProject`**, and
+   until it is, every fingerprint comparison refuses reuse, which is the correct
+   answer for a phase that rebuilds anyway.
+
+6. **`ExtractedUpdate` carries `modules` and an optional `projectUpdateMs`.**
+   The store needs one module record per re-extracted file, not only the files
+   that declared something; and §6.2 asks for `project-update` and `extraction`
+   to be measured separately, which a backend reached only through
+   `extractProject` cannot do. The adapter leaves the field absent rather than
+   reporting 0 — absent means "not separable by this backend", 0 would mean
+   "free", and §3.4's distinction between the two is the whole point.
+
+7. **`loadConfig` had to stop trusting Node's ESM module cache — twice.**
+   `import()` caches by URL for the life of the process, so a second
+   `loadConfig` on an edited `ambit.config.ts` returned the *first* version's
+   exports. One-shot `ambit check` never noticed; a resident session is exactly
+   the process that loads the config again after it changed, and §6.2's table
+   requires that change to re-derive every contract.
+
+   The first fix put the config's own content hash in the specifier's query.
+   That is correct for a config whose value is a function of its own text, and
+   **wrong for one that imports anything**: the config is re-evaluated, but its
+   `import "./contracts.ts"` resolves to the same URL as last time, so Node
+   hands it the cached module and the config is rebuilt out of stale parts. The
+   query cannot be pushed down either — the specifier is written in the
+   config's source, not chosen by the loader. Reproduced before it was fixed.
+
+   Two consequences, and they are separable:
+
+   - **The value.** A config that imports anything is now evaluated in a worker
+     thread, which has a module registry of its own, so its whole graph is
+     fresh. A config that imports nothing keeps the content-query path and pays
+     nothing. The cost is one worker start, and it buys the only behaviour §6.2
+     accepts. `AmbitConfig` is plain data, so it crosses the thread boundary by
+     structured clone.
+
+     **"Imports anything" is its own question, and deriving it from the hash
+     closure was wrong.** The first attempt used `files.length > 1`, which is
+     the count of *relative* specifiers that resolved — so a config importing
+     only `ambit-ts/config`, and a config whose relative import was written
+     across several lines, both produced a one-element closure and took the path
+     that cannot see an edited dependency. Both were reproduced. The load
+     decision is now `ConfigDependencies.hasImports`, which is set by any static
+     `import` or `export … from`, bare or relative, however it is written, and
+     the scanner no longer stops at the first newline. A shape it still cannot
+     read a specifier out of is counted and reported as `undecidable` rather
+     than passed over — the scan is allowed to see an import that is not there,
+     and never allowed to miss one that is.
+
+     What this does *not* close: a package rewritten in place changes neither
+     `configHash` (bare specifiers are not in the closure, by design) nor
+     `resolutionHash` (the lockfile did not move). The config is still
+     *evaluated* fresh, so the answer is right; it is the fingerprint's reuse
+     decision that would be wrong, and it is covered only because
+     `undecidable` is permanently non-empty until phase 4. **Phase 4 must not
+     remove that entry without answering this**, which is why it is written
+     here rather than left to be rediscovered.
+   - **The fingerprint.** `configHash` now covers the config *and the
+     transitive closure of its relative imports*, not the config's text alone.
+     A bare specifier is not followed: it names a package, and a change there is
+     a resolution change, which `resolutionHash` and §6.2's table already answer
+     with a whole rebuild. Anything the closure walk cannot decide — a specifier
+     resolving to no file, a dynamic import — goes into `undecidable`, because
+     an incomplete closure makes an unchanged hash meaningless.
+
+   **This also changed what the equivalence oracle proves.** Both paths call the
+   same `loadConfig` in the same process, so a stale config made the resident
+   session and the in-process cold run agree byte for byte on the same wrong
+   answer — a comparison certifying a defect rather than catching it. The config
+   rows are therefore also compared against a cold run in a **separate
+   process** (`test/support/cold-oracle.ts`), which shares no module registry
+   with the session. Both new tests were confirmed to fail without the fix.
+
+   One honest consequence is recorded rather than hidden: starting a thread is
+   authority, so `analyze`, `openResidentSession` and the update path declare
+   `process` where they declared only `fs_read`. Ambit reported the increase
+   against its own source, which is what it is for.
+
+8. **The report phase is one function shared by both paths.**
+   `src/checker/report.ts` composes the diagnostics, the authority records and
+   the coverage report, and `analyze()` and the resident session both call it.
+   The design's table said `analyze.ts` was unchanged; it moved instead, and the
+   reason is the equivalence law — two compositions of the same diagnostics are
+   two orders to keep in step, and the first divergence between them would read
+   as an analysis difference rather than a reporting one.
+
 ## Undecided
 
-- Phase 0 may change the order of today's one-shot diagnostic output. §9.2 lists
-  the NDJSON *field shape*, not record order, so no announcement is owed — but a
-  `CHANGELOG.md` line is cheaper than the question. Measure the actual change
-  first.
+- ~~Phase 0 may change the order of today's one-shot diagnostic output.~~
+  **Settled.** It did change `check src --format json`'s order, and a
+  `CHANGELOG.md` line was written for it. See correction 1.
 - Where the change set comes from — an editor's notifications, a file watcher —
   is not decided here, and is not needed: the tests and the benchmark apply their
   own changes. It belongs with CLI exposure in phase 6.

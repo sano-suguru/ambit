@@ -1,8 +1,9 @@
 # Current status
 
 Node.js v24.20.0, macOS (darwin arm64), Apple M1, 8 cores, 16 GiB. Every number
-here was run, not estimated — but not all on the same day. Re-run **2026-09-11**:
-`pnpm test`, `tsc --noEmit`, `biome ci`, `check src --coverage`, `check
+here was run, not estimated — but not all on the same day. Re-run **2026-09-12**:
+`pnpm test`, `tsc --noEmit`, `biome ci`, `check src --coverage`,
+`scripts/bench-corpus.ts`. Re-run **2026-09-11**: `check
 test/fixtures/realistic-api --coverage`. Quoted from the runs archived in
 [`docs/measurements/`](measurements/), not re-taken: the corpus median, the
 latency figures, and the npm install evidence.
@@ -30,15 +31,15 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | Authority increases an external team rejected or explicitly approved | 0 | > 0 |
 | `unknown` rate, real third-party code (corpus median, 4,200 functions) | 52.9% | lower — no target (see below) |
 | `unknown` rate, adopting-team-equivalent fixture (`realistic-api`) | 1.9% (1/53) | no target (see below) |
-| `unknown` rate, Ambit's own source (`check src`) | 38.9% (135/347) | — |
+| `unknown` rate, Ambit's own source (`check src`) | 39.4% (147/373) | — |
 | Authority Ambit sees in a third-party backend's data layer ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)) | 940 stubbed call sites, up from 120 | — |
 | Third-party backends `ambit diff` is silent on when nothing changed | **3** — Unleash ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)), immich ([2026-09-11](measurements/2026-09-11-second-third-party-validation-immich.md)), outline ([2026-09-11](measurements/2026-09-11-third-third-party-validation-outline.md)) | — |
 | `unknown` rate, second third-party backend (immich `server/src`, 3,191 functions) | 79.9% (2,550/3,191) | no target (see below) |
 | `unknown` rate, third third-party backend (outline `server`, 2,245 functions) | 72.8% (1,635/2,245) | no target (see below) |
-| Tests | 623 passing, 35 files | green |
+| Tests | 689 passing, 38 files | green |
 | `tsc --noEmit` / `biome ci .` | pass / pass | pass |
-| `check src` latency, 40 files | ~1.1 s | §3.5's 3 s allowance |
-| Incremental / resident analysis | no | yes (§6.2) |
+| `check src` latency, 42 files | ~1.1 s (last timed at 40 files; not re-timed) | §3.5's 3 s allowance |
+| Incremental / resident analysis | a resident session exists and recomputes everything | yes (§6.2), with a scoped fixed point |
 | Bundled stub packages | 6 DB/LLM clients, 9 builtin namespaces | 50 packages |
 | Runtime hooks | 4 (`fetch`, `node:fs`, `node:child_process`, `pg`) | — |
 | Framework adapters | 2 (Hono, Next.js App Router) | — |
@@ -255,7 +256,7 @@ would move it next is measurable — the corpus prints the whole unresolved-name
 histogram — but which of those names *matters* is a question only an adopter can
 answer, and there is none.
 
-On Ambit's own source the same figure is 38.9%, dominated by calls into the
+On Ambit's own source the same figure is 39.4%, dominated by calls into the
 `typescript` compiler API from the connection layer: the one file §3.4 means to
 be replaceable.
 
@@ -283,6 +284,75 @@ want next: `--strict` is only usable where its reports can be closed, and a
 package no bundled table covers has no exit short of `@boundary`
 ([`docs/limitations.md`](limitations.md)).
 
+## The resident check path (§6.2)
+
+Phases 0–2 of [`docs/resident-check-path.md`](resident-check-path.md) are
+implemented. **No speed claim is made and none is measurable yet**: every
+`update()` goes through the full-rebuild adapter, so a re-check recomputes the
+whole project, and `scripts/bench-resident.ts` (phase 5) does not exist.
+
+What is built, and what says so:
+
+| Phase | Built | Evidence |
+|---|---|---|
+| 0 — canonical diagnostic order | yes | `test/diagnostic-order.test.ts` drives the adopted backend with `files` reversed and asserts the diagnostics, authority records and coverage bytes are identical. `check src --format json` order changed; announced in `CHANGELOG.md` |
+| 1 — `ExtractedProject.modules` | yes | `test/extracted-modules.test.ts`: one entry per source file including a re-export-only barrel, and the per-file slices re-sum to the project aggregates on five fixture roots |
+| 2 — resident session, full rebuild only | yes | `test/resident.differential.test.ts`: 39 cases, every mutation row comparing a resident generation's rendered bytes against a cold `analyze()` over the same tree. The config rows are compared against a cold run in a **separate process** (`test/support/cold-oracle.ts`) as well, because both in-process paths share one module registry and a stale config would make them agree on the same wrong answer |
+| 3 — scoped fixed point | no | — |
+| 4 — `openProject`, reverse-import re-extraction | no | — |
+| 5 — benchmark, measured numbers | no | — |
+
+The differential suite covers §6.2's equivalence law over an ordinary edit, a
+JSDoc-only edit, authority added and removed, a file added, a file deleted, an
+unresolved import resolved by adding the file it names, a specifier re-pointed
+at a newly added file, a rename as delete-plus-add, a re-export barrel
+re-pointed, a cycle, a callback edge gained and lost, an `ambit.config.ts`
+contract added/changed/removed, a change and its revert, and ten sequential
+mutations in one session. Five failure shapes — a tsconfig that stopped
+parsing, a config that no longer loads, both broken at once, two declarations
+colliding on one symbol id (§4.1), and a tree with nothing analyzable in it —
+each prove the same four things: the update reports failure, the previous generation stays committed
+byte-identically, it is **not** served as the current answer, and a later valid
+update succeeds, **and the cold path fails on the same tree with the same
+message** — the doubly-broken row is what makes that last clause mean something.
+One self-hosting row runs a session on `src/` itself across two generations.
+
+**An `ambit.config.ts` that imports anything is loaded in a worker thread**,
+because Node's module registry would otherwise hand the config a cached copy of
+what that module exported before it was edited. "Imports anything" means any
+static `import` or `export … from`, bare or relative, however it is written —
+not the size of the hash closure, which counts only resolved *relative*
+specifiers and so missed both a bare `ambit-ts/config` import and a relative one
+written across several lines. A config that imports nothing pays nothing. The fingerprint's `configHash` covers the same
+transitive closure of *relative* imports; a bare specifier is not followed,
+because a change to an installed package is a resolution change that §6.2
+already answers with a whole rebuild. What the closure walk cannot decide — a
+specifier resolving to no file on disk, a dynamic import — goes into
+`undecidable`. Starting a thread is authority, so `analyze` and the resident
+entry points declare `process` alongside `fs_read`.
+
+One gap is stated rather than closed: a package rewritten in place moves neither
+`configHash` (bare specifiers are outside the closure by design) nor
+`resolutionHash` (the lockfile did not change). The config is still evaluated
+fresh, so the answer is right; what would be wrong is the fingerprint's reuse
+decision, and it is covered today only because `undecidable` is permanently
+non-empty. Phase 4 removes that entry and must answer this first.
+
+**What the design's adversarial table asks for and the suite does not yet
+cover**, so the next phase starts from a known list rather than from a
+rediscovery: the gate-3 mutation set in `scripts/m05-probe/mutations.ts`, an
+overload implementation swapped, the inline-callback owner gaining or losing a
+body, `@boundary` added or removed, a `paths` change in tsconfig, a dependency
+installed or updated, a mid-edit syntax error, and self-hosting with a real
+`src/` file *touched* — the self-hosting row runs two unmutated generations on
+`src/` and does its mutation on a copy of `test/fixtures/realistic-api` instead,
+because other test files read `src/` concurrently.
+
+The snapshot-bound-state rule (§6.2, §3.4) is asserted two ways:
+`test/architecture.test.ts` forbids `src/checker/resident.ts` from importing
+`typescript` at all, and the differential suite clones the committed store with
+`structuredClone`, which throws on any retained compiler object or closure.
+
 ## Next measurement
 
 1. `node scripts/bench-corpus.ts` after each analysis change, before claiming
@@ -300,7 +370,7 @@ package no bundled table covers has no exit short of `@boundary`
 |---|---|---|
 | M0 — specification, diagnostics, scope | **done** | `rfcs/` and `conformance/` are deferred by §9.1 to 1.0 or the first external adopter ([ADR-0010](adr/0010-when-governance-takes-effect.md)) |
 | M0.5 — backend comparison | **done** | Linux not re-verified. Gates 3 and 4 worth re-running once §6.2 exists. Full record: [`docs/measurements/m0.5-backend-comparison.md`](measurements/m0.5-backend-comparison.md). A TypeScript 7 *shadow* backend now runs the same pipeline for comparison only, measured in [2026-09-12](measurements/2026-09-12-ts7-shadow-analysis.md) and hardened in [2026-09-12](measurements/2026-09-12-ts7-shadow-hardening.md), again in [2026-09-12](measurements/2026-09-12-callable-slot-handle.md), again in [2026-09-12](measurements/2026-09-12-literal-receiver-port.md) and again in [2026-09-12](measurements/2026-09-12-instance-member-port.md) — it changes no default. Divergences on `src` 137 → 4 → **0**, and every one of the gate's 14 roots is now at 0; across the five third-party repositories 260 → 16, with 0 high-risk left, 0 authority increases, 0 decreases, 0 `unknown` lost, and the CI decision agreeing everywhere. Those numbers say the two engines no longer disagree in any way that reaches authority and that nothing accounts for — **not** that the shadow backend is at feature parity: `NOT_PORTED` is now `project:no-tsconfig-fallback` alone, a project-loading difference. Every call-resolution shape `legacy-ts.ts` implements is ported — `resolution:literal-receiver` (the four rows on `src`, one site at `cli/analyze.ts:91`) and `resolution:instance-member` (the seven left on `backend-smoke`, one site at `call-resolution.ts:172`). The corpus figure of 16 predates both ports and has not been re-measured. TypeScript 7 is 0.60x–1.16x of the adopted backend on those repositories, so the performance case is weaker than `src` alone suggested. `node scripts/shadow-check.ts` is the regression gate |
-| M1 — effects, unknown, coverage, diagnostics, init | **partial** | No resident or incremental check (§6.2) — a re-check costs the same as a first check. No versioned JSON Schema for the diagnostic format (§5.2). `@budget costUsd` parses and is never priced. Config has no `stubs` key |
+| M1 — effects, unknown, coverage, diagnostics, init | **partial** | A resident session exists (`src/checker/resident.ts`) and is **not yet incremental**: every `update()` recomputes the whole project, so a re-check still costs what a first check costs. What it buys is the equivalence oracle — phases 0–2 of [`docs/resident-check-path.md`](resident-check-path.md); phases 3–6 (the scoped fixed point, reverse-import re-extraction, the benchmark, CLI exposure) are not built, and no resident timing has been measured. No versioned JSON Schema for the diagnostic format (§5.2). `@budget costUsd` parses and is never priced. Config has no `stubs` key |
 | M2 — capabilities, budget, hooks, adapters, 50 stubs | **partial** | Four hooks, not more: `node:http`/`https`/`net`, `mysql2`, Prisma, Drizzle, MongoDB and every LLM SDK have none, so calling them is neither blocked nor recorded. `costUsd` and `llmCalls` are not enforced. Two adapters (Hono, Next.js App Router); Express, BullMQ, `worker_threads`, Server Actions, `middleware.ts`, the Pages Router and Edge have none. No `@budget` loop-pattern warnings. **Stubs are 5 client packages and 9 builtin namespaces, not 50 packages** |
 | M3 — fix patches, agent protocol | **partial** | `fixes[].edits` exists for `AMB-E001` only. **`ambit agent` does not exist** — no protocol, no iteration limit, no approval gate for loosening fixes |
 | M4 — editor, SBOM, npm | **partial** | Published as [`ambit-ts`](https://www.npmjs.com/package/ambit-ts) 0.1.0 on 2026-09-10, **without provenance**. No editor integration of any kind. **`ambit sbom` does not exist**, nor do stub trust levels in diagnostics (§8). No pilot team. The runtime ships with the CLI, so installing Ambit pulls in `typescript` ([ADR-0009](adr/0009-package-name-and-single-package.md)) |

@@ -5,6 +5,7 @@ import type {
   CallSite,
   ExtractedFile,
   ExtractedFunction,
+  ExtractedModule,
   ExtractedProject,
   LiteralArgument,
   OnExceed,
@@ -115,9 +116,20 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
   // slice saw but did not extract (`skippedFunctions` — DESIGN.md §4.3).
   // Reuses pass 1's declarationsByFile instead of re-walking each file.
   const files: ExtractedFile[] = [];
+  // One entry per source file under the root, whether or not it declares
+  // anything — DESIGN.md §6.2's resident store is keyed by it, and a barrel
+  // that only re-exports is exactly the file `files` does not carry and the
+  // store cannot do without.
+  const modules: ExtractedModule[] = [];
   const skippedFunctions = new Map<SkippedFunctionKind, number>();
   const uncarriedContracts: UncarriedContract[] = [];
   for (const [sourceFile, declarations] of declarationsByFile) {
+    // Where this file's share of `uncarriedContracts` starts. The two pushes
+    // below (a contract on a config-only declaration, and one on a node that
+    // was skipped) both land in the project-level array, and the per-file
+    // slice is that array's tail — derived rather than accumulated twice, so
+    // the two cannot disagree.
+    const uncarriedStart = uncarriedContracts.length;
     const functions: ExtractedFunction[] = [];
     for (const [node, declPath] of declarations) {
       const id = symbolId(relativePath(absoluteRoot, sourceFile), declPath);
@@ -181,12 +193,78 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
       });
     }
     const skipped = collectSkippedFunctions(sourceFile, declaredNodeToId, absoluteRoot);
+    const fileSkipped = new Map<SkippedFunctionKind, number>();
     for (const kind of skipped.kinds) {
+      fileSkipped.set(kind, (fileSkipped.get(kind) ?? 0) + 1);
       skippedFunctions.set(kind, (skippedFunctions.get(kind) ?? 0) + 1);
     }
     uncarriedContracts.push(...skipped.uncarried);
+    modules.push({
+      filePath: relativePath(absoluteRoot, sourceFile),
+      imports: collectImportTargets(sourceFile, checker, absoluteRoot),
+      skippedFunctions: fileSkipped,
+      uncarriedContracts: uncarriedContracts.slice(uncarriedStart),
+    });
   }
-  return { files, skippedFunctions, uncarriedContracts };
+  return { files, skippedFunctions, uncarriedContracts, modules };
+}
+
+/**
+ * The in-root files this one imports, root-relative and deduplicated, in
+ * source order — {@link ExtractedModule.imports}.
+ *
+ * Resolved through the checker's module symbol rather than through
+ * `ts.resolveModuleName`: the compiler has already resolved every specifier in
+ * the program with the options the program was built with, and asking it again
+ * with a separately assembled argument list is a second resolution model
+ * living beside the first. A specifier the compiler could not resolve yields
+ * no symbol and therefore no edge, which is the honest answer and is why
+ * DESIGN.md §6.2 makes a file *addition* re-check everything.
+ *
+ * Every form that names a module is walked, type-only imports included:
+ * §6.2's table is a minimum, so an edge too many costs time and an edge too
+ * few costs correctness.
+ */
+function collectImportTargets(
+  sourceFile: ts.SourceFile,
+  checker: ts.TypeChecker,
+  absoluteRoot: string,
+): readonly string[] {
+  const targets: string[] = [];
+  const seen = new Set<string>();
+
+  function record(specifier: ts.Expression | undefined): void {
+    if (specifier === undefined || !ts.isStringLiteralLike(specifier)) return;
+    for (const declaration of checker.getSymbolAtLocation(specifier)?.declarations ?? []) {
+      if (!ts.isSourceFile(declaration) || declaration.isDeclarationFile) continue;
+      if (!isUnderRoot(declaration.fileName, absoluteRoot)) continue;
+      const relative = relativePath(absoluteRoot, declaration);
+      if (seen.has(relative)) continue;
+      seen.add(relative);
+      targets.push(relative);
+    }
+  }
+
+  function visit(node: ts.Node): void {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      record(node.moduleSpecifier);
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference)
+    ) {
+      record(node.moduleReference.expression);
+    } else if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments.length > 0
+    ) {
+      record(node.arguments[0]);
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  ts.forEachChild(sourceFile, visit);
+  return targets;
 }
 
 // ---- project loading --------------------------------------------------

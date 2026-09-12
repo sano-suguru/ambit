@@ -46,6 +46,7 @@ import type {
   CallSite,
   ExtractedFile,
   ExtractedFunction,
+  ExtractedModule,
   ExtractedProject,
   LiteralArgument,
   RawJsDoc,
@@ -483,9 +484,13 @@ class Extractor {
     // Pass 2 — JSDoc, calls, wrappers, and the tally of what was seen and not
     // extracted.
     const files: ExtractedFile[] = [];
+    // One per source file under the root, whether or not it declared anything
+    // — the port of the legacy backend's `modules` (DESIGN.md §6.2).
+    const modules: ExtractedModule[] = [];
     const skippedFunctions = new Map<SkippedFunctionKind, number>();
     const uncarriedContracts: UncarriedContract[] = [];
     for (const [sourceFile, declarations] of declarationsByFile) {
+      const uncarriedStart = uncarriedContracts.length;
       const functions: ExtractedFunction[] = [];
       for (const [node, declPath] of declarations) {
         const id = symbolId(this.relativePath(sourceFile), declPath);
@@ -526,12 +531,67 @@ class Extractor {
         files.push({ filePath: this.relativePath(sourceFile), functions, runtimeWrappers });
       }
       const skipped = this.collectSkippedFunctions(sourceFile);
+      const fileSkipped = new Map<SkippedFunctionKind, number>();
       for (const kind of skipped.kinds) {
+        fileSkipped.set(kind, (fileSkipped.get(kind) ?? 0) + 1);
         skippedFunctions.set(kind, (skippedFunctions.get(kind) ?? 0) + 1);
       }
       uncarriedContracts.push(...skipped.uncarried);
+      modules.push({
+        filePath: this.relativePath(sourceFile),
+        imports: this.collectImportTargets(sourceFile),
+        skippedFunctions: fileSkipped,
+        uncarriedContracts: uncarriedContracts.slice(uncarriedStart),
+      });
     }
-    return { files, skippedFunctions, uncarriedContracts };
+    return { files, skippedFunctions, uncarriedContracts, modules };
+  }
+
+  /**
+   * The port of the legacy backend's `collectImportTargets`: the in-root files
+   * this one imports, root-relative, deduplicated, in source order.
+   *
+   * Same rule and same resolution path — the checker's module symbol, not a
+   * second resolver — so a divergence here means the two compilers resolved a
+   * specifier differently, which is what the comparison is for.
+   */
+  private collectImportTargets(sourceFile: Node): readonly string[] {
+    const is = this.is;
+    const targets: string[] = [];
+    const seen = new Set<string>();
+
+    const record = (specifier: Node | undefined): void => {
+      if (!specifier || !is.isStringLiteral(specifier)) return;
+      for (const declaration of this.declarationsOf(
+        this.checker.getSymbolAtLocation(specifier) as Node,
+      )) {
+        if (!is.isSourceFile(declaration) || declaration.isDeclarationFile) continue;
+        if (!this.isUnderRoot(declaration.fileName)) continue;
+        const relative = this.relativePath(declaration);
+        if (seen.has(relative)) continue;
+        seen.add(relative);
+        targets.push(relative);
+      }
+    };
+
+    const visit = (node: Node): void => {
+      if (is.isImportDeclaration(node) || is.isExportDeclaration(node)) {
+        record(node.moduleSpecifier);
+      } else if (
+        is.isImportEqualsDeclaration(node) &&
+        is.isExternalModuleReference(node.moduleReference)
+      ) {
+        record(node.moduleReference.expression);
+      } else if (is.isCallExpression(node) && node.arguments?.length > 0) {
+        // A dynamic `import("./x")`. The keyword is not an identifier on this
+        // API either, so the callee is matched by its printed text.
+        if (node.expression?.getText?.(sourceFile) === "import") record(node.arguments[0]);
+      }
+      node.forEachChild(visit);
+    };
+
+    sourceFile.forEachChild(visit);
+    return targets;
   }
 
   // ---- positions --------------------------------------------------------

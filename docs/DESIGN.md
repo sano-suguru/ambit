@@ -484,6 +484,8 @@ The primary consumer of diagnostics is the AI agent. Human-facing display is a r
 
 `ambit check --format github` emits the same structured diagnostics as GitHub Actions workflow commands (`::error file=...,line=...,col=...,title=<id>::<body>`), folding each step of the call path and `contract.operation` into the body with `%0A` so the path is readable from the annotation alone. `severity` maps onto `error` / `warning` / `notice`, and `location.file` is rewritten relative to the workspace. This format exists to satisfy §6's "do not require a dedicated CI plugin" and does not affect consumers of the NDJSON.
 
+**Diagnostics are emitted in a canonical order** — by file, then by line, then by column, then by diagnostic id — and every list inside one is ordered by its own contents. The order is a function of the findings and not of the order the analysis discovered files in, which is what lets §6.2's resident path be compared against a cold run byte for byte. Record order is not part of §9.2's guaranteed surface; this states what the implementation does, not a promise it will not change.
+
 **Authority records.** `--format json` follows the diagnostics with one `kind: "authority"` record per analyzed function — not a diagnostic, but the authority that function holds. Every function is emitted, including those with no violation.
 
 ```json

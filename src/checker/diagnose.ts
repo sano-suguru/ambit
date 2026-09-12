@@ -136,9 +136,21 @@ function callersOf(
   id: SymbolId,
   state: ReadonlyMap<SymbolId, PropagatedFunction>,
 ): readonly PropagatedFunction[] {
-  return [...state.values()].filter((candidate) =>
-    candidate.summary.calls.some((call) => call.kind === "resolved" && call.callee === id),
-  );
+  // Sorted by symbol id, not left in `state`'s insertion order: the result
+  // reaches the output as `fixes[].impact.callersAffected`, and DESIGN.md
+  // §6.2's equivalence law is over bytes — an order that follows how files
+  // were discovered is not a function of the tree.
+  // `toSorted`, not `sort`: an in-place sort on a chained temporary reads to
+  // Ambit's own mutation analysis as an escaping `state_write` (the receiver is
+  // a call result, not a binding it can follow to a local allocation), and this
+  // function is reached from `analyze`, which declares `fs_read`. Ambit
+  // checking its own source is the point of running it on `src` — the honest
+  // answer to a call it cannot prove local is to not make one.
+  return [...state.values()]
+    .filter((candidate) =>
+      candidate.summary.calls.some((call) => call.kind === "resolved" && call.callee === id),
+    )
+    .toSorted((a, b) => (a.summary.id < b.summary.id ? -1 : a.summary.id > b.summary.id ? 1 : 0));
 }
 
 function diagnoseEffects(
@@ -938,4 +950,40 @@ function declaredContractList(
   declared: ReadonlySet<KnownEffect>,
 ): readonly (KnownEffect | "pure")[] {
   return declared.size === 0 ? ["pure"] : [...declared];
+}
+
+/**
+ * The canonical order diagnostics are reported in — by file, then by position,
+ * then by diagnostic id, then by message.
+ *
+ * Diagnostics used to come out in `state.values()` insertion order, which is
+ * the order the backend discovered files in. That is not a property of the
+ * tree being checked: a backend that walked the same directory differently,
+ * or a resident path that patched one file's entry into a store rather than
+ * rebuilding it, would report the same findings in a different order. DESIGN.md
+ * §6.2's equivalence law is stated in bytes ("the same diagnostics ... in the
+ * same order"), so the order has to be a function of the findings alone.
+ *
+ * Compared by code point (`<` / `>`), never `localeCompare`: the output is a
+ * wire format read by `ambit diff` and by agents, and a locale-dependent order
+ * would make two machines disagree about the same tree.
+ *
+ * Stable, so two diagnostics equal on every key keep the order the pipeline
+ * produced them in — the composition order in `analyze`, which is itself a
+ * function of the tree.
+ */
+export function sortDiagnostics(diagnostics: readonly Diagnostic[]): readonly Diagnostic[] {
+  return [...diagnostics].sort(
+    (a, b) =>
+      compareText(a.location.file, b.location.file) ||
+      a.location.line - b.location.line ||
+      a.location.col - b.location.col ||
+      compareText(a.id, b.id) ||
+      compareText(a.message, b.message),
+  );
+}
+
+/** Code-point order. See {@link sortDiagnostics} for why not `localeCompare`. */
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
