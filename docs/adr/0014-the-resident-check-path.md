@@ -87,7 +87,12 @@ that an earlier generation matched.
 
 **The full-rebuild rows in §6.2's table are wide on purpose.** A compiler-option
 change, an installed dependency, a `.d.ts` or a global augmentation all force a
-whole rebuild rather than a computed closure. Each could be narrowed later with
+whole rebuild rather than a computed closure — and so does a file *addition*,
+which is the one row that is not merely conservative but forced: the edges the
+store holds are resolved import targets, so a specifier that resolved to nothing,
+or to a candidate a new file outranks, held no edge to close over. A deletion has
+no such gap, because every file a deletion can affect already pointed at what was
+deleted. Each could be narrowed later with
 evidence; each narrowing is a new way for a stale answer to survive, so none is
 narrowed on reasoning alone.
 
@@ -102,6 +107,8 @@ nothing else.
 
 - A measurement shows `project-update` or `extraction` dominating a cold start in
   a resident session — the case for C.
+- File additions turn out to be frequent enough in a real session to pay for an
+  unresolved-specifier index, which is what would make an addition incremental.
 - §3.5's gates 3 and 4 are re-run on the resident path and a second backend
   changes the phase profile.
 - The equivalence law is observed to fail for a shape the differential tests do

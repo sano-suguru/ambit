@@ -622,7 +622,8 @@ The rest of this section is what any implementation of that has to satisfy. The 
 | What changed | What must be re-checked |
 |---|---|
 | A file's text, including its JSDoc alone | That file, and every file that depends on it, transitively. A contract comment is a change like any other (§4.1) |
-| A file added or deleted | The same closure, plus the symbols the file held, which cease to exist or come into existence |
+| A file deleted | The same closure, plus the symbols the file held, which cease to exist. Every file whose resolution the deletion can change already held an edge to it, so the closure finds them all |
+| A file added | Every file. A specifier that resolved to nothing, or to a lower-precedence candidate, held no edge to the file that did not exist yet, so no closure over the edges already held can find the files a new file changes |
 | A file renamed | Treated as a delete and an add. The resident path makes no rename guess; `ambit diff` alone reconciles identity across a rename, and it does so from git (§6) |
 | A `.d.ts`, a global augmentation, or a file that is not a module | Every file. None of them is reached through an import edge, and all of them change how names elsewhere resolve |
 | A file the project holds but the checked directory does not contain | Every file. Nothing under the root points at it through an edge the analysis holds, and it can still decide what a name under the root resolves to |

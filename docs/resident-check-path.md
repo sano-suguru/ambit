@@ -182,6 +182,13 @@ interface ProjectFingerprint {
 }
 ```
 
+**What the fingerprint cannot decide, it rebuilds.** The fingerprint is not
+trying to be a complete model of what a project depends on; it is trying to be a
+cheap test that is never wrong in the permissive direction. Anything it cannot
+answer — a lockfile shape it does not know, a workspace manifest it has not seen,
+a `node_modules` tree rewritten from outside — is a full rebuild, and widening a
+trigger is always the allowed move while narrowing one needs evidence.
+
 `tsconfigHash` deliberately excludes `parsed.fileNames`. With `include` globs
 that list changes whenever any file appears or disappears on disk, and hashing it
 would turn every add and delete into a full rebuild — which is the one thing
@@ -218,6 +225,30 @@ how its importers' calls resolve. Propagation follows calls because effects and
 capabilities flow backwards along them — that is what §6.2's "walk the contract
 dependencies backwards" names. A single graph would be wrong in both directions.
 
+**A closure over the edges already held cannot find what a *new* file changes.**
+The edges are resolved import targets, so a specifier that resolved to nothing —
+`import { x } from "./foo"` with no `foo.ts` in the tree — held no edge at all,
+and the file it would point at does not exist to close over. Adding `foo.ts`
+therefore leaves its importer unvisited, its call still `unresolved`, and the
+resident answer quietly behind the cold one. TypeScript's resolution precedence
+makes the same point more sharply: a new `foo.ts` can take a specifier away from
+an existing `foo/index.ts`, and the importer's edge pointed at the file that
+*keeps* resolving, not at the one that arrived. **So a file addition is a full
+re-extraction, not a closure** — and a rename, being a delete and an add, is one
+too.
+
+Deletion is the asymmetric case and is genuinely safe: every file whose
+resolution a deletion can change had a specifier resolving *to* the deleted file,
+which is exactly an edge the old graph holds. Removing a candidate cannot
+redirect a specifier that was resolving elsewhere.
+
+The narrowing that would make an addition incremental is an index from
+*unresolved specifier* to the files that wrote it, plus the resolution candidates
+each specifier could have taken. It is worth building when a benchmark says
+additions are frequent enough to matter, and it is not worth building first: it
+is a second resolution model living beside the compiler's, and a second model is
+a second way to be wrong.
+
 Both graphs are derived, and a re-extracted file's old edges are **removed
 before** its new ones are added. Adding without removing is the shape that leaves
 a stale caller in `reverseCalls` forever, and it reads as extra work rather than
@@ -236,8 +267,9 @@ benchmark, not with an argument.
 One generation of `session.update(changes)`. The phase names are §6.2's.
 
 1. **Fingerprint check** (inside `project-update`). Rebuild `ProjectFingerprint`
-   and compare. Any difference, or a change touching a `.d.ts`, a global
-   augmentation, or a non-module file, switches to a **full rebuild**: drop the
+   and compare. Any difference, an `added` change, or a change touching a
+   `.d.ts`, a global augmentation, or a non-module file, switches to a **full
+   rebuild**: drop the
    store and run the first-check path. Full rebuild shares no code with the
    incremental path, so a bug in one cannot hide in the other.
 2. **`project-update`**. `TsProjectSession.update(changes)`. The legacy backend
@@ -259,6 +291,31 @@ One generation of `session.update(changes)`. The phase names are §6.2's.
    (§6.2, §3.4).
 9. **`transfer`**. Always 0 in-process, always reported, so a process-separated
    backend fills the same schema.
+
+## Who has to notice a change
+
+The *transport* — an editor's notifications, a file watcher, a test driving the
+session by hand — is phase 6 and is genuinely open. The *responsibility* is not,
+because it decides whether an invalidation rule can fire at all: a rule that says
+"a change outside the root is a full rebuild" is inert if nothing outside the
+root is ever reported.
+
+The split is this. **The session does not trust its caller to report everything.**
+`FileChange` carries what the caller knows about files under the root, and every
+update independently recomputes `ProjectFingerprint` — the tsconfig text and its
+`extends` chain, `ambit.config.ts`, and the resolution inputs — from disk before
+doing anything else. So a change to a `.d.ts` outside the root, an installed
+dependency, or a tsconfig nobody told the session about is caught by the
+fingerprint at the top of the next update, not missed. What the caller owes is
+only the in-root change set, and a caller that over-reports costs time rather
+than correctness.
+
+That leaves one honest gap, and it is stated rather than closed: a change to a
+file **under the root** that the caller never reports is invisible until
+something else triggers a rebuild. Phase 5's benchmark and the self-hosting test
+both drive the session with a known change set, so neither depends on the gap
+being closed; a watcher does, and that is phase 6's problem to solve rather than
+to discover.
 
 ## Impact and the fixed point
 
@@ -307,8 +364,9 @@ differential suite below is for.
 | §6.2 row | Implementation |
 |---|---|
 | A file's text, JSDoc included | Re-extract its reverse-import closure |
-| Added / deleted | Same closure; a deleted file's ids go into `S` and leave `state` |
-| Renamed | A delete and an add. **The resident path makes no rename guess** — `ambit diff` reconciles identity across a rename, from git, and only there |
+| Deleted | Same closure; the file's ids go into `S` and leave `state`. Safe for the reason above |
+| Added | **Full re-extraction.** No closure over the edges already held can find the importers a new file changes |
+| Renamed | A delete and an add, so a full re-extraction. **The resident path makes no rename guess** — `ambit diff` reconciles identity across a rename, from git, and only there |
 | `.d.ts`, global augmentation, non-module file | Full rebuild |
 | A file in the program but outside the checked root | Full rebuild. Extraction is filtered to files under the root, so no import edge exists to close over, and the file can still change what names inside the root resolve to |
 | `ambit.config.ts` | Re-summarize every file; extraction untouched |
@@ -329,6 +387,8 @@ Each is a row in the differential suite, not a paragraph of reassurance.
 | Case | Expected |
 |---|---|
 | File deleted | Its ids vanish; callers fall to `unresolved`. Equal to cold |
+| **An unresolved import, then the file it names is added** | The importer's call stops being `unresolved` and resolves, and its caller's effects change with it. This is the case a closure over held edges cannot reach, and the reason an addition is a full re-extraction |
+| A new file taking a specifier from an existing one (`foo.ts` added beside `foo/index.ts`) | The importer re-resolves to the new file. Same reason, same handling |
 | File renamed | Every old id gone, every new id new. No `moved` verdict here |
 | An export added or removed | Importers re-extract; resolution changes propagate |
 | A re-export / barrel re-pointed | Every importer of the barrel is in the closure — including when the barrel declares no function of its own |
@@ -411,4 +471,8 @@ first update that breaks equality names itself.
   own changes. It belongs with CLI exposure in phase 6.
 - What `resolutionHash` has to cover. `package.json` and the lockfile may not be
   enough in a workspace; verify against a corpus repository that has one, and if
-  it is not enough, widen the full-rebuild trigger rather than narrow it.
+  it is not enough, widen the full-rebuild trigger rather than narrow it. The
+  rule above already says which way to fail.
+- Whether file additions are frequent enough in a real editor session to be worth
+  the unresolved-specifier index that would make them incremental. Measured in
+  phase 5, not guessed at before it.
