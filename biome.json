@@ -30,6 +30,10 @@
   },
   "overrides": [
     {
+      "includes": ["test/shadow/baseline.json"],
+      "formatter": { "enabled": false }
+    },
+    {
       "includes": ["test/fixtures/node-builtin-specifier/**"],
       "linter": {
         "rules": {

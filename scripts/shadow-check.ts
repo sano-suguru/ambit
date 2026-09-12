@@ -164,6 +164,12 @@ async function main(): Promise<number> {
       notPorted: NOT_PORTED,
       roots: now,
     };
+    // `JSON.stringify` always expands an array over lines and Biome's JSON
+    // formatter collapses a short one back onto a single line, so the two
+    // disagree whenever `notPorted` gets short enough to fit — a `--update`
+    // would then fail `biome ci`. The file is machine-written, so `biome.json`
+    // turns the formatter off for it rather than making this line guess at
+    // the formatter's rules.
     writeFileSync(BASELINE, `${JSON.stringify(baseline, null, 2)}\n`);
     process.stdout.write(`recorded ${path.relative(process.cwd(), BASELINE)}\n`);
     return 0;

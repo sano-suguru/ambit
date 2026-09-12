@@ -141,7 +141,7 @@ export const KNOWN_DIVERGENCES: readonly KnownDivergence[] = [
     category: "call-edge",
     whenAuthorityIncludes: "present",
     classification: "not-yet-ported",
-    note: "an edge the adopted backend gets from resolution:literal-receiver / resolution:instance-member (NOT_PORTED)",
+    note: "an edge the adopted backend gets from resolution:instance-member (NOT_PORTED)",
   },
 ];
 

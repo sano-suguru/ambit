@@ -1,45 +1,40 @@
 {
   "schema": "ambit-shadow-baseline/1",
   "notPorted": [
-    "resolution:literal-receiver",
     "resolution:instance-member",
     "project:no-tsconfig-fallback"
   ],
   "roots": {
     "src": {
-      "divergences": 4,
-      "highRisk": 4,
+      "divergences": 0,
+      "highRisk": 0,
       "unclassified": 0,
-      "byClassification": {
-        "not-yet-ported": 4
-      },
+      "byClassification": {},
       "authorityParity": 1,
-      "calleeResolutionParity": 0.9995,
+      "calleeResolutionParity": 1,
       "unknownRateDelta": 0,
       "decisionsAgree": true
     },
     "test/fixtures/backend-conformance": {
+      "divergences": 0,
+      "highRisk": 0,
+      "unclassified": 0,
+      "byClassification": {},
+      "authorityParity": 1,
+      "calleeResolutionParity": 1,
+      "unknownRateDelta": 0,
+      "decisionsAgree": true
+    },
+    "test/fixtures/backend-smoke": {
       "divergences": 7,
       "highRisk": 4,
       "unclassified": 0,
       "byClassification": {
         "not-yet-ported": 7
       },
-      "authorityParity": 0.9818,
-      "calleeResolutionParity": 0.9773,
-      "unknownRateDelta": 0.0182,
-      "decisionsAgree": true
-    },
-    "test/fixtures/backend-smoke": {
-      "divergences": 21,
-      "highRisk": 12,
-      "unclassified": 0,
-      "byClassification": {
-        "not-yet-ported": 21
-      },
-      "authorityParity": 0.95,
-      "calleeResolutionParity": 0.9333,
-      "unknownRateDelta": 0.05,
+      "authorityParity": 0.9833,
+      "calleeResolutionParity": 0.9778,
+      "unknownRateDelta": 0.0167,
       "decisionsAgree": true
     },
     "test/fixtures/cross-module": {

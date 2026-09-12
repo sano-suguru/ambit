@@ -420,6 +420,61 @@ describe("backend conformance: any and the non-null assertion (§3.5 gate 1, §4
   });
 });
 
+describe("backend conformance: the object-literal receiver (§4.2 rule 7)", () => {
+  /**
+   * `X.p()` where `X` is a `const` bound to one object literal. §4.2 rule 7
+   * lets the *value* decide the target, which is the only way this resolves:
+   * the checker answers with the annotation's member signature, so a backend
+   * that asks it the question gets `Dispatcher.run` and no declaration in this
+   * project. Ambit's own `legacyTsBackend: TsBackend = { extractProject }` is
+   * this shape, so a backend that cannot do it loses a resolved edge on
+   * Ambit's own source.
+   *
+   * The negatives below are the boundary. Each is a receiver or a member a
+   * broader version of the rule would resolve and a correct one must not,
+   * because more than one function can stand behind it — resolving any of
+   * them would be a false positive in the direction that matters, claiming
+   * authority the analysis did not actually follow.
+   */
+  it("follows the value through an annotation the checker would answer with", async () => {
+    const calls = await callsOf("literal-receiver.ts", "literal-receiver.ts#callsAnnotated");
+    expect(calls.map((c) => c.resolvedCallee)).toEqual(["literal-receiver.ts#target"]);
+  });
+
+  it("unwraps `as const`, which asserts a type without moving the member", async () => {
+    const calls = await callsOf("literal-receiver.ts", "literal-receiver.ts#callsAsConst");
+    expect(calls.map((c) => c.resolvedCallee)).toEqual(["literal-receiver.ts#target"]);
+  });
+
+  it("takes one hop to the named function and no more", async () => {
+    const calls = await callsOf("literal-receiver.ts", "literal-receiver.ts#callsRebind");
+    expect(calls[0]?.resolvedCallee).toBeUndefined();
+  });
+
+  it("does not resolve a member whose value is a call result", async () => {
+    const calls = await callsOf("literal-receiver.ts", "literal-receiver.ts#callsCallResult");
+    expect(calls[0]?.resolvedCallee).toBeUndefined();
+  });
+
+  it("does not resolve a member whose value is read out of another object", async () => {
+    const calls = await callsOf("literal-receiver.ts", "literal-receiver.ts#callsIndexedAccess");
+    expect(calls[0]?.resolvedCallee).toBeUndefined();
+  });
+
+  /**
+   * `const anyReceiver: any = { run: pureTarget }` — the `any` is on the
+   * annotation, and rule 7 does not read the annotation. The value is still
+   * exactly one literal, so the call is resolved rather than `any-typed`:
+   * §4.7's "an `any` cast destroys the declaration" is about the *callee*
+   * expression (`callsThroughAnyCast` above), not about a receiver whose
+   * initializer is right there.
+   */
+  it("resolves through an any-annotated receiver, because the value is still one literal", async () => {
+    const calls = await callsOf("any-typed.ts", "any-typed.ts#callsAnyTypedMember");
+    expect(calls.map((c) => c.resolvedCallee)).toEqual(["any-typed.ts#pureTarget"]);
+  });
+});
+
 describe("backend conformance: recursion (§3.5 gate 1)", () => {
   /**
    * §4.2 rule 7 iterates the propagation to a fixed point; that needs the
