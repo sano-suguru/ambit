@@ -1177,10 +1177,35 @@ class Extractor {
     if (!handles) return [];
     const resolved: Node[] = [];
     for (const handle of handles) {
-      const node = handle?.resolve(this.project);
+      const node = this.resolveHandle(handle);
       if (node) resolved.push(node);
     }
     return resolved;
+  }
+
+  /**
+   * The node behind a declaration handle.
+   *
+   * This API hands back declarations lazily: a handle carries a project, a
+   * path and a kind, and only `resolve` produces the node whose `parameters`,
+   * `body` and `getSourceFile()` can be read. Reading a field off the handle
+   * itself returns `undefined` silently rather than throwing, which is why a
+   * missed `resolve` reads as "this declaration has nothing" instead of as an
+   * error — one such miss in {@link acceptsCallableArgument} cost fifteen
+   * divergences before it was found.
+   *
+   * The signature is honest about being loose rather than precise: `Node` here
+   * is this file's `any` alias, so "a handle" and "the node behind it" are the
+   * same type and the distinction this function exists to make is invisible to
+   * the compiler. That is not a choice — the native compiler is installed into
+   * `.m05-native/` and this file sits outside `tsconfig.json`'s `include`, so
+   * there are no types to name. When the API ships stable ones, the parameter
+   * and the return belong on opposite sides of that boundary (a handle in, a
+   * resolved node out), and the silent-`undefined` failure above stops being
+   * possible to write.
+   */
+  private resolveHandle(handle: Node | undefined): Node | undefined {
+    return handle?.resolve?.(this.project) ?? undefined;
   }
 
   private implementationDeclarationOf(symbol: Node): Node | undefined {
@@ -1867,8 +1892,20 @@ class Extractor {
 
   // ---- arguments ----------------------------------------------------------
 
-  private literalArgumentsOf(node: Node): readonly (LiteralArgument | undefined)[] {
-    return [...(node.arguments ?? [])].map((argument: Node) => this.literalArgumentOf(argument));
+  /**
+   * The adopted backend collapses "no argument was a literal" to `undefined`
+   * rather than to a list of `undefined`s, and the port did not — so
+   * `Boolean(fields || mapper)` carried `literalArguments=[-]` on this side and
+   * nothing on the other. No compared dimension reads the field, so it never
+   * surfaced as a divergence; it is corrected here because an instrument that
+   * differs from what it measures for no reason is one more thing to rule out
+   * next time.
+   */
+  private literalArgumentsOf(node: Node): readonly (LiteralArgument | undefined)[] | undefined {
+    const args = [...(node.arguments ?? [])];
+    if (args.length === 0) return undefined;
+    const read = args.map((argument: Node) => this.literalArgumentOf(argument));
+    return read.some((argument) => argument !== undefined) ? read : undefined;
   }
 
   private literalArgumentOf(argument: Node): LiteralArgument | undefined {
@@ -1956,7 +1993,16 @@ class Extractor {
    * "yes", so the narrowing can only add opacity checks back, never drop one.
    */
   private acceptsCallableArgument(signature: Node, index: number): boolean {
-    const declaration = signature.declaration;
+    // `signature.declaration` is a *handle* on this API — `{canonicalProject,
+    // index, kind, path}` with a `resolve` on its prototype — not the node.
+    // Reading `.parameters` off the handle answered `undefined` at every
+    // index, so the fail-open below fired on every call and every `any`-typed
+    // or callable-union argument became opaque. Fifteen `shadow-more-unknown`
+    // divergences on `drizzle-orm`, traced in
+    // `docs/measurements/2026-09-12-callable-slot-handle.md`. `declarationsOf`
+    // already resolves symbol declaration handles the same way; this was the
+    // one place that read one raw.
+    const declaration = this.resolveHandle(signature.declaration);
     if (!declaration || this.is.isJSDocSignature(declaration)) return true;
     const parameter = [...(declaration.parameters ?? [])][index];
     if (!parameter || parameter.dotDotDotToken) return true;

@@ -32,3 +32,33 @@ function double(value: number): number {
 export function passesExtractedCallback(promise: Promise<number>): Promise<number> {
   return promise.then(double);
 }
+
+// The other half of the same narrowing, and the half that a backend unable to
+// read the *declared* parameter list loses silently rather than loudly.
+// `Object.keys` declares `o: {}` and `new Proxy` declares
+// `handler: ProxyHandler<T>`; neither position is a callback slot, so an
+// argument that merely *could* be callable — `any` is callable as far as the
+// argument test is concerned — must not make the call read as opaque. A
+// backend that sees no parameters there falls open at every index and reports
+// `callbackByReference` on both of these. Measured on `drizzle-orm`, eleven of
+// fifteen divergences (`docs/measurements/2026-09-12-callable-slot-handle.md`).
+
+// biome-ignore lint/suspicious/noExplicitAny: an any-typed argument is the point
+export function passesAnyToNonCallbackSlot(value: any): string[] {
+  return Object.keys(value);
+}
+
+// biome-ignore lint/suspicious/noExplicitAny: an any-typed argument is the point
+export function passesAnyToNonCallbackConstructorSlot(target: object, handler: any): object {
+  return new Proxy(target, handler);
+}
+
+// A union whose one callable constituent sits in a non-callback slot. The
+// argument test says "may be callable" and is right to; the slot says this was
+// never a callback, and that is what decides. `Boolean(value?: T)` is the
+// shape `drizzle-orm` hit twice.
+export function passesCallableUnionToNonCallbackSlot(
+  value: string | ((x: number) => number) | undefined,
+): boolean {
+  return Boolean(value);
+}

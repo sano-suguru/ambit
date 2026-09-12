@@ -7,15 +7,14 @@
   ],
   "roots": {
     "src": {
-      "divergences": 7,
+      "divergences": 4,
       "highRisk": 4,
-      "unclassified": 3,
+      "unclassified": 0,
       "byClassification": {
-        "not-yet-ported": 4,
-        "unclassified": 3
+        "not-yet-ported": 4
       },
       "authorityParity": 1,
-      "calleeResolutionParity": 0.9979,
+      "calleeResolutionParity": 0.9995,
       "unknownRateDelta": 0,
       "decisionsAgree": true
     },
@@ -26,22 +25,21 @@
       "byClassification": {
         "not-yet-ported": 7
       },
-      "authorityParity": 0.9808,
-      "calleeResolutionParity": 0.9756,
-      "unknownRateDelta": 0.0192,
+      "authorityParity": 0.9818,
+      "calleeResolutionParity": 0.9773,
+      "unknownRateDelta": 0.0182,
       "decisionsAgree": true
     },
     "test/fixtures/backend-smoke": {
-      "divergences": 27,
-      "highRisk": 13,
-      "unclassified": 6,
+      "divergences": 21,
+      "highRisk": 12,
+      "unclassified": 0,
       "byClassification": {
-        "not-yet-ported": 21,
-        "unclassified": 6
+        "not-yet-ported": 21
       },
-      "authorityParity": 0.9333,
+      "authorityParity": 0.95,
       "calleeResolutionParity": 0.9333,
-      "unknownRateDelta": 0.0667,
+      "unknownRateDelta": 0.05,
       "decisionsAgree": true
     },
     "test/fixtures/cross-module": {
