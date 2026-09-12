@@ -301,6 +301,16 @@ cost: on a copy of `src/` (398 functions), adding one JSDoc tag to
 scoping something. It says nothing about latency, and no latency claim is
 made until phase 5 measures one.
 
+**Phase 3 is validated, not performance-proven, and the phase breakdown of
+that same run says why.** `extraction` 383 ms, `impact` 2.14 ms, `summarize`
+2.13 ms, `report` 1.53 ms, `propagate` 0.32 ms. What phase 3 scoped is the
+0.32 ms; extraction dominates it by roughly three orders of magnitude. So the
+case for a resident path at all still rests on phase 4 cutting
+project-update and extraction — that is where the next work goes, and
+polishing the impact comparator is not, unless new correctness evidence
+demands it. These are single-run observations on one tree, not a benchmark;
+`scripts/bench-resident.ts` is still phase 5's.
+
 What is built, and what says so:
 
 | Phase | Built | Evidence |
