@@ -257,6 +257,18 @@ was meant to stop.
 
 ## What is left
 
+**What this measures is not feature parity, and the two must not be read as one
+number.** What went to zero is the *unexplained, authority-bearing* divergence
+on real third-party code: no shape now differs between the engines that changes
+what Ambit reports and that nothing accounts for. What has not gone anywhere is
+the shadow backend's own declared gap — `NOT_PORTED` is still three shapes
+(`resolution:literal-receiver`, `resolution:instance-member`,
+`project:no-tsconfig-fallback`), the first of them is what the four remaining
+`src` rows are, and a shape the port declines is not a shape the port handles.
+"The shadow backend and the adopted one no longer disagree about anything we
+cannot explain" is what the numbers support; "the shadow backend does what the
+adopted one does" is not, and nothing here should be quoted as though it were.
+
 - **The 16 above**, established only as JSDoc text on non-contract tags with no
   authority consequence — parser or port not distinguished, and deliberately
   not suppressed.

@@ -1193,6 +1193,16 @@ class Extractor {
    * missed `resolve` reads as "this declaration has nothing" instead of as an
    * error — one such miss in {@link acceptsCallableArgument} cost fifteen
    * divergences before it was found.
+   *
+   * The signature is honest about being loose rather than precise: `Node` here
+   * is this file's `any` alias, so "a handle" and "the node behind it" are the
+   * same type and the distinction this function exists to make is invisible to
+   * the compiler. That is not a choice — the native compiler is installed into
+   * `.m05-native/` and this file sits outside `tsconfig.json`'s `include`, so
+   * there are no types to name. When the API ships stable ones, the parameter
+   * and the return belong on opposite sides of that boundary (a handle in, a
+   * resolved node out), and the silent-`undefined` failure above stops being
+   * possible to write.
    */
   private resolveHandle(handle: Node | undefined): Node | undefined {
     return handle?.resolve?.(this.project) ?? undefined;
