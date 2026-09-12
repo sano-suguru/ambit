@@ -404,14 +404,29 @@ Three things follow, and the third is the uncomfortable one.
    which is the right default; the values say the shadow side *knew* more.
    Direction detection erring toward high-risk is what let this surface at all,
    and the fix is to explain these 105, not to soften the rule.
-3. **This is a `ts6-suspect` on Ambit's own value chain.** If TypeScript 6.0.3
-   types an installed driver's receiver as `any` where 7.0.2 does not, then the
-   *adopted* backend is losing `db_read` and `db_write` on real ORM code — the
-   exact failure Ambit exists to prevent, in the product path, not the shadow
-   one. Not root-caused here: whether it is module resolution under the corpus
-   tsconfig, a checker difference, or an artifact of installing only what the
-   subtree imports is undecided, and asserting one would be a guess. It is the
-   first thing the next investigation should settle, ahead of the 204.
+3. **This looks like a `ts6-suspect` on Ambit's own value chain**, and the
+   reading was left open here because asserting one of the three candidates —
+   a checker difference, module resolution under the corpus tsconfig, or an
+   artifact of installing only what the subtree imports — would have been a
+   guess.
+
+   **It was the second, and the tsconfig was ours.**
+   `docs/measurements/2026-09-12-any-typed-divergence.md` traces one call site
+   to its first branch: `corpus.json` gave `drizzle-orm` a `baseUrl` pointing at
+   the measured subtree, and `drizzle-orm/src` contains a directory named after
+   nearly every driver it supports, so `import … from 'mysql2'` resolved to
+   drizzle's own `src/mysql2/` and the receiver read `any`. With `baseUrl`
+   removed, `--with-deps` reports **31 divergences and 6 high-risk** — below the
+   hermetic arm's 43 rather than four times above it — with
+   `shadow-less-unknown` **0** and authority increases **0**. All 105 and both
+   increases were manufactured by one line of corpus configuration.
+
+   The numbers in this section are therefore a record of the artifact, not of
+   the backends. What survives it is narrower and still worth having: TypeScript
+   6.0.3 applies the deprecated `baseUrl` fallback to a bare specifier where
+   7.0.2 does not, which is a real difference for any project that sets
+   `baseUrl` — and a parity measurement needs its dependencies, which is how
+   this was found at all.
 
 ### New classes, seen only on third-party code
 
@@ -487,16 +502,14 @@ made within-engine instead.
 
 ## Remaining blockers, in order
 
-1. **Settle the `any-typed` disagreement first** (the A/B above). 105
-   `shadow-less-unknown` divergences and 2 authority increases on `drizzle-orm`,
-   including four sites where the shadow side reports `db_read, db_write` and
-   the adopted side reports nothing. If TypeScript 6.0.3 really types an
-   installed driver's receiver as `any`, the defect is in the product path, and
-   everything else on this list is smaller than it.
+1. ~~**Settle the `any-typed` disagreement first**~~ — done, and it was the
+   corpus. See `docs/measurements/2026-09-12-any-typed-divergence.md`.
 2. **Re-measure the corpus with `--with-deps` before trusting any of its
-   counts**, including the 204 below. The no-deps run understated `drizzle-orm`
-   by 4x; there is no reason to assume the other four are better behaved, and
-   part of the 204 may be the same artifact.
+   counts**, including the 204 below. On `drizzle-orm` the dependency-resolved
+   arm is now *below* the hermetic one (31 against 43), which is the direction
+   it should move in; the other four have not been measured with their
+   dependencies present, and each one's generated tsconfig is part of the
+   measurement.
 3. **Root-cause the 204 `unresolved-classification/shadow-more-unknown`** across
    the corpus. Safe direction, largest class, unexplained — and until it is
    explained, "the shadow side is more conservative" is a description rather

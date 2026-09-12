@@ -69,12 +69,11 @@
       "subdir": "drizzle-orm/src",
       "what": "SQL ORM / query builder and database driver bindings",
       "compilerOptions": {
-        "baseUrl": ".",
         "paths": {
           "~/*": ["./*"]
         }
       },
-      "$comment": "The repository maps its own `~/*` imports onto `drizzle-orm/src/*` in a tsconfig outside the measured subtree. Reproducing that mapping is corpus setup, not analysis: without it every internal import fails to resolve and the target would measure module resolution rather than contract analysis.",
+      "$comment": "The repository maps its own `~/*` imports onto `drizzle-orm/src/*` in a tsconfig outside the measured subtree. Reproducing that mapping is corpus setup, not analysis: without it every internal import fails to resolve and the target would measure module resolution rather than contract analysis. `paths` carries the mapping and `baseUrl` deliberately does NOT accompany it: with `baseUrl` set to the subtree, TypeScript 6.0.3 resolves a bare specifier against it first, so `import { Connection } from 'mysql2'` inside `src/mysql2/session.ts` lands on drizzle's own `src/mysql2/` directory instead of the installed package and the receiver reads `any`. Measured, and it cost 105 false divergences under `shadow-corpus.ts --with-deps` before it was found. `paths` without `baseUrl` resolves relative to this file, which is what the mapping needs and nothing more.",
       "tree": "69c20ec8bb642bbe9dc940682fca34876bd49c96"
     }
   ]
