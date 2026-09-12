@@ -6,7 +6,7 @@ architecture is [ADR-0014](adr/0014-the-resident-check-path.md). Nothing here is
 a new guarantee — §9.2 puts the existence of a resident path outside the
 guaranteed surface, and this document adds no claim to it.
 
-Status: **phases 0–2 implemented, phases 3–6 not.** `docs/status.md` carries
+Status: **phases 0–4 implemented, phases 5–6 not.** `docs/status.md` carries
 what that means in detail; this file stays the design, and where the
 implementation forced a correction the text below says so rather than being
 quietly left behind.
@@ -100,7 +100,13 @@ interface TsBackend {
 }
 
 interface TsProjectSession {
-  update(changed: readonly FileChange[]): Promise<ExtractedUpdate>;
+  /** `reextract` is the closure the resident layer decided may be re-extracted;
+   *  absent means the whole project. The backend may answer any call with a full
+   *  project — see correction 18. */
+  update(
+    changed: readonly FileChange[],
+    reextract?: readonly string[],
+  ): Promise<ExtractedUpdate>;
   close(): void;
 }
 
@@ -268,6 +274,12 @@ additions are frequent enough to matter, and it is not worth building first: it
 is a second resolution model living beside the compiler's, and a second model is
 a second way to be wrong.
 
+An import edge is not only an import *statement*. `import("./svc.ts").Svc` in
+type position writes none and is still a dependency: a parameter annotated with
+it makes the checker resolve a call on that parameter into the named file
+(correction 12). `ExtractedModule.imports` follows it, along with `export … from`,
+`import =`, a dynamic `import()`, and type-only imports.
+
 Both graphs are derived, and a re-extracted file's old edges are **removed
 before** its new ones are added. Adding without removing is the shape that leaves
 a stale caller in `reverseCalls` forever, and it reads as extra work rather than
@@ -293,11 +305,12 @@ One generation of `session.update(changes)`. The phase names are §6.2's.
    incremental path, so a bug in one cannot hide in the other.
 
    **What the verdict gates is extraction, and that makes it phase 4's, not
-   phase 3's.** The distinction matters because `undecidable` carries a
-   permanent entry — the resolved compiler options, which nothing can read
-   until `openProject` exists — so reuse is refused on every update until
-   phase 4. A phase 3 written *inside* the permitting branch would therefore
-   never run, and could not be measured.
+   phase 3's.** While phase 3 stood alone, `undecidable` carried a permanent
+   entry — the resolved compiler options, which nothing can read until
+   `openProject` exists — so reuse was refused on every update. A phase 3
+   written *inside* the permitting branch would therefore never have run, and
+   could not have been measured. Phase 4 replaced that entry with the backend's
+   own comparison rather than deleting it; see correction 13.
 
    It does not have to be, and **the reason is not that a refused fingerprint
    makes every summary count as changed** — it does not. A compiler option can
@@ -427,6 +440,7 @@ differential suite below is for.
 | Added | **Full re-extraction.** No closure over the edges already held can find the importers a new file changes |
 | Renamed | A delete and an add, so a full re-extraction. **The resident path makes no rename guess** — `ambit diff` reconciles identity across a rename, from git, and only there |
 | `.d.ts`, global augmentation, non-module file | Full rebuild |
+| A file entering or leaving the program with no root name moving (an explicit `files:` list) | Full rebuild. The program's in-root file set is compared, not only its root names — a file that arrived is an addition by another name |
 | A file in the program but outside the checked root | Full rebuild. Extraction is filtered to files under the root, so no import edge exists to close over, and the file can still change what names inside the root resolve to |
 | `ambit.config.ts` | Re-summarize every file; extraction untouched |
 | `tsconfig.json`, compiler options | Full rebuild |
@@ -511,8 +525,8 @@ resident path that reintroduces it has failed whatever else it achieves.
 | 1 | `ExtractedProject` gains `modules` — see **Components**, not `ExtractedFile`, and the aggregates stay where they are | `check src --coverage` counts unchanged |
 | 2 | `resident.ts` with the store and a full-rebuild-only `update` (architecture A) | The differential suite passes on every mutation — slowly is fine |
 
-Phases 0, 1, 2 and 3 are done. What building them corrected is recorded under
-**Corrections from the implementation** below.
+Phases 0, 1, 2, 3 and 4 are done. What building them corrected is recorded
+under **Corrections from the implementation** below.
 | 3 | The scoped fixed point in `propagate.ts`; extraction still whole-project. **Not gated on `fingerprintPermitsReuse`** — see the lifecycle's step 1 | Suite still passes; `impact` appears in the timings |
 | 4 | `openProject` in the legacy backend; reverse-import closure re-extraction | Suite still passes; `extraction` shrinks |
 | 5 | Benchmark, `docs/measurements/`, `docs/status.md` | Measured numbers exist |
@@ -687,19 +701,131 @@ changed, so a reader of an earlier draft is not left with a stale picture.
     because an un-propagated function in the output would read as a function
     that was analyzed and found clean (§3.4).
 
-## What phase 3 found and left for phase 4
+## What phase 4 found and left for phase 5
 
-- **`fingerprintPermitsReuse` is still computed and still unused.** Phase 3 is
-  outside it by design (lifecycle step 1) and phase 4 is where it starts
-  gating extraction. Its `undecidable` list is still permanently non-empty.
-- **`ExtractedUpdate.full === false` still throws.** Nothing patches the store
-  yet; the scoped fixed point reuses propagated values, never extraction
-  results. Phase 4 is what makes a partial update committable, and the
-  invalidation table above is what it has to implement.
-- **The per-file `matchedConfigKeys` is built and is not yet load-bearing.**
-  Every generation still summarizes every file, so the union it is subtracted
-  from is a whole-project union. It becomes load-bearing the first time phase
-  4 re-summarizes a subset.
+- **`project-update` is the dominant phase of a re-check.** 128–163 ms against
+  50–67 ms of extraction on a 49-file copy of `src/`
+  ([2026-09-13](measurements/2026-09-13-resident-partial-extraction.md)).
+  Extraction shrank by about the ratio the closure did, which is what phase 4
+  was for; the phase that did not move is now the one to point phase 5's
+  instrument at. This is ADR-0014's named revisit condition for architecture C,
+  met on **one** subject — which is a direction to measure, not a decision.
+- **`oldProgram`'s contribution is unmeasured.** It is passed on every update
+  and no row was ever run without it, so nothing here separates "the program was
+  reused" from "the program was rebuilt quickly". The caching `getSourceFile`
+  lever is still the lever, and still unpulled.
+- **A file addition is still a whole re-extraction**, and the
+  unresolved-specifier index that would change that is still unbuilt. Phase 5 is
+  where the frequency of additions in a real session is measured.
+- **The equivalence oracle is still a whole cold run.** Every differential row
+  pays for a full `analyze()`, which is what makes the suite slow and what makes
+  it worth having.
+
+12. **`ExtractedModule.imports` was missing an `import("…")` type node.** A
+    parameter annotated `s: import("./svc.ts").Svc` makes the checker resolve
+    `s.run()` into `svc.ts`, and the file writes no import statement at all — so
+    the store held a resolved call edge with no import edge under it, and
+    editing `svc.ts` would have left the caller out of the re-extraction
+    closure with a `resolvedCallee` that no longer resolved. Found by probing
+    the compiler while building the closure, not by reasoning about the
+    grammar. The defect predates phase 4 and was invisible without it; the fix
+    is one branch in `collectImportTargets`.
+
+13. **The reuse gate is two layers, and the fingerprint is only one of them.**
+    The design put the resolved compiler options in `tsconfigHash` and left them
+    as a permanent `undecidable` entry (correction 5). Phase 4 does not move them
+    into the fingerprint: `computeFingerprint` runs *before* any program exists,
+    so it cannot read them at all. What reads them is the backend session, after
+    it builds the new program, and what it compares there is more than the
+    options:
+
+    - the resolved compiler options, serialized with sorted keys;
+    - the root-name set, which must equal the old one minus exactly the
+      deletions the caller reported — a set that *grew* is a file addition
+      whether or not anybody reported it;
+    - every program input that is not an in-root implementation file — in-root
+      `.d.ts`, `node_modules` typings, and sources pulled in from outside the
+      root — by **text hash**, with a `ts.SourceFile` identity check first;
+    - whether any changed or deleted file's declarations are global, in the old
+      program or the new one: a non-module script, a `declare global`, an
+      ambient `declare module "…"`.
+
+    The compiler's own `lib.*.d.ts` files are excluded from the hash: they are a
+    function of the engine version and of `lib`/`target`, and both are compared
+    already. **The external-file hash is what closes the hole correction 7 left
+    open** — a package rewritten in place moves neither the lockfile nor
+    `package.json`, and the program's own input list is the one place the
+    rewrite is visible. The permanent `undecidable` entry is removed because
+    that clause replaced it, not because the question went away.
+
+    `ProjectFingerprint.undecidable` is now split. `projectUndecidable` (an
+    unreadable or `extends`-chained tsconfig) refuses extraction reuse;
+    `configUndecidable` (a config closure the walk could not follow) does not,
+    because no contract in `ambit.config.ts` reaches `extractProject` and §6.2's
+    table says so. `undecidable` remains the concatenation and still means "no
+    reuse at all".
+
+14. **What gates re-summarization is the config's *value*, not `configHash`.**
+    The store keeps `configValueHash` — a hash of the loaded `AmbitConfig`, its
+    path and its source text — and a generation re-summarizes every file when it
+    moves. That is direct evidence rather than a proxy: `configHash` follows
+    only the *relative* specifiers a config imports, so a config importing a
+    package rewritten in place would hash the same while meaning something else,
+    which is exactly what correction 7 recorded as unclosed. The config is
+    re-evaluated from a fresh module registry every generation, so the loaded
+    value cannot hide the change. A config whose value will not serialize yields
+    `undefined`, which is never equal to anything and can only force a
+    re-summarization.
+
+    `ambit.config.ts` is itself a `.ts` file under the root when it lives there,
+    so it has a module record like any other file. A generation whose config
+    value moved seeds the config's own path into the re-extraction closure
+    rather than trusting the caller to report it.
+
+15. **Omitting the change set is not the same as passing an empty one.**
+    `session.update()` with no argument is a caller that does not track changes,
+    and it forces a whole re-extraction; `session.update([])` is a caller
+    asserting that nothing under the root moved, and a partial update can be
+    built on it. The design left "who has to notice a change" open and named the
+    honest gap — a change under the root the caller never reports — without
+    saying where a caller would see it. This is where: in the difference between
+    those two calls. It is also what keeps every phase-0-to-3 test unchanged,
+    since all of them call `update()`.
+
+16. **A failed generation forces the next one to rebuild.** The backend commits
+    its own baseline when `update` returns, and `runGeneration` can still throw
+    after that — on `functionsFound === 0`, on summarization, on propagation. The
+    store is then at generation *N* while the backend is at *N+1*, and the next
+    update would compare against a baseline that already absorbed the change
+    that failed, reading it as "nothing moved". So the session re-extracts
+    everything on the first update after a failure, which re-baselines both
+    layers at once. The two-layer transactionality this protects is not the
+    store's alone; the store's was never in doubt, because a partial patch
+    builds a new map and never edits the committed one.
+
+17. **Both reverse graphs are rebuilt, not patched.** The design said a
+    re-extracted file's old edges are removed before its new ones are added. The
+    implementation does something stronger and simpler: it rebuilds
+    `reverseImports` and `reverseCalls` from the patched file map every
+    generation, so there is no edge older than that map and the stale-edge
+    failure cannot occur. It is one walk over data already in memory —
+    `buildReverseCalls` was whole-project already, because the new generation's
+    graph is one of the two the impact closure is taken over. The differential
+    suite asserts the result against a from-scratch rebuild anyway.
+
+18. **A backend's partial answer is cross-checked against what was asked.** The
+    resident layer decides *what* a closure covers and passes it to
+    `TsProjectSession.update`; the backend decides *whether* its own state
+    permits a partial answer, and may return a whole project for any call. What
+    it may not do is return `full: false` covering a different set: a backend
+    that re-extracted fewer files than the closure named would leave entries the
+    caller believed were refreshed, and each one would be a stale answer served
+    as a fresh one (§3.4). A mismatch throws, and a throw commits nothing.
+
+19. **The per-file `matchedConfigKeys` became load-bearing**, which correction 3
+    predicted it would. A generation that re-summarizes only the closure cannot
+    ask `ResolvedConfig.unmatchedExactKeys()`; the store's union over
+    `FileEntry.matchedConfigKeys` is what `AMB-W006` is derived from.
 
 ## Undecided
 

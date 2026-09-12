@@ -1,7 +1,7 @@
 # Current status
 
 Node.js v24.20.0, macOS (darwin arm64), Apple M1, 8 cores, 16 GiB. Every number
-here was run, not estimated — but not all on the same day. Re-run **2026-09-12**:
+here was run, not estimated — but not all on the same day. Re-run **2026-09-13**:
 `pnpm test`, `tsc --noEmit`, `biome ci`, `check src --coverage`,
 `scripts/bench-corpus.ts`. Re-run **2026-09-11**: `check
 test/fixtures/realistic-api --coverage`. Quoted from the runs archived in
@@ -16,7 +16,7 @@ behind these numbers are archived in [`docs/measurements/`](measurements/).
 
 **0.1.0 is published and not production-proven.** All five M0.5 backend gates
 ran and the default backend is decided ([ADR-0001](adr/0001-analysis-backend.md)).
-M1 has no incremental path. M2–M4 are partial. M5 — the Phase 1 exit criterion —
+M1's incremental path exists and is not exposed: there is no CLI flag and no benchmark. M2–M4 are partial. M5 — the Phase 1 exit criterion —
 is untouched, and cannot be moved by technical work.
 
 What 0.1.0 asserts is `docs/DESIGN.md` §9.2's guaranteed surface under semver's
@@ -31,15 +31,15 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | Authority increases an external team rejected or explicitly approved | 0 | > 0 |
 | `unknown` rate, real third-party code (corpus median, 4,200 functions) | 52.9% | lower — no target (see below) |
 | `unknown` rate, adopting-team-equivalent fixture (`realistic-api`) | 1.9% (1/53) | no target (see below) |
-| `unknown` rate, Ambit's own source (`check src`) | 39.4% (147/373) | — |
+| `unknown` rate, Ambit's own source (`check src`) | 39.5% (163/413) | — |
 | Authority Ambit sees in a third-party backend's data layer ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)) | 940 stubbed call sites, up from 120 | — |
 | Third-party backends `ambit diff` is silent on when nothing changed | **3** — Unleash ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)), immich ([2026-09-11](measurements/2026-09-11-second-third-party-validation-immich.md)), outline ([2026-09-11](measurements/2026-09-11-third-third-party-validation-outline.md)) | — |
 | `unknown` rate, second third-party backend (immich `server/src`, 3,191 functions) | 79.9% (2,550/3,191) | no target (see below) |
 | `unknown` rate, third third-party backend (outline `server`, 2,245 functions) | 72.8% (1,635/2,245) | no target (see below) |
-| Tests | 689 passing, 38 files | green |
+| Tests | 742 passing, 39 files | green |
 | `tsc --noEmit` / `biome ci .` | pass / pass | pass |
 | `check src` latency, 42 files | ~1.1 s (last timed at 40 files; not re-timed) | §3.5's 3 s allowance |
-| Incremental / resident analysis | a resident session with a scoped fixed point; extraction still whole-project | yes (§6.2), with incremental extraction too |
+| Incremental / resident analysis | a resident session with a scoped fixed point **and a reverse-import closure re-extraction** ([2026-09-13](measurements/2026-09-13-resident-partial-extraction.md)); no CLI exposure, no benchmark | yes (§6.2), exposed and measured |
 | Bundled stub packages | 6 DB/LLM clients, 9 builtin namespaces | 50 packages |
 | Runtime hooks | 4 (`fetch`, `node:fs`, `node:child_process`, `pg`) | — |
 | Framework adapters | 2 (Hono, Next.js App Router) | — |
@@ -77,7 +77,7 @@ where it is measurable, as a Phase 1 exit metric in `ROADMAP.md`.
 ### Baseline commands
 
 ```sh
-pnpm test                                                    # 552 tests, 33 files — pass
+pnpm test                                                    # 742 tests, 39 files — pass
 pnpm exec tsc --noEmit                                       # pass
 ./node_modules/.bin/biome ci .                               # pass
 node src/cli/main.ts check src --coverage                    # exit 0
@@ -286,30 +286,29 @@ package no bundled table covers has no exit short of `@boundary`
 
 ## The resident check path (§6.2)
 
-Phases 0–3 of [`docs/resident-check-path.md`](resident-check-path.md) are
-implemented. **No speed claim is made and none is measured**: extraction still
-goes through the full-rebuild adapter, so every `update()` re-runs the
-compiler, re-extracts and re-summarizes the whole project, and
-`scripts/bench-resident.ts` (phase 5) does not exist. What phase 3 changed is
-the *fixed point*, which is now scoped to the functions whose summaries moved
-and the callers that reach them — a correctness-preserving reduction in work
-with no number attached to it.
+Phases 0–4 of [`docs/resident-check-path.md`](resident-check-path.md) are
+implemented. **No speed claim is made against `analyze()`**, because the
+baseline that claim would be made against is phase 5's and
+`scripts/bench-resident.ts` does not exist. What is measured is narrower and
+is recorded in full in
+[2026-09-13](measurements/2026-09-13-resident-partial-extraction.md): on a
+49-file copy of `src/` (412 functions), an edit to one file re-extracts the 6
+files in its reverse-import closure instead of all 49, and **extraction falls
+from 189–198 ms to 50–67 ms**. Three runs per verdict, one subject, one edit.
 
-The only figure worth recording yet is the size of the reduction, not its
-cost: on a copy of `src/` (398 functions), adding one JSDoc tag to
-`impactClosure` gives `S` = 1 and `I` = 6. That says the scoped path is
-scoping something. It says nothing about latency, and no latency claim is
-made until phase 5 measures one.
+**What did not move is `project-update`, and it is now the dominant phase** —
+128–163 ms, about two thirds of a partial re-check's total. That is
+`ts.createProgram` with `oldProgram` passed, the type checker, and the baseline
+the reuse gate compares. `oldProgram`'s own contribution is unmeasured: no row
+was run without it. So the ordering of the remaining work is set by a number
+rather than by a guess — phase 5's instrument points at program construction,
+not at the extraction phase 4 already shrank, and not at the impact comparator,
+whose 1–2 ms was never the cost.
 
-**Phase 3 is validated, not performance-proven, and the phase breakdown of
-that same run says why.** `extraction` 383 ms, `impact` 2.14 ms, `summarize`
-2.13 ms, `report` 1.53 ms, `propagate` 0.32 ms. What phase 3 scoped is the
-0.32 ms; extraction dominates it by roughly three orders of magnitude. So the
-case for a resident path at all still rests on phase 4 cutting
-project-update and extraction — that is where the next work goes, and
-polishing the impact comparator is not, unless new correctness evidence
-demands it. These are single-run observations on one tree, not a benchmark;
-`scripts/bench-resident.ts` is still phase 5's.
+ADR-0014 named "`project-update` or `extraction` dominating a cold start in a
+resident session" as the revisit condition for architecture C. It is met for
+`project-update` **on one subject**, which is a direction to measure and not a
+decision.
 
 What is built, and what says so:
 
@@ -317,9 +316,9 @@ What is built, and what says so:
 |---|---|---|
 | 0 — canonical diagnostic order | yes | `test/diagnostic-order.test.ts` drives the adopted backend with `files` reversed and asserts the diagnostics, authority records and coverage bytes are identical. `check src --format json` order changed; announced in `CHANGELOG.md` |
 | 1 — `ExtractedProject.modules` | yes | `test/extracted-modules.test.ts`: one entry per source file including a re-export-only barrel, and the per-file slices re-sum to the project aggregates on five fixture roots |
-| 2 — resident session, full rebuild only | yes | `test/resident.differential.test.ts`: 55 cases, every mutation row comparing a resident generation's rendered bytes against a cold `analyze()` over the same tree. The config rows are compared against a cold run in a **separate process** (`test/support/cold-oracle.ts`) as well, because both in-process paths share one module registry and a stale config would make them agree on the same wrong answer |
+| 2 — resident session, full rebuild only | yes | `test/resident.differential.test.ts`: 78 cases, every mutation row comparing a resident generation's rendered bytes against a cold `analyze()` over the same tree. The config rows are compared against a cold run in a **separate process** (`test/support/cold-oracle.ts`) as well, because both in-process paths share one module registry and a stale config would make them agree on the same wrong answer |
 | 3 — scoped fixed point | yes | `src/checker/impact.ts` (`summariesEqual`, `changedSymbols`, `impactClosure`) and `propagateScoped` in `src/checker/propagate.ts`. `test/impact.test.ts` pins the three decisions field by field; sixteen rows in the differential suite assert, for every mutation, that the scoped state equals `propagate` over the same summaries symbol for symbol *and* that the generation ran scoped |
-| 4 — `openProject`, reverse-import re-extraction | no | — |
+| 4 — `openProject`, reverse-import re-extraction | yes | `openProject` in `src/checker/backend/legacy-ts.ts` holds the `ts.Program` and compares the compiler-side half of the reuse gate; `planUpdate` / `patchStore` in `src/checker/resident.ts` decide and apply the closure. Twenty-two rows in the differential suite assert the verdict (full or partial) **and** the re-extracted set, alongside byte equivalence with cold and the scoped-state oracle. The hazards each have their own row: a file added, a rename, an unresolved specifier resolved by an addition, a tsconfig `paths` change, a lockfile-invisible `node_modules` rewrite, an in-root `.d.ts`, a `declare global`, a file entering the program with no root name moving, a path the session never extracted, an unreported change set, and a failed generation followed by a recovery |
 | 5 — benchmark, measured numbers | no | — |
 
 The differential suite covers §6.2's equivalence law over an ordinary edit, a
@@ -339,8 +338,50 @@ gaining and losing a body, `@boundary` added and removed, `AMB-W006` rebuilt
 from the per-file matched config keys, a revert compared on the internal state
 as well as the report, twelve sequential mutations, §3.5's three gate-3
 mutations from `scripts/m05-probe/mutations.ts`, a row proving the scoped path
-runs while `fingerprintPermitsReuse` is false, and a mutation on a copy of
-`src/` itself. Five failure shapes — a tsconfig that stopped
+runs while the fingerprint refuses extraction reuse, and a mutation on a copy of
+`src/` itself.
+
+Phase 4 added twenty-two more, and each asserts the **verdict** and the
+**re-extracted set** rather than equivalence alone — a row that asserted only
+equivalence would pass just as well against a session that re-extracted
+everything, which is the thing phase 4 stops doing. Partial: an edited file and
+its transitive importers, a leaf nothing imports, a re-pointed barrel that
+declares no function of its own, a deleted file followed through the old import
+graph with no stale edge left behind, a config-only change that re-summarizes
+every file and re-extracts only the config, a mid-edit syntax error, ten
+sequential partial updates, the three gate-3 mutations taken through the
+closure, and a one-file edit on a copy of `src/`. Full: a file added, a rename,
+an unresolved specifier whose target arrives, a tsconfig `paths` change, a
+changed `package.json`, a package rewritten in place under `node_modules`, an
+in-root `.d.ts`, a `declare global`, a path this session never extracted, a
+caller that reports no change set at all, a file that enters the program without
+a root name moving (an explicit `files:` tsconfig), and the first update after a
+failed one. One more row is about the import graph rather than the gate: a file
+that depends on another only through an `import("…")` **type node**, which
+writes no import statement and still resolves a call into the named file.
+
+**A package rewritten in place under `node_modules` moves neither the lockfile
+nor `package.json`**, so the disk-side fingerprint reads "nothing changed". What
+sees it is the backend session, which hashes every program input that is not an
+in-root implementation file — in-root `.d.ts`, `node_modules` typings, and
+sources pulled in from outside the root — excluding the compiler's own
+`lib.*.d.ts`, which are a function of the engine version and of `lib`/`target`
+and are compared through those. That clause is what let
+`ProjectFingerprint`'s permanent "resolved compiler options are not available"
+unknown be removed: it was replaced, not deleted.
+
+**Building the closure found one defect that predates it.**
+`ExtractedModule.imports` did not follow an `import("…")` type node, so a file
+whose only dependency on another is a parameter annotated
+`s: import("./svc.ts").Svc` held a resolved call edge into `svc.ts` with no
+import edge under it. Probed against the compiler, not reasoned about; fixed in
+`collectImportTargets`, and the row that covers it fails without the fix.
+
+**Omitting a change set is not the same as passing an empty one.**
+`session.update()` re-extracts everything, because a caller that does not track
+changes cannot be closed over; `session.update([])` is a caller asserting that
+nothing under the root moved. That difference is where §6.2's one open gap — a
+change under the root that the caller never reports — is visible to a caller. Five failure shapes — a tsconfig that stopped
 parsing, a config that no longer loads, both broken at once, two declarations
 colliding on one symbol id (§4.1), and a tree with nothing analyzable in it —
 each prove the same four things: the update reports failure, the previous generation stays committed
@@ -402,7 +443,7 @@ The snapshot-bound-state rule (§6.2, §3.4) is asserted two ways:
 |---|---|---|
 | M0 — specification, diagnostics, scope | **done** | `rfcs/` and `conformance/` are deferred by §9.1 to 1.0 or the first external adopter ([ADR-0010](adr/0010-when-governance-takes-effect.md)) |
 | M0.5 — backend comparison | **done** | Linux not re-verified. Gates 3 and 4 worth re-running once §6.2 exists. Full record: [`docs/measurements/m0.5-backend-comparison.md`](measurements/m0.5-backend-comparison.md). A TypeScript 7 *shadow* backend now runs the same pipeline for comparison only, measured in [2026-09-12](measurements/2026-09-12-ts7-shadow-analysis.md) and hardened in [2026-09-12](measurements/2026-09-12-ts7-shadow-hardening.md), again in [2026-09-12](measurements/2026-09-12-callable-slot-handle.md), again in [2026-09-12](measurements/2026-09-12-literal-receiver-port.md) and again in [2026-09-12](measurements/2026-09-12-instance-member-port.md) — it changes no default. Divergences on `src` 137 → 4 → **0**, and every one of the gate's 14 roots is now at 0; across the five third-party repositories 260 → 16, with 0 high-risk left, 0 authority increases, 0 decreases, 0 `unknown` lost, and the CI decision agreeing everywhere. Those numbers say the two engines no longer disagree in any way that reaches authority and that nothing accounts for — **not** that the shadow backend is at feature parity: `NOT_PORTED` is now `project:no-tsconfig-fallback` alone, a project-loading difference. Every call-resolution shape `legacy-ts.ts` implements is ported — `resolution:literal-receiver` (the four rows on `src`, one site at `cli/analyze.ts:91`) and `resolution:instance-member` (the seven left on `backend-smoke`, one site at `call-resolution.ts:172`). The corpus figure of 16 predates both ports and has not been re-measured. TypeScript 7 is 0.60x–1.16x of the adopted backend on those repositories, so the performance case is weaker than `src` alone suggested. `node scripts/shadow-check.ts` is the regression gate |
-| M1 — effects, unknown, coverage, diagnostics, init | **partial** | A resident session exists (`src/checker/resident.ts`) and is **incremental only in propagation**: every `update()` still runs the compiler, extraction and summarization over the whole project, and only the fixed point is scoped to the functions whose summaries moved plus their callers — phases 0–3 of [`docs/resident-check-path.md`](resident-check-path.md). Phases 4–6 (`openProject`, reverse-import re-extraction, the benchmark, CLI exposure) are not built, and **no resident timing has been measured**, so no re-check is claimed to be faster than a first check. No versioned JSON Schema for the diagnostic format (§5.2). `@budget costUsd` parses and is never priced. Config has no `stubs` key |
+| M1 — effects, unknown, coverage, diagnostics, init | **partial** | A resident session exists (`src/checker/resident.ts`) and is **incremental in extraction, summarization and propagation**: an update re-extracts the reverse-import closure of what the caller reported, re-summarizes that closure (or every file, when the config's value moved), and scopes the fixed point to the functions whose summaries moved plus their callers — phases 0–4 of [`docs/resident-check-path.md`](resident-check-path.md). Every other row of §6.2's invalidation table falls back to a whole re-extraction. Phases 5–6 (the benchmark, CLI exposure) are not built, and **no re-check is claimed to be faster than a first check**: the only resident timing taken ([2026-09-13](measurements/2026-09-13-resident-partial-extraction.md)) has no `analyze()` baseline in it. No versioned JSON Schema for the diagnostic format (§5.2). `@budget costUsd` parses and is never priced. Config has no `stubs` key |
 | M2 — capabilities, budget, hooks, adapters, 50 stubs | **partial** | Four hooks, not more: `node:http`/`https`/`net`, `mysql2`, Prisma, Drizzle, MongoDB and every LLM SDK have none, so calling them is neither blocked nor recorded. `costUsd` and `llmCalls` are not enforced. Two adapters (Hono, Next.js App Router); Express, BullMQ, `worker_threads`, Server Actions, `middleware.ts`, the Pages Router and Edge have none. No `@budget` loop-pattern warnings. **Stubs are 5 client packages and 9 builtin namespaces, not 50 packages** |
 | M3 — fix patches, agent protocol | **partial** | `fixes[].edits` exists for `AMB-E001` only. **`ambit agent` does not exist** — no protocol, no iteration limit, no approval gate for loosening fixes |
 | M4 — editor, SBOM, npm | **partial** | Published as [`ambit-ts`](https://www.npmjs.com/package/ambit-ts) 0.1.0 on 2026-09-10, **without provenance**. No editor integration of any kind. **`ambit sbom` does not exist**, nor do stub trust levels in diagnostics (§8). No pilot team. The runtime ships with the CLI, so installing Ambit pulls in `typescript` ([ADR-0009](adr/0009-package-name-and-single-package.md)) |

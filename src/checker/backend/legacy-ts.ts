@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
@@ -10,6 +11,8 @@ import type {
   LiteralArgument,
   OnExceed,
   RawJsDoc,
+  ResidentExtractedUpdate,
+  ResidentFileChange,
   RuntimeWrapper,
   SkippedFunctionKind,
   SourceLocation,
@@ -50,24 +53,56 @@ export const legacyTsBackend: TsBackend = {
   name: "typescript-legacy",
   version: ts.version,
   extractProject,
+  openProject,
 };
 
 /** @effects fs_read */
 async function extractProject(rootDir: string): Promise<ExtractedProject> {
-  const absoluteRoot = path.resolve(rootDir);
+  const absoluteRoot = resolveProjectRoot(rootDir);
+  const { rootNames, options } = loadProjectConfig(absoluteRoot);
+  const program = ts.createProgram({ rootNames, options });
+  return extractFromProgram(program, absoluteRoot);
+}
 
-  // A missing/non-directory target must fail loudly, not silently produce
-  // zero files (DESIGN.md §3.4: "Do not convert a failure to start, an
-  // unsupported setting, or an analysis failure into 'no violations'").
-  // Without this check, ts.findConfigFile still
-  // walks upward from a nonexistent path and can find an unrelated ancestor
-  // tsconfig.json, silently analyzing the wrong (or no) files.
+/**
+ * A missing/non-directory target must fail loudly, not silently produce zero
+ * files (DESIGN.md §3.4: "Do not convert a failure to start, an unsupported
+ * setting, or an analysis failure into 'no violations'"). Without this check,
+ * `ts.findConfigFile` still walks upward from a nonexistent path and can find
+ * an unrelated ancestor tsconfig.json, silently analyzing the wrong (or no)
+ * files.
+ *
+ * @effects fs_read
+ */
+function resolveProjectRoot(rootDir: string): string {
+  const absoluteRoot = path.resolve(rootDir);
   if (!fs.existsSync(absoluteRoot) || !fs.statSync(absoluteRoot).isDirectory()) {
     throw new Error(`project root not found or not a directory: ${absoluteRoot}`);
   }
+  return absoluteRoot;
+}
 
-  const { rootNames, options } = loadProjectConfig(absoluteRoot);
-  const program = ts.createProgram({ rootNames, options });
+/**
+ * The two extraction passes over one program.
+ *
+ * **Pass 1 is always whole-project, whatever `only` says.** It mints a
+ * `SymbolId` per declaration and builds the `Map<ts.Node, SymbolId>` pass 2
+ * resolves calls through, and a call in a re-extracted file can resolve into a
+ * declaration in any other file — so a map built over a subset would turn a
+ * resolved call into an `unresolved` one, which is a violation quietly becoming
+ * an `unknown` (DESIGN.md §3.4). It is a syntactic walk with no checker in it,
+ * which is what makes rebuilding it every generation affordable.
+ *
+ * `only` restricts **pass 2** — the checker-driven half — to a set of
+ * root-relative paths, for the resident path's reverse-import closure (§6.2).
+ * Absent means the whole project, which is what `extractProject` passes and
+ * what every full rebuild passes.
+ */
+function extractFromProgram(
+  program: ts.Program,
+  absoluteRoot: string,
+  only?: ReadonlySet<string>,
+): ExtractedProject {
   const checker = program.getTypeChecker();
 
   // Pass 1: find every function/method declaration under the project root
@@ -76,9 +111,7 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
   // are kept (not just indexed into declaredNodeToId) so pass 2 can reuse
   // them instead of walking the file a second time.
   const declaredNodeToId = new Map<ts.Node, SymbolId>();
-  const sourceFiles = program
-    .getSourceFiles()
-    .filter((sf) => !sf.isDeclarationFile && isUnderRoot(sf.fileName, absoluteRoot));
+  const sourceFiles = inRootSourceFiles(program, absoluteRoot);
 
   const declarationsByFile = new Map<
     ts.SourceFile,
@@ -97,6 +130,10 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
       // the other every pass and `ambit check` never returns. So a residual
       // collision has to stop the run rather than reach the fixed point
       // (§3.4 — a failure to analyze is never reported as "no violations").
+      //
+      // Checked in pass 1, so a collision anywhere in the project stops a
+      // partial update too — the resident path must not commit a generation
+      // whose unvisited half does not converge.
       if (mintedInFile.has(id)) {
         const { line } = locationOf(absoluteRoot, sourceFile, nameOrNode(node));
         throw new Error(
@@ -124,6 +161,11 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
   const skippedFunctions = new Map<SkippedFunctionKind, number>();
   const uncarriedContracts: UncarriedContract[] = [];
   for (const [sourceFile, declarations] of declarationsByFile) {
+    const filePath = relativePath(absoluteRoot, sourceFile);
+    // The walk order is the program's, and a restricted pass 2 skips rather
+    // than reorders: the resident store patches entries in place, so the file
+    // order a partial update produces has to be the order a whole one would.
+    if (only !== undefined && !only.has(filePath)) continue;
     // Where this file's share of `uncarriedContracts` starts. The two pushes
     // below (a contract on a config-only declaration, and one on a node that
     // was skipped) both land in the project-level array, and the per-file
@@ -132,7 +174,7 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
     const uncarriedStart = uncarriedContracts.length;
     const functions: ExtractedFunction[] = [];
     for (const [node, declPath] of declarations) {
-      const id = symbolId(relativePath(absoluteRoot, sourceFile), declPath);
+      const id = symbolId(filePath, declPath);
       const location = locationOf(absoluteRoot, sourceFile, nameOrNode(node));
       // An accessor / anonymous default export propagates like any other
       // function but does not adopt a contract comment (DESIGN.md §4.1 (a)).
@@ -187,7 +229,7 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
     );
     if (functions.length > 0 || runtimeWrappers.length > 0) {
       files.push({
-        filePath: relativePath(absoluteRoot, sourceFile),
+        filePath,
         functions,
         runtimeWrappers,
       });
@@ -200,13 +242,308 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
     }
     uncarriedContracts.push(...skipped.uncarried);
     modules.push({
-      filePath: relativePath(absoluteRoot, sourceFile),
+      filePath,
       imports: collectImportTargets(sourceFile, checker, absoluteRoot),
       skippedFunctions: fileSkipped,
       uncarriedContracts: uncarriedContracts.slice(uncarriedStart),
     });
   }
   return { files, skippedFunctions, uncarriedContracts, modules };
+}
+
+/** The program's non-declaration source files that lie under the analysis root. */
+function inRootSourceFiles(program: ts.Program, absoluteRoot: string): readonly ts.SourceFile[] {
+  return program
+    .getSourceFiles()
+    .filter((sf) => !sf.isDeclarationFile && isUnderRoot(sf.fileName, absoluteRoot));
+}
+
+// ---- the resident project session (DESIGN.md §6.2) ---------------------
+
+/**
+ * What this backend has to be sure of before it may re-extract only part of a
+ * project — the **compiler-side half** of the resident path's reuse gate.
+ *
+ * `src/checker/resident.ts` owns the disk-side half (`ProjectFingerprint`) and
+ * runs it before any program exists. Everything below can only be read *from a
+ * program*, which is why it lives here and why phase 4's `openProject` is what
+ * lets `ProjectFingerprint` stop saying "resolved compiler options are not
+ * available" (`docs/resident-check-path.md`, correction 5).
+ *
+ * Every field is evidence, never an assumption. A value this session cannot
+ * compare is a full re-extraction, which costs time; a value it compares wrong
+ * in the permissive direction is a stale answer, which §3.4 forbids.
+ */
+interface ProjectBaseline {
+  /** The program's root file names, absolute, as a set. */
+  readonly rootNames: ReadonlySet<string>;
+  /**
+   * The resolved compiler options, serialized with sorted keys, or `undefined`
+   * where a value could not be read — which refuses reuse rather than standing
+   * in for one (§3.4).
+   */
+  readonly optionsHash: string | undefined;
+  /**
+   * Every program input that is **not** an in-root implementation file: the
+   * default lib, `node_modules` typings, in-root `.d.ts`, and sources the
+   * program pulled in from outside the analysis root.
+   *
+   * Hashed by text rather than trusted by path, because this is the hole a
+   * lockfile cannot see: a package rewritten in place under `node_modules`
+   * moves neither `package.json` nor the lockfile, so the disk-side
+   * fingerprint reads "nothing changed" — and the program's own file list is
+   * the one place the rewrite is visible.
+   *
+   * The compiler's own `lib.*.d.ts` files are excluded: they are a function of
+   * the engine version and of the `lib`/`target` options, and both are already
+   * compared (`engineVersion` on the fingerprint, {@link optionsHash} here).
+   * Hashing several megabytes of them on every keystroke would buy nothing.
+   */
+  readonly externalFiles: ReadonlyMap<string, ExternalFile>;
+  /**
+   * Per in-root file: whether its declarations are visible outside itself
+   * other than through imports.
+   *
+   * True for a non-module (a script whose top-level names are global), for a
+   * `declare global` block, and for an ambient `declare module "…"`. Editing
+   * one of these changes what names resolve to in files that never imported
+   * it, so no reverse-import closure can reach the files it affects — §6.2's
+   * table makes it a full rebuild and this is how the row is detected.
+   */
+  readonly globalScope: ReadonlyMap<string, boolean>;
+}
+
+interface ExternalFile {
+  /** The `ts.SourceFile` as this baseline saw it, for an identity fast path. */
+  readonly file: ts.SourceFile;
+  readonly hash: string;
+}
+
+/**
+ * Hold the compiler's state open across updates (DESIGN.md §6.2).
+ *
+ * Everything compiler-owned — the `ts.Program`, its source files, the checker
+ * — stays inside this closure. What leaves is `ResidentExtractedUpdate`, which
+ * is strings and numbers like every other value crossing this boundary (§3.4).
+ *
+ * @effects fs_read
+ */
+async function openProject(rootDir: string): Promise<{
+  update(
+    changed: readonly ResidentFileChange[],
+    reextract?: readonly string[],
+  ): Promise<ResidentExtractedUpdate>;
+  close(): void;
+}> {
+  const absoluteRoot = resolveProjectRoot(rootDir);
+  let program: ts.Program | undefined;
+  let baseline: ProjectBaseline | undefined;
+
+  return {
+    async update(
+      changed: readonly ResidentFileChange[],
+      reextract?: readonly string[],
+    ): Promise<ResidentExtractedUpdate> {
+      const projectUpdateStarted = performance.now();
+      const { rootNames, options } = loadProjectConfig(absoluteRoot);
+      // `oldProgram` is passed whenever there is one and never assumed to
+      // help: `tryReuseStructureFromOldProgram` bails on a root-name delta or
+      // a module-resolution option change, and the default `CompilerHost` does
+      // not cache source files by version. Equivalence does not depend on it;
+      // what shrinks on a partial update is pass 2 (`docs/resident-check-path.md`).
+      const next = ts.createProgram({
+        rootNames,
+        options,
+        ...(program ? { oldProgram: program } : {}),
+      });
+      // Forcing the checker here rather than leaving it to `extractFromProgram`
+      // keeps the phase boundary honest: binding the program is part of
+      // bringing the engine up to date, not part of walking it.
+      next.getTypeChecker();
+      const nextBaseline = baselineOf(next, absoluteRoot, options);
+      const projectUpdateMs = performance.now() - projectUpdateStarted;
+
+      const partial =
+        reextract !== undefined &&
+        baseline !== undefined &&
+        permitsPartialExtraction(baseline, nextBaseline, changed, absoluteRoot);
+
+      if (!partial) {
+        const project = extractFromProgram(next, absoluteRoot);
+        program = next;
+        baseline = nextBaseline;
+        return {
+          files: project.files,
+          modules: project.modules,
+          removed: [],
+          full: true,
+          projectUpdateMs,
+        };
+      }
+
+      const only = new Set(reextract);
+      const slice = extractFromProgram(next, absoluteRoot, only);
+      program = next;
+      baseline = nextBaseline;
+      return {
+        files: slice.files,
+        modules: slice.modules,
+        removed: changed.filter((c) => c.kind === "deleted").map((c) => c.path),
+        full: false,
+        projectUpdateMs,
+      };
+    },
+    close(): void {
+      // Dropping the program drops the checker, every `ts.SourceFile` and every
+      // node with it. Nothing else here is compiler-owned.
+      program = undefined;
+      baseline = undefined;
+    },
+  };
+}
+
+/** @effects fs_read */
+function baselineOf(
+  program: ts.Program,
+  absoluteRoot: string,
+  options: ts.CompilerOptions,
+): ProjectBaseline {
+  const defaultLibDir = path.dirname(ts.getDefaultLibFilePath(options));
+  const externalFiles = new Map<string, ExternalFile>();
+  const globalScope = new Map<string, boolean>();
+  for (const file of program.getSourceFiles()) {
+    if (!file.isDeclarationFile && isUnderRoot(file.fileName, absoluteRoot)) {
+      globalScope.set(relativePath(absoluteRoot, file), hasGlobalScope(file));
+      continue;
+    }
+    if (path.dirname(file.fileName) === defaultLibDir) continue;
+    externalFiles.set(file.fileName, {
+      file,
+      hash: createHash("sha256").update(file.text).digest("hex"),
+    });
+  }
+  return {
+    rootNames: new Set(program.getRootFileNames()),
+    optionsHash: hashCompilerOptions(options),
+    externalFiles,
+    globalScope,
+  };
+}
+
+/**
+ * Whether a file's declarations can be seen by a file that never imported it.
+ *
+ * A file with no external-module indicator is a script: its top-level `const`
+ * is a global. A `declare global` block and an ambient `declare module "…"`
+ * do the same thing from inside a module.
+ */
+function hasGlobalScope(file: ts.SourceFile): boolean {
+  if (!ts.isExternalModule(file)) return true;
+  return file.statements.some(
+    (statement) =>
+      ts.isModuleDeclaration(statement) &&
+      ((statement.flags & ts.NodeFlags.GlobalAugmentation) !== 0 ||
+        ts.isStringLiteral(statement.name)),
+  );
+}
+
+/**
+ * The resolved compiler options as one string, with sorted keys so two runs of
+ * the same tsconfig hash alike.
+ *
+ * `undefined` where a value the serializer cannot read (a function, a circular
+ * object — neither appears in options the compiler resolved, but nothing here
+ * may depend on that) made the answer incomplete. An incomplete hash is not a
+ * hash: the caller refuses reuse on it rather than comparing it.
+ */
+function hashCompilerOptions(options: ts.CompilerOptions): string | undefined {
+  const parts: string[] = [];
+  for (const key of Object.keys(options).toSorted()) {
+    const value = options[key];
+    let rendered: string;
+    try {
+      rendered = JSON.stringify(value) ?? `undefined:${String(value)}`;
+    } catch {
+      return undefined;
+    }
+    parts.push(`${key}=${rendered}`);
+  }
+  return createHash("sha256").update(parts.join("\n")).digest("hex");
+}
+
+/**
+ * The compiler-side verdict: may this update re-extract only the closure the
+ * caller asked for?
+ *
+ * Every clause is a §6.2 full-rebuild row read off the program rather than
+ * guessed at. `false` is always safe; `true` has to be earned.
+ */
+function permitsPartialExtraction(
+  before: ProjectBaseline,
+  after: ProjectBaseline,
+  changed: readonly ResidentFileChange[],
+  absoluteRoot: string,
+): boolean {
+  if (before.optionsHash === undefined || after.optionsHash === undefined) return false;
+  if (before.optionsHash !== after.optionsHash) return false;
+
+  // A file *addition* is the row §6.2 forces rather than merely prefers: the
+  // edges the store holds are resolved import targets, so a specifier that
+  // resolved to nothing held no edge to close over. A root-name set that grew
+  // says one arrived whether or not the caller reported it.
+  const deleted = new Set(
+    changed
+      .filter((change) => change.kind === "deleted")
+      .map((change) => path.resolve(absoluteRoot, change.path)),
+  );
+  for (const rootName of after.rootNames) {
+    if (!before.rootNames.has(rootName)) return false;
+  }
+  for (const rootName of before.rootNames) {
+    // Gone from the program, and only a deletion the caller reported explains
+    // it. A root that vanished for any other reason is a tree this session no
+    // longer has a model of.
+    if (!after.rootNames.has(rootName) && !deleted.has(path.resolve(rootName))) return false;
+  }
+
+  // The program's non-implementation inputs: the default lib is excluded from
+  // the baseline, so what is left is `node_modules` typings, in-root `.d.ts`,
+  // and outside-root sources. A new one, a vanished one, or a rewritten one is
+  // a full rebuild — this is the clause that sees a package rewritten in place.
+  if (before.externalFiles.size !== after.externalFiles.size) return false;
+  for (const [fileName, next] of after.externalFiles) {
+    const previous = before.externalFiles.get(fileName);
+    if (previous === undefined) return false;
+    // Identity first, for the case where the host returns the same object
+    // across programs. The default `CompilerHost` re-reads and re-parses on
+    // every `getSourceFile`, so this is a cheap check that may never hit rather
+    // than a measured optimization; the hash below is what actually decides.
+    if (previous.file === next.file) continue;
+    if (previous.hash !== next.hash) return false;
+  }
+
+  // The program's **in-root** file set, which is not the same question as the
+  // root names: with an explicit `files:` list, a file enters or leaves the
+  // program by being imported, and no root name moves when it does. A file that
+  // arrived is an addition by another name, and one that left is an entry the
+  // store would keep forever. `globalScope`'s keys are that set.
+  for (const filePath of after.globalScope.keys()) {
+    if (!before.globalScope.has(filePath)) return false;
+  }
+  for (const filePath of before.globalScope.keys()) {
+    if (!after.globalScope.has(filePath) && !deleted.has(path.resolve(absoluteRoot, filePath))) {
+      return false;
+    }
+  }
+
+  // A file whose declarations are global cannot be closed over: §6.2's table.
+  // Checked in both baselines, because *becoming* a script is the same hazard
+  // as being one.
+  for (const change of changed) {
+    if (before.globalScope.get(change.path) === true) return false;
+    if (after.globalScope.get(change.path) === true) return false;
+  }
+  return true;
 }
 
 /**
@@ -221,9 +558,12 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
  * no symbol and therefore no edge, which is the honest answer and is why
  * DESIGN.md §6.2 makes a file *addition* re-check everything.
  *
- * Every form that names a module is walked, type-only imports included:
- * §6.2's table is a minimum, so an edge too many costs time and an edge too
- * few costs correctness.
+ * Every form that names a module is walked: `import` and `export … from`,
+ * `import =`, a dynamic `import()`, type-only imports, and an `import("…")`
+ * type node — which has no import statement at all and is still a dependency,
+ * because a parameter annotated with one makes a call on that parameter resolve
+ * into the named file. §6.2's table is a minimum, so an edge too many costs
+ * time and an edge too few costs correctness.
  */
 function collectImportTargets(
   sourceFile: ts.SourceFile,
@@ -259,6 +599,17 @@ function collectImportTargets(
       node.arguments.length > 0
     ) {
       record(node.arguments[0]);
+    } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
+      // `import("./svc.ts").Svc` in type position. There is no import
+      // *statement* here and the file still depends on the other one: a
+      // parameter annotated this way makes the checker resolve a call on it to
+      // the annotated declaration, so a call in this file lands on a
+      // `SymbolId` in that one. Probed against the compiler before this branch
+      // was written, and asserted in `test/resident.differential.test.ts`.
+      // Without this edge the resident path would leave the file out of the
+      // re-extraction closure and keep a `resolvedCallee` that no longer
+      // resolves.
+      record(node.argument.literal);
     }
     ts.forEachChild(node, visit);
   }

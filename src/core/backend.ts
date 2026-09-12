@@ -514,7 +514,10 @@ export interface TsBackend {
    * no compiler object like everything else on this boundary.
    */
   openProject?(rootDir: string): Promise<{
-    update(changed: readonly ResidentFileChange[]): Promise<ResidentExtractedUpdate>;
+    update(
+      changed: readonly ResidentFileChange[],
+      reextract?: readonly string[],
+    ): Promise<ResidentExtractedUpdate>;
     close(): void;
   }>;
 }
