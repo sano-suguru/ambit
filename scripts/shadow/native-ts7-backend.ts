@@ -76,13 +76,13 @@ type Any = any;
  * see `scripts/shadow/compare.ts`.
  */
 export const NOT_PORTED: readonly string[] = [
-  // `objectLiteralReceiverTarget` / `constructedInstanceMemberTarget`: a call
-  // through a receiver whose value is certainly one object literal or one
-  // constructed class instance. `objectLiteralMemberTarget` *is* ported.
-  // `Extractor.recordDeclinedShape` emits these two codes at the sites it
-  // declines, so a divergence there is classified from the backend's own
-  // report rather than from the text of the rendered pair.
-  "resolution:literal-receiver",
+  // `constructedInstanceMemberTarget`: a call through a receiver whose value
+  // is certainly one constructed class instance. `objectLiteralMemberTarget`
+  // and `objectLiteralReceiverTarget` are both ported — a call through a
+  // receiver bound to one object literal is resolved here, not declined.
+  // `Extractor.recordDeclinedShape` emits this code at the sites it declines,
+  // so a divergence there is classified from the backend's own report rather
+  // than from the text of the rendered pair.
   "resolution:instance-member",
   // The legacy backend scans for `.ts` files when there is no `tsconfig.json`;
   // this one throws instead, because the native API opens a project by config
@@ -1305,6 +1305,16 @@ class Extractor {
       const memberId = this.objectLiteralMemberTarget(declaration);
       if (memberId) return { location, resolvedCallee: memberId };
     }
+
+    // A property access on a `const` bound to an object literal is resolvable
+    // from the value even when the literal carries a type annotation and
+    // `getSymbolAtLocation` therefore lands on the annotation's member
+    // signature instead of the literal's own member — the shape of Ambit's own
+    // `legacyTsBackend: TsBackend = { extractProject }`. Same position in the
+    // chain as `legacy-ts.ts`'s `classifyCall`, and the same guards.
+    const receiverMemberId = this.objectLiteralReceiverTarget(callee);
+    if (receiverMemberId) return { location, resolvedCallee: receiverMemberId };
+
     this.recordDeclinedShape(callee, location);
 
     const importBindingReason: UnresolvedReason | undefined =
@@ -1491,12 +1501,16 @@ class Extractor {
    * of the rendered pair.
    *
    * The test is the premise of the unported rule and nothing more: a property
-   * access whose receiver is a `const` holding one object literal
-   * (`resolution:literal-receiver`) or one `new` (`resolution:instance-member`).
-   * It deliberately does not go on to find the member — that would *be* the
-   * port. Saying "this is the shape I did not implement" is a different and
-   * much cheaper claim than "here is what I would have found", and only the
-   * first one is honest for a gap.
+   * access whose receiver is a `const` holding one `new`
+   * (`resolution:instance-member`). It deliberately does not go on to find the
+   * member — that would *be* the port. Saying "this is the shape I did not
+   * implement" is a different and much cheaper claim than "here is what I
+   * would have found", and only the first one is honest for a gap.
+   *
+   * The object-literal receiver is no longer among them:
+   * `objectLiteralReceiverTarget` above is the port, and leaving a declined
+   * code behind for a rule that now exists would let a *genuine* future
+   * disagreement on that shape read as "not yet ported".
    */
   private recordDeclinedShape(callee: Node, location: SourceLocation): void {
     const is = this.is;
@@ -1504,10 +1518,6 @@ class Extractor {
     const declaration = this.constInitializedVariableOf(callee.expression);
     if (!declaration) return;
     const initializer = unwrapTypeOnlyExpression(is, declaration.initializer);
-    if (is.isObjectLiteralExpression(initializer)) {
-      this.declined.set(locationKey(location), "resolution:literal-receiver");
-      return;
-    }
     // A `new` only counts when the class is one this project declares. The
     // unported rule walks the class's own members for the method, so a
     // receiver holding `new Set()` is not a shape it would have resolved
@@ -1534,6 +1544,45 @@ class Extractor {
         (is.isClassDeclaration(declaration) || is.isClassExpression(declaration)) &&
         !declaration.getSourceFile().isDeclarationFile,
     );
+  }
+
+  /**
+   * `X.p(...)` where `X` is a `const` bound to an object literal: the member is
+   * found by name in the literal itself, so a type annotation on `X` — which
+   * makes `getSymbolAtLocation` return the annotation's member signature rather
+   * than the literal's member — does not hide the target.
+   *
+   * A line-for-line port of `legacy-ts.ts`'s `objectLiteralReceiverTarget`,
+   * down to which guard rejects what: the receiver's own symbol is de-aliased,
+   * its first declaration must be a `const` variable declaration, and
+   * `indexableObjectLiteral` decides whether the literal behind it may be
+   * indexed at all (no spread, `satisfies` / `as const` unwrapped). Genuine
+   * dynamic dispatch is untouched — a receiver with no single literal behind it
+   * fails those guards and stays unresolved.
+   */
+  private objectLiteralReceiverTarget(callee: Node): SymbolId | undefined {
+    const is = this.is;
+    if (!is.isPropertyAccessExpression(callee) || !is.isIdentifier(callee.expression)) {
+      return undefined;
+    }
+    const receiverSymbol = this.checker.getSymbolAtLocation(callee.expression);
+    if (!receiverSymbol) return undefined;
+    const resolved =
+      (receiverSymbol.flags & this.SymbolFlags.Alias) !== 0
+        ? this.checker.getAliasedSymbol(receiverSymbol)
+        : receiverSymbol;
+
+    const declaration = this.declarationsOf(resolved)[0];
+    if (!declaration || !is.isVariableDeclaration(declaration)) return undefined;
+    const literal = this.indexableObjectLiteral(declaration);
+    if (!literal) return undefined;
+
+    for (const member of literal.properties) {
+      if (!member.name || !is.isIdentifier(member.name)) continue;
+      if (member.name.text !== callee.name.text) continue;
+      return this.objectLiteralMemberTarget(member);
+    }
+    return undefined;
   }
 
   private objectLiteralMemberTarget(member: Node): SymbolId | undefined {
