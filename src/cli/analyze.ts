@@ -61,7 +61,15 @@ export interface AnalyzeOptions {
  * could not run must never be reported as "checked, nothing wrong"
  * (DESIGN.md §3.4).
  *
- * @effects fs_read
+ * `process` is `loadConfig`'s, not this function's own: an `ambit.config.ts`
+ * that imports another module is evaluated in a worker thread, because Node's
+ * module registry would otherwise hand back a cached copy of what that module
+ * exported before it was edited. A config that imports nothing starts no
+ * thread. Declared rather than left inferred — Ambit reports this increase
+ * against its own source, and hiding it here is the one thing the tool exists
+ * to prevent.
+ *
+ * @effects fs_read, process
  */
 export async function analyze(dir: string, options: AnalyzeOptions = {}): Promise<Analysis> {
   // Loaded before extraction so a broken config stops the run before any

@@ -1,6 +1,8 @@
+import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import process from "node:process";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   type AnalysisResult,
@@ -11,6 +13,7 @@ import {
   type ResidentStore,
 } from "../src/checker/index.ts";
 import { analyze } from "../src/cli/analyze.ts";
+import { renderAnalysis } from "./support/render-analysis.ts";
 
 /**
  * DESIGN.md §6.2's **equivalence law**, asserted rather than argued.
@@ -82,27 +85,30 @@ function readText(full: string): string {
 }
 
 /**
- * The whole externally observable result as bytes: every diagnostic, every
- * authority record, then the coverage report with its count maps written as
- * ordered entry lists.
- *
- * This is what `ambit check --format json --coverage` emits, modulo the
- * envelope: NDJSON, diagnostics first, authority records next, the counts last.
+ * The whole externally observable result as bytes — shared with
+ * `test/support/cold-oracle.ts`, which renders the same thing from a separate
+ * process. See `test/support/render-analysis.ts`.
  */
-function render(analysis: AnalysisResult): string {
-  const lines = [
-    ...analysis.diagnostics.map((diagnostic) => JSON.stringify(diagnostic)),
-    ...analysis.authority.map((record) => JSON.stringify(record)),
-    JSON.stringify({
-      ...analysis.coverage,
-      // `JSON.stringify` writes a `Map` as `{}`. Written as entry lists so the
-      // comparison sees the counts *and* their order, which is what the CLI
-      // serializes through `Object.fromEntries`.
-      skippedByKind: [...analysis.coverage.skippedByKind],
-      unresolvedByReason: [...analysis.coverage.unresolvedByReason],
-    }),
-  ];
-  return `${lines.join("\n")}\n`;
+const render = renderAnalysis;
+
+/**
+ * A cold `analyze()` over `dir` **in a process of its own**, rendered.
+ *
+ * The in-process oracle is the right one almost everywhere and the wrong one
+ * for anything the two paths can share and go stale on — a cached config
+ * module makes the session and the in-process oracle agree on the same wrong
+ * answer. A separate process shares no module registry with this one.
+ */
+function renderColdInSeparateProcess(dir: string): string {
+  const result = spawnSync(
+    process.execPath,
+    [path.join(import.meta.dirname, "support", "cold-oracle.ts"), dir],
+    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+  );
+  if (result.status !== 0) {
+    throw new Error(`cold oracle failed (${result.status}): ${result.stderr}`);
+  }
+  return result.stdout;
 }
 
 /** Run the resident session's next generation and the cold oracle over the same tree. */
@@ -485,6 +491,46 @@ describe("resident session: each mutation's update equals a cold run over the sa
     expect(matched.diagnostics.some((d) => d.id === "AMB-W006")).toBe(false);
   });
 
+  it("an ambit.config.ts helper edited, checked against a separate-process cold run", async () => {
+    const dir = copyFixture("cross-module");
+    write(
+      dir,
+      "config-contracts.ts",
+      'export const contracts = {\n  "builtin-named-import.ts#callsBuiltinNamedImport": { effects: ["fs_read"] },\n};\n',
+    );
+    write(
+      dir,
+      "ambit.config.ts",
+      'import { contracts } from "./config-contracts.ts";\n\nexport default { contracts };\n',
+    );
+    const session = await open(dir);
+    expect(
+      declaredOf(session.current(), "builtin-named-import.ts#callsBuiltinNamedImport"),
+    ).toEqual(["fs_read"]);
+
+    // The config file's own text does not change here — only a module it
+    // imports. A cache key built from the config's text alone leaves this
+    // update answering out of the previous generation's helper, and the
+    // in-process oracle would go stale with it and agree. Hence the separate
+    // process: it shares no module registry with this one.
+    write(
+      dir,
+      "config-contracts.ts",
+      'export const contracts = {\n  "builtin-named-import.ts#callsBuiltinNamedImport": { effects: ["network"] },\n};\n',
+    );
+    const result = await session.update();
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+
+    expect(declaredOf(result.analysis, "builtin-named-import.ts#callsBuiltinNamedImport")).toEqual([
+      "network",
+    ]);
+    expect(render(result.analysis)).toBe(renderColdInSeparateProcess(dir));
+    // And the in-process oracle agrees too — which it only does because
+    // `loadConfig` evaluates an importing config in a fresh module registry.
+    expect(render(result.analysis)).toBe(render(await analyze(dir)));
+  });
+
   it("a change, then the same change reverted", async () => {
     const dir = copyFixture("cross-module");
     const session = await open(dir);
@@ -771,6 +817,50 @@ describe("ProjectFingerprint fails toward rebuilding", () => {
     expect(fingerprintOf(dir).tsconfigHash).not.toBe(installed.tsconfigHash);
   });
 
+  it("moves configHash when a file the config imports changes, not only the config", async () => {
+    const dir = copyFixture("cross-module");
+    write(dir, "config-contracts.ts", "export const contracts = {};\n");
+    write(
+      dir,
+      "ambit.config.ts",
+      'import { contracts } from "./config-contracts.ts";\n\nexport default { contracts };\n',
+    );
+    const before = fingerprintOf(dir);
+
+    // The config file itself is untouched. Hashing its text alone would report
+    // this as "nothing changed" — the permissive direction §6.2 forbids.
+    write(
+      dir,
+      "config-contracts.ts",
+      'export const contracts = { "callee.ts#fetchRate": { effects: ["network"] } };\n',
+    );
+    const after = fingerprintOf(dir);
+    expect(after.configHash).not.toBe(before.configHash);
+    expect(after.tsconfigHash).toBe(before.tsconfigHash);
+    expect(after.resolutionHash).toBe(before.resolutionHash);
+  });
+
+  it("reports an unreadable or dynamically imported config dependency as undecidable", async () => {
+    const dir = copyFixture("cross-module");
+    write(
+      dir,
+      "ambit.config.ts",
+      'import { contracts } from "./not-on-disk.ts";\n\nexport default { contracts };\n',
+    );
+    expect(
+      fingerprintOf(dir).undecidable.some((reason) => /resolves to no file/.test(reason)),
+    ).toBe(true);
+
+    write(
+      dir,
+      "ambit.config.ts",
+      'const { contracts } = await import("./config-contracts.ts");\n\nexport default { contracts };\n',
+    );
+    expect(fingerprintOf(dir).undecidable.some((reason) => /dynamic import/.test(reason))).toBe(
+      true,
+    );
+  });
+
   it("reports an `extends` chain as undecidable rather than hashing past it", async () => {
     const dir = copyFixture("cross-module");
     const plain = fingerprintOf(dir);
@@ -792,10 +882,14 @@ describe("resident session: nothing snapshot-bound is retained", () => {
     await session.update();
     const store: ResidentStore = session.committed().store;
 
-    // `structuredClone` throws `DataCloneError` on a function, so it throws on
-    // any retained compiler node, type, signature, or closure over one. §6.2:
-    // "A compiler node, type, signature, or internal id is valid for the
-    // snapshot that produced it and is discarded with it."
+    // `structuredClone` throws `DataCloneError` on a function, so it catches a
+    // retained compiler node, type, signature, or closure over one — every
+    // object shape that carries methods. It is **one guard, not a proof**: a
+    // snapshot-bound *primitive* (an internal numeric or string id) clones
+    // fine. What rules those out is the other two: `test/architecture.test.ts`
+    // forbids this file from importing `typescript` at all, and `src/core`'s
+    // `TsBackend` boundary fixes what may cross it (§3.4). The three together
+    // are the argument; this assertion alone is not.
     expect(() => structuredClone(store)).not.toThrow();
 
     // And the store is actually populated, so the assertion above is not

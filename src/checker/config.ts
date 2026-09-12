@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { Worker } from "node:worker_threads";
 import type {
   AmbitConfig,
   ConfigContract,
@@ -66,6 +67,118 @@ function isProjectBoundary(dir: string): boolean {
 }
 
 /**
+ * Every file the config's *value* depends on, and what about that dependence
+ * could not be decided.
+ *
+ * A config is a module, so its value is a function of its own text **and of
+ * every module it imports**. Hashing the config file alone says an edit to a
+ * helper it imports changed nothing, which is exactly the permissive direction
+ * DESIGN.md §6.2's resident path must never fail in.
+ *
+ * {@link files} is the config file followed by the transitive closure of its
+ * *relative* imports that exist on disk, deduplicated and sorted — a stable
+ * list to hash. {@link undecidable} carries every reason the closure may be
+ * incomplete; a non-empty list means a caller must not treat an unchanged hash
+ * as "nothing changed".
+ */
+export interface ConfigDependencies {
+  readonly files: readonly string[];
+  readonly undecidable: readonly string[];
+}
+
+/**
+ * A static `import` / `export … from`, or a dynamic `import(...)`, with a
+ * string-literal specifier. Deliberately a text scan and not a parse: this
+ * runs on one small file, it must not pull in a compiler (§6.1 keeps
+ * `src/checker/config.ts` compiler-free), and every shape it *fails* to
+ * recognize is caught by {@link DYNAMIC_IMPORT} below, which fails toward
+ * "undecidable" rather than toward a smaller closure.
+ */
+const STATIC_SPECIFIER = /(?:^|[\s;}])(?:import|export)\s[^;\n]*?["']([^"']+)["']/g;
+/** Any `import(` at all, whether or not its argument is a literal. */
+const DYNAMIC_IMPORT = /\bimport\s*\(/;
+
+/**
+ * The config's dependency closure, walked from `configPath`.
+ *
+ * Only *relative* specifiers are followed. A bare specifier names a package,
+ * and a change to an installed package is a change to module resolution, which
+ * §6.2's table already answers with a whole rebuild — following it here would
+ * walk `node_modules` on every check to re-derive an answer the resolution
+ * inputs already give.
+ *
+ * @effects fs_read
+ */
+export function configDependencies(configPath: string): ConfigDependencies {
+  const files = new Set<string>();
+  const undecidable: string[] = [];
+  const queue: string[] = [path.resolve(configPath)];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current === undefined || files.has(current)) continue;
+    let text: string;
+    try {
+      text = fs.readFileSync(current, "utf8");
+    } catch {
+      // A file named by an import that cannot be read leaves the closure
+      // incomplete, and saying so is the whole point of `undecidable`.
+      undecidable.push(`cannot read ${current}, named by the config's imports`);
+      continue;
+    }
+    files.add(current);
+
+    for (const match of text.matchAll(STATIC_SPECIFIER)) {
+      const specifier = match[1];
+      if (specifier === undefined || !specifier.startsWith(".")) continue;
+      const resolved = resolveRelativeSpecifier(current, specifier);
+      if (resolved === undefined) {
+        undecidable.push(`${current} imports ${specifier}, which resolves to no file on disk`);
+        continue;
+      }
+      queue.push(resolved);
+    }
+    if (DYNAMIC_IMPORT.test(text)) {
+      undecidable.push(`${current} uses a dynamic import, whose target cannot be read statically`);
+    }
+  }
+
+  return { files: [...files].sort(), undecidable };
+}
+
+/**
+ * A relative specifier as Node would resolve it, restricted to the shapes a
+ * config plausibly writes: the path as written, then the extensions Node's
+ * type stripping accepts, then a directory index.
+ *
+ * A miss is reported as undecidable rather than guessed at — this is a second
+ * resolution model beside Node's, and the only honest thing a second model can
+ * do when it disagrees is say so.
+ *
+ * @effects fs_read
+ */
+function resolveRelativeSpecifier(fromFile: string, specifier: string): string | undefined {
+  const base = path.resolve(path.dirname(fromFile), specifier);
+  const candidates = [
+    base,
+    `${base}.ts`,
+    `${base}.mts`,
+    `${base}.js`,
+    `${base}.mjs`,
+    path.join(base, "index.ts"),
+    path.join(base, "index.js"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (fs.statSync(candidate).isFile()) return candidate;
+    } catch {
+      // Not this candidate.
+    }
+  }
+  return undefined;
+}
+
+/**
  * Load the config that governs `startDir`, or `undefined` when there is none.
  *
  * The file is imported, not parsed: it is TypeScript or JavaScript, and Node
@@ -74,6 +187,9 @@ function isProjectBoundary(dir: string): boolean {
  * A file that throws on import (a syntax error, a bad import) becomes a
  * {@link ConfigError}: a config that could not be read must stop the run, not
  * be treated as "no config" (§3.4).
+ *
+ * **How it is imported depends on whether it imports anything itself**, and
+ * that is the one subtle thing in this file — see the two branches below.
  */
 export async function loadConfig(startDir: string): Promise<LoadedConfig | undefined> {
   const configPath = findConfigFile(startDir);
@@ -86,32 +202,96 @@ export async function loadConfig(startDir: string): Promise<LoadedConfig | undef
     throw new ConfigError(`cannot read ${configPath}: ${messageOf(error)}`);
   }
 
-  let module: { readonly default?: unknown };
+  // Node's ESM loader caches a module by URL for the life of the process, so a
+  // second `loadConfig` on an edited config would return the *first* version's
+  // exports. One-shot `ambit check` never noticed; DESIGN.md §6.2's resident
+  // path is precisely a process that loads the config again after it changed,
+  // and §6.2's table requires that change to re-derive every contract. A cached
+  // module satisfies that by re-deriving from stale data, which is the failure
+  // §3.4 forbids wearing the shape of a success.
+  const dependencies = configDependencies(configPath);
+  const importsSomething = dependencies.files.length > 1 || dependencies.undecidable.length > 0;
+
+  let defaultExport: unknown;
   try {
-    // The query is the file's own content hash, and it is load-bearing rather
-    // than cosmetic: Node's ESM loader caches a module by URL for the life of
-    // the process, so a second `loadConfig` on an edited config file in the
-    // same process would return the *first* version's exports. One-shot
-    // `ambit check` never noticed, but DESIGN.md §6.2's resident path is a
-    // process that loads the config again after it changed — and §6.2's table
-    // requires an `ambit.config.ts` change to re-derive every contract. A
-    // cached module would satisfy that by re-deriving from stale data, which
-    // is the failure §3.4 forbids wearing the shape of a success.
-    //
-    // Keyed by content rather than by a counter so an *unchanged* config is
-    // still imported once: re-evaluating a module has side effects of its
-    // own, and repeating them per check would be a cost the cold path never
-    // had.
-    const url = `${pathToFileURL(configPath).href}?v=${createHash("sha256").update(sourceText).digest("hex").slice(0, 16)}`;
-    module = (await import(url)) as { readonly default?: unknown };
+    defaultExport = importsSomething
+      ? await importInFreshRegistry(configPath)
+      : await importWithContentQuery(configPath, sourceText);
   } catch (error) {
     throw new ConfigError(`cannot load ${configPath}: ${messageOf(error)}`);
   }
 
-  if (module.default === undefined) {
+  if (defaultExport === undefined) {
     throw new ConfigError(`${configPath} has no default export`);
   }
-  return { configPath, config: validateConfig(module.default, configPath), sourceText };
+  return { configPath, config: validateConfig(defaultExport, configPath), sourceText };
+}
+
+/**
+ * The cheap path, for a config that imports nothing of its own: re-import it
+ * under a query carrying its own content hash.
+ *
+ * Keyed by content rather than by a counter so an *unchanged* config is still
+ * imported once — re-evaluating a module has side effects of its own, and
+ * repeating them per check would be a cost the cold path never had.
+ *
+ * This is only correct because the config's value is then a function of its
+ * own text alone. The moment it imports something, it is not, and
+ * {@link importInFreshRegistry} takes over.
+ */
+async function importWithContentQuery(configPath: string, sourceText: string): Promise<unknown> {
+  const digest = createHash("sha256").update(sourceText).digest("hex").slice(0, 16);
+  const module = (await import(`${pathToFileURL(configPath).href}?v=${digest}`)) as {
+    readonly default?: unknown;
+  };
+  return module.default;
+}
+
+/**
+ * The correct-but-slower path, for a config that imports anything.
+ *
+ * A content query on the *config* re-evaluates the config and nothing else: its
+ * own `import "./contracts.ts"` resolves to the same URL as last time, so Node
+ * hands it the cached module and the config is rebuilt out of stale parts. The
+ * query cannot be pushed down either — the specifier is written in the config's
+ * source, not chosen here.
+ *
+ * A worker thread has its own module registry, so every module in the config's
+ * graph is evaluated fresh. The config's default export is plain data
+ * ({@link AmbitConfig} carries no functions), so it crosses the thread boundary
+ * by structured clone; a config that exports something uncloneable fails here
+ * rather than being silently half-copied.
+ *
+ * The cost is one worker start — tens of milliseconds — and it is paid only by
+ * a config that imports something. A config that does not takes
+ * {@link importWithContentQuery} and pays nothing.
+ */
+async function importInFreshRegistry(configPath: string): Promise<unknown> {
+  const runner = `
+import { workerData, parentPort } from "node:worker_threads";
+const module = await import(workerData);
+parentPort.postMessage({ value: module.default });
+`;
+  const worker = new Worker(runner, {
+    eval: true,
+    workerData: pathToFileURL(configPath).href,
+    // Inherited so a config importing `ambit-ts/config` resolves the same way
+    // it would on the main thread.
+    env: process.env,
+  });
+  try {
+    return await new Promise<unknown>((resolve, reject) => {
+      worker.once("message", (message: { readonly value: unknown }) => {
+        resolve(message.value);
+      });
+      worker.once("error", reject);
+      worker.once("exit", (code) => {
+        if (code !== 0) reject(new Error(`config loader exited with code ${code}`));
+      });
+    });
+  } finally {
+    await worker.terminate();
+  }
 }
 
 const TOP_LEVEL_KEYS = ["effects", "contracts", "strict"] as const;

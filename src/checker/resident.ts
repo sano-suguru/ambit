@@ -37,7 +37,7 @@ import type {
   TsBackend,
 } from "../core/index.ts";
 import { legacyTsBackend } from "./backend/legacy-ts.ts";
-import { loadConfig, type ResolvedConfig, resolveConfig } from "./config.ts";
+import { configDependencies, loadConfig, type ResolvedConfig, resolveConfig } from "./config.ts";
 import { type PropagatedFunction, propagate } from "./propagate.ts";
 import { type AnalysisResult, buildReport } from "./report.ts";
 import { summarizeExtractedFiles } from "./summarize.ts";
@@ -105,7 +105,18 @@ export interface ProjectFingerprint {
   readonly tsconfigPath: string | undefined;
   /** The tsconfig's own text. See {@link undecidable} for what it deliberately cannot cover. */
   readonly tsconfigHash: string;
-  /** `ambit.config.ts`'s source text, or the hash of `""` where there is none. */
+  /**
+   * `ambit.config.ts` **and every file it imports**, transitively — not the
+   * config file's text alone.
+   *
+   * A config is a module, so its value is a function of its whole dependency
+   * closure. Hashing the config file by itself reports an edit to a helper it
+   * imports as "nothing changed", which is the one direction §6.2 forbids this
+   * fingerprint from being wrong in. Only relative specifiers are followed: a
+   * bare one names a package, and a change there is a resolution change, which
+   * {@link resolutionHash} and §6.2's own table already answer with a whole
+   * rebuild.
+   */
   readonly configHash: string;
   /** `package.json` and the lockfile beside it — the resolution inputs readable as text. */
   readonly resolutionHash: string;
@@ -186,9 +197,22 @@ export function computeFingerprint(rootDir: string, engine: TsBackend): ProjectF
     },
     true,
   );
-  const configText = configPath === undefined ? "" : readOrUndefined(configPath);
-  if (configPath !== undefined && configText === undefined) {
-    undecidable.push(`cannot read ${configPath}`);
+  // The config's whole dependency closure, not its own text: see `configHash`.
+  // Anything the closure walk could not decide — a specifier resolving to no
+  // file, a dynamic import — is carried straight through to `undecidable`,
+  // because an incomplete closure makes an unchanged hash meaningless.
+  const configParts: string[] = [];
+  if (configPath !== undefined) {
+    const dependencies = configDependencies(configPath);
+    undecidable.push(...dependencies.undecidable);
+    for (const file of dependencies.files) {
+      const text = readOrUndefined(file);
+      if (text === undefined) {
+        undecidable.push(`cannot read ${file}`);
+        continue;
+      }
+      configParts.push(file, text);
+    }
   }
 
   const packageJsonPath = findUpward(absoluteRoot, (dir) => {
@@ -210,7 +234,7 @@ export function computeFingerprint(rootDir: string, engine: TsBackend): ProjectF
     engineVersion: engine.version,
     tsconfigPath,
     tsconfigHash: hash(tsconfigText ?? ""),
-    configHash: hash(configText ?? ""),
+    configHash: hash(configParts.join("\n\u0000\n")),
     resolutionHash: hash(resolutionParts.join("\n \n")),
     undecidable,
   };
@@ -459,7 +483,7 @@ export class ResidentSession {
    * session that could not analyze the tree must not exist reporting no
    * violations (§3.4).
    *
-   * @effects fs_read
+   * @effects fs_read, process
    */
   static async open(
     rootDir: string,
@@ -505,9 +529,10 @@ export class ResidentSession {
    *
    * `state_write` is the commit itself — the assignment to the session's own
    * fields, which is the whole reason this object exists and is exactly the
-   * authority a resident path holds that a one-shot run does not.
+   * authority a resident path holds that a one-shot run does not. `process` is
+   * `loadConfig`'s, as on every other entry point here.
    *
-   * @effects fs_read, state_write
+   * @effects fs_read, state_write, process
    */
   async update(changes: readonly FileChange[] = []): Promise<UpdateResult> {
     if (this.#closed) throw new Error("resident session is closed");
@@ -596,7 +621,7 @@ export class ResidentSession {
   }
 }
 
-/** @effects fs_read */
+/** @effects fs_read, process */
 export async function openResidentSession(
   rootDir: string,
   options: ResidentSessionOptions = {},
@@ -627,7 +652,10 @@ interface GenerationInput {
  * §6.2's lifecycle for one generation, in its phase order. Every value it
  * produces is a local; the caller is what commits.
  *
- * @effects fs_read
+ * `process` is `loadConfig`'s — see `analyze`'s contract for why a config that
+ * imports another module is evaluated in a thread of its own.
+ *
+ * @effects fs_read, process
  */
 async function runGeneration(input: GenerationInput): Promise<Generation> {
   const { rootDir, backend, strict, projectSession } = input;

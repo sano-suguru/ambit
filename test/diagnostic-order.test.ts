@@ -66,12 +66,17 @@ describe("diagnostic order does not depend on file discovery order", () => {
   it("orders by file, then line, then column, then diagnostic id", async () => {
     const { diagnostics } = await analyze(FIXTURE);
     const keys = diagnostics.map((d) => [d.location.file, d.location.line, d.location.col, d.id]);
+    // Code-point comparison, the same comparator `sortDiagnostics` uses. A
+    // `localeCompare` here would agree on ASCII and quietly stop testing the
+    // contract the implementation actually states — which is precisely the
+    // contract that has to hold on a machine with a different locale.
+    const byCodePoint = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
     const sorted = [...keys].sort(
       (a, b) =>
-        String(a[0]).localeCompare(String(b[0]), "en") ||
+        byCodePoint(String(a[0]), String(b[0])) ||
         Number(a[1]) - Number(b[1]) ||
         Number(a[2]) - Number(b[2]) ||
-        String(a[3]).localeCompare(String(b[3]), "en"),
+        byCodePoint(String(a[3]), String(b[3])),
     );
     expect(keys).toEqual(sorted);
   });

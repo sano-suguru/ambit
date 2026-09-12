@@ -223,10 +223,14 @@ Discarded with every generation:
   and subtract that from the config's exact keys, which needs `contractFor` to
   report which key it matched (correction 3). While every update is a full
   rebuild, `unmatchedExactKeys()` is read after a whole run and is correct.
-- **Node's ESM module cache, for the config file.** `loadConfig` imports
-  `ambit.config.ts`, and `import()` caches by URL for the life of the process,
-  so an edited config would come back as its previous version. The specifier
-  carries the file's content hash (correction 7).
+- **Node's ESM module cache, for the config and everything it imports.**
+  `loadConfig` imports `ambit.config.ts`, and `import()` caches by URL for the
+  life of the process, so an edited config would come back as its previous
+  version. A config that imports nothing is re-imported under a query carrying
+  its own content hash; one that imports anything is evaluated in a worker
+  thread, whose module registry is its own — a content query on the config
+  alone re-evaluates the config out of cached dependencies. `configHash` covers
+  the same closure (correction 7).
 
 ## Two reverse graphs, never merged
 
@@ -533,15 +537,49 @@ changed, so a reader of an earlier draft is not left with a stale picture.
    reporting 0 — absent means "not separable by this backend", 0 would mean
    "free", and §3.4's distinction between the two is the whole point.
 
-7. **`loadConfig` had to stop trusting Node's ESM module cache.** `import()`
-   caches by URL for the life of the process, so a second `loadConfig` on an
-   edited `ambit.config.ts` returned the *first* version's exports. One-shot
-   `ambit check` never noticed; a resident session is exactly the process that
-   loads the config again after it changed, and §6.2's table requires that
-   change to re-derive every contract. The specifier now carries the file's own
-   content hash as a query, so an edited config is re-imported and an unchanged
-   one is not. This was a live defect, not a design choice — a resident update
-   would have re-derived every contract from stale data and reported success.
+7. **`loadConfig` had to stop trusting Node's ESM module cache — twice.**
+   `import()` caches by URL for the life of the process, so a second
+   `loadConfig` on an edited `ambit.config.ts` returned the *first* version's
+   exports. One-shot `ambit check` never noticed; a resident session is exactly
+   the process that loads the config again after it changed, and §6.2's table
+   requires that change to re-derive every contract.
+
+   The first fix put the config's own content hash in the specifier's query.
+   That is correct for a config whose value is a function of its own text, and
+   **wrong for one that imports anything**: the config is re-evaluated, but its
+   `import "./contracts.ts"` resolves to the same URL as last time, so Node
+   hands it the cached module and the config is rebuilt out of stale parts. The
+   query cannot be pushed down either — the specifier is written in the
+   config's source, not chosen by the loader. Reproduced before it was fixed.
+
+   Two consequences, and they are separable:
+
+   - **The value.** A config that imports anything is now evaluated in a worker
+     thread, which has a module registry of its own, so its whole graph is
+     fresh. A config that imports nothing keeps the content-query path and pays
+     nothing. The cost is one worker start, and it buys the only behaviour §6.2
+     accepts. `AmbitConfig` is plain data, so it crosses the thread boundary by
+     structured clone.
+   - **The fingerprint.** `configHash` now covers the config *and the
+     transitive closure of its relative imports*, not the config's text alone.
+     A bare specifier is not followed: it names a package, and a change there is
+     a resolution change, which `resolutionHash` and §6.2's table already answer
+     with a whole rebuild. Anything the closure walk cannot decide — a specifier
+     resolving to no file, a dynamic import — goes into `undecidable`, because
+     an incomplete closure makes an unchanged hash meaningless.
+
+   **This also changed what the equivalence oracle proves.** Both paths call the
+   same `loadConfig` in the same process, so a stale config made the resident
+   session and the in-process cold run agree byte for byte on the same wrong
+   answer — a comparison certifying a defect rather than catching it. The config
+   rows are therefore also compared against a cold run in a **separate
+   process** (`test/support/cold-oracle.ts`), which shares no module registry
+   with the session. Both new tests were confirmed to fail without the fix.
+
+   One honest consequence is recorded rather than hidden: starting a thread is
+   authority, so `analyze`, `openResidentSession` and the update path declare
+   `process` where they declared only `fs_read`. Ambit reported the increase
+   against its own source, which is what it is for.
 
 8. **The report phase is one function shared by both paths.**
    `src/checker/report.ts` composes the diagnostics, the authority records and
