@@ -136,7 +136,16 @@ describe("a shadow backend that reports less is high-risk", () => {
     const found = report.divergences.find((d) => d.category === "authority");
     expect(found?.direction).toBe("shadow-less-authority");
     expect(found?.risk).toBe("high");
-    expect(report.highRiskCount).toBe(1);
+    // Twice, and that is the point: the same loss is visible as a propagated
+    // effect and as authority, and direction is now read off both dimensions'
+    // own values rather than only off `diffAuthority`. A rendered-string
+    // comparison called the propagated-effect half a plain `value-mismatch`
+    // at normal risk, which is the shape a real regression would have hidden
+    // in.
+    const propagated = report.divergences.find((d) => d.category === "propagated-effect");
+    expect(propagated?.direction).toBe("shadow-less-authority");
+    expect(propagated?.risk).toBe("high");
+    expect(report.highRiskCount).toBe(2);
     expect(report.authorityDiff.decreases).toBe(1);
   });
 
@@ -196,19 +205,38 @@ describe("divergence shapes are reported with their own category", () => {
     expect(report.parity.functions.disagreed).toBe(1);
   });
 
-  it("reports a call the shadow backend could not resolve, and classifies the known gap", () => {
+  it("reports a call the shadow backend could not resolve, and classifies the gap it declared", () => {
+    const call = { owner: "a.ts#f" as SymbolId, location: "a.ts:3:3-3:9", ordinal: 0 };
+    const report = compareFacts({
+      root: "t",
+      authority: { ...EMPTY, calls: [{ ...call, resolvedCallee: "a.ts#g" as SymbolId }] },
+      shadow: { ...EMPTY, calls: [{ ...call, unresolvedReason: "unresolved-symbol" }] },
+      notPorted: ["resolution:literal-receiver"],
+      // What the real pipeline passes: the code the backend reported at the
+      // moment it declined. A shape the port has not taken on must not read as
+      // a compiler disagreement, or the remaining divergences stop being worth
+      // reading — but the claim has to come from the backend, not from the
+      // rendered pair resembling a rule.
+      shadowDeclined: new Map([[call.location, "resolution:literal-receiver"]]),
+    });
+    const found = report.divergences.find((d) => d.category === "callee-resolution");
+    expect(found?.authorityValue).toBe("resolved=a.ts#g");
+    expect(found?.shadowValue).toBe("unresolvedReason=unresolved-symbol");
+    expect(found?.classification).toBe("not-yet-ported");
+    expect(found?.note).toContain("resolution:literal-receiver");
+  });
+
+  it("leaves the same pair unclassified when the backend declared nothing", () => {
     const call = { owner: "a.ts#f" as SymbolId, location: "a.ts:3:3-3:9", ordinal: 0 };
     const report = compare(
       { calls: [{ ...call, resolvedCallee: "a.ts#g" as SymbolId }] },
       { calls: [{ ...call, unresolvedReason: "unresolved-symbol" }] },
     );
     const found = report.divergences.find((d) => d.category === "callee-resolution");
-    expect(found?.authorityValue).toBe("resolved=a.ts#g");
-    expect(found?.shadowValue).toBe("unresolvedReason=unresolved-symbol");
-    // A shape the port has not taken on must not read as a compiler
-    // disagreement, or the remaining divergences stop being worth reading.
-    expect(found?.classification).toBe("not-yet-ported");
-    expect(found?.note).toBeTruthy();
+    expect(found?.classification).toBe("unclassified");
+    // Unexplained, and still high-risk: classification and risk are decided
+    // separately and from different inputs.
+    expect(found?.risk).toBe("high");
   });
 
   it("reports a missing call-graph edge", () => {
@@ -254,5 +282,75 @@ describe("the comparison is deterministic", () => {
       { callEdges: [], authority: [record("a.ts#f", [], false), record("b.ts#g", [], false)] },
     );
     expect(JSON.stringify(again)).toBe(JSON.stringify(report));
+  });
+});
+
+describe("classification reads structured codes, and never lowers risk", () => {
+  const call = (
+    location: string,
+    fields: Partial<{ kind: string; effects: string[]; reason: string; operation: string }>,
+  ) => ({
+    owner: "a.ts#f" as SymbolId,
+    location,
+    ordinal: 0,
+    kind: (fields.kind ?? "resolved") as "resolved" | "stub" | "unresolved",
+    effects: fields.effects ?? [],
+    capabilities: [],
+    ...(fields.reason ? { reason: fields.reason } : {}),
+    ...(fields.operation ? { operation: fields.operation } : {}),
+  });
+
+  it("calls a lost stub match shadow-less-authority, with no rule to help it", () => {
+    // The `ky.default` shape: the adopted backend names the receiver, matches
+    // a stub and reports `network`; the shadow backend names it wrongly and
+    // reports nothing. Direction has to come from the values — there is no
+    // classification that could produce it, and there must never be one that
+    // could soften it.
+    const report = compare(
+      { summaryCalls: [call("a.ts:1:1-1:9", { kind: "stub", effects: ["network"] })] },
+      {
+        summaryCalls: [call("a.ts:1:1-1:9", { kind: "unresolved", reason: "ambient-declaration" })],
+      },
+    );
+    const found = report.divergences.find((d) => d.category === "direct-effect");
+    expect(found?.direction).toBe("shadow-less-authority");
+    expect(found?.risk).toBe("high");
+    expect(report.highRiskCount).toBeGreaterThan(0);
+  });
+
+  it("classifies the site a code was reported at, and only that site", () => {
+    // Two call sites in one function; the backend declined one of them. The
+    // symbol index exists for the propagated dimensions, which have no
+    // location — it must not reach a *different* call site in the same
+    // function, or a structured classifier repeats the substring one's failure.
+    const declined = "a.ts:1:1-1:9";
+    const other = "a.ts:9:1-9:9";
+    const report = compareFacts({
+      root: "t",
+      authority: {
+        ...EMPTY,
+        summaryCalls: [
+          call(declined, { kind: "resolved" }),
+          call(other, { kind: "stub", effects: ["network"] }),
+        ],
+      },
+      shadow: {
+        ...EMPTY,
+        summaryCalls: [
+          call(declined, { kind: "unresolved", reason: "unresolved-symbol" }),
+          call(other, { kind: "unresolved", reason: "external-module" }),
+        ],
+      },
+      notPorted: ["resolution:literal-receiver"],
+      shadowDeclined: new Map([[declined, "resolution:literal-receiver"]]),
+    });
+    const at = (location: string) =>
+      report.divergences.find((d) => d.category === "direct-effect" && d.location === location);
+    expect(at(declined)?.classification).toBe("not-yet-ported");
+    expect(at(declined)?.note).toContain("resolution:literal-receiver");
+    expect(at(other)?.classification).toBe("unclassified");
+    // Classifying one of them changed neither's risk.
+    expect(at(declined)?.risk).toBe("high");
+    expect(at(other)?.risk).toBe("high");
   });
 });

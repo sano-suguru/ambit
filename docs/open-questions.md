@@ -227,6 +227,35 @@ exit: when it fires, the question is decided, the answer goes in the
   carry a second backend as a product — meaningful only once §3.5's conditions
   are met.
   *Trigger:* an adopter whose tsconfig `ambit check` refuses to start on.
+- **`any-typed` on an installed package's receiver, where TypeScript 7 resolves
+  it.** With `drizzle-orm`'s dependencies installed, the adopted backend reports
+  `reason=any-typed` at 105 call sites where the TypeScript 7 shadow backend
+  resolves the declared package type — including four `mysql2` sites where the
+  shadow side matches a stub and reports `db_read, db_write` and the adopted
+  side reports nothing
+  (`docs/measurements/2026-09-12-ts7-shadow-hardening.md`, the `--with-deps`
+  A/B). Reproduce with `node scripts/shadow-corpus.ts drizzle-orm --with-deps`.
+  Undecided, and three readings are open: a module-resolution difference under
+  the corpus tsconfig (`moduleResolution: Bundler`, `types: []`, packages with
+  an `exports` map), a checker difference between 6.0.3 and 7.0.2, or an
+  artifact of installing only the packages the subtree imports. Which one it is
+  decides whether this is a defect in the product backend — losing `db_read` on
+  real ORM code is the failure Ambit exists to prevent — or a property of the
+  measurement. It must be settled before any of the corpus divergence counts
+  are quoted.
+
+- **The adopted backend truncates a JSDoc `@see` URL's scheme.** On `hono`,
+  `@see https://developers.cloudflare.com/...` is extracted as
+  `see://developers.cloudflare.com/...` by `typescript-legacy@6.0.3` and
+  correctly by the TypeScript 7 shadow backend — 16 `function` divergences
+  across `hono` and `trpc-server`
+  (`docs/measurements/2026-09-12-ts7-shadow-hardening.md`, defect 5). It reaches
+  no contract tag and no diagnostic, so no verdict changes today. What is
+  undecided is whether the raw text of a non-contract tag is something Ambit
+  promises to carry faithfully at all, or only the five tags §9.2 names — the
+  answer decides whether this is a bug in the adopted backend or a property of a
+  field nobody reads.
+
 - **The rule for tracking the analysis engine's version.** The version is "the
   latest stable release of the JS-implementation line that leaves the counts of
   `pnpm test` / `tsc --noEmit` / `biome ci` / `check src` and `check

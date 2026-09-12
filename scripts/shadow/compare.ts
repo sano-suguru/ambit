@@ -66,6 +66,38 @@ export type DivergenceClassification =
   | "ts7-suspect"
   | "unclassified";
 
+/**
+ * What a compared value asserts, reduced to two sets so that "the shadow
+ * backend reported less" can be decided from the values themselves.
+ *
+ * This is the half of the report that must never depend on
+ * {@link KNOWN_DIVERGENCES}. Classification is a triage aid and a heuristic;
+ * direction and risk are the signal, and a rule written to explain a known gap
+ * must not be able to downgrade a genuine regression that happens to look like
+ * it. So the two are computed in that order and from different inputs: risk
+ * from the signals below, classification afterwards and only for the note it
+ * carries.
+ *
+ * - `authority` — every token whose presence means authority was *reported*:
+ *   an effect, a capability, a stub match, a wrapper budget, an error
+ *   diagnostic. Losing one is DESIGN.md §3.4's forbidden direction.
+ * - `unknown` — every token whose presence means the analysis *admitted it did
+ *   not know*: an `unknown` flag, an unresolved reason, an opaque callback.
+ *   Losing one is the same failure wearing a different hat — a site that
+ *   silently stops being `unknown` is a check that passes for the wrong
+ *   reason.
+ */
+export interface Signal {
+  readonly authority: readonly string[];
+  readonly unknown: readonly string[];
+}
+
+/** A rendered value plus, where one can be derived, its {@link Signal}. */
+interface ComparedValue {
+  readonly rendered: string;
+  readonly signal?: Signal;
+}
+
 export interface Divergence {
   readonly category: DivergenceCategory;
   readonly direction: DivergenceDirection;
@@ -101,50 +133,15 @@ export interface KnownDivergence {
 
 export const KNOWN_DIVERGENCES: readonly KnownDivergence[] = [
   {
-    category: "callee-resolution",
-    whenAuthorityIncludes: "resolved=",
-    whenShadowIncludes: "unresolvedReason=",
-    classification: "not-yet-ported",
-    note:
-      "resolution:literal-receiver / resolution:instance-member are not ported (NOT_PORTED): " +
-      "the adopted backend follows a receiver whose value is certainly one object literal or one " +
-      "constructed instance, the shadow backend does not and falls to the reason the callee's own " +
-      "declaration gives",
-  },
-  {
-    category: "callee-resolution",
-    whenAuthorityIncludes: "name=",
-    whenShadowIncludes: "unresolvedReason=",
-    classification: "not-yet-ported",
-    note:
-      "qualified-name:installed-type-receiver / :constructed-receiver / :factory-receiver are not " +
-      "ported (NOT_PORTED): the adopted backend names a receiver by the package type or class it " +
-      "came from, the shadow backend names only a namespace or default import",
-  },
-  {
-    // Both sides call the site unresolved for the same reason; only the
-    // *name* the report carries differs, because the shadow backend could not
-    // produce a receiver-origin qualified name. The effect outcome is
-    // identical — this costs the `--coverage` breakdown a name, not a verdict.
-    category: "direct-effect",
-    whenAuthorityIncludes: "kind=unresolved",
-    whenShadowIncludes: "operation=-",
-    classification: "not-yet-ported",
-    note: "the operation name comes from a receiver-origin qualified name (NOT_PORTED); both sides agree the site is unresolved",
-  },
-  {
-    category: "direct-effect",
-    whenAuthorityIncludes: "kind=stub",
-    whenShadowIncludes: "kind=unresolved",
-    classification: "not-yet-ported",
-    note: "the stub match the adopted backend gets from a receiver-origin qualified name (NOT_PORTED)",
-  },
-  {
+    // The structured code is the first thing `classify` consults, and it
+    // covers the resolution shapes at the sites that carry a location. This
+    // rule only reaches the dimensions that carry a *symbol* instead — a
+    // call-graph edge the adopted backend gets from a receiver the shadow
+    // backend does not follow.
     category: "call-edge",
     whenAuthorityIncludes: "present",
-    whenShadowIncludes: "",
     classification: "not-yet-ported",
-    note: "an edge the adopted backend gets from resolution:literal-receiver / resolution:instance-member",
+    note: "an edge the adopted backend gets from resolution:literal-receiver / resolution:instance-member (NOT_PORTED)",
   },
 ];
 
@@ -226,11 +223,76 @@ function parity(
   };
 }
 
+/**
+ * Codes the shadow backend itself reported, keyed by location — set once per
+ * comparison so {@link classify} can read them. A module-level binding rather
+ * than a parameter threaded through nine call sites, because `compareFacts` is
+ * one synchronous pass and the alternative is nine signatures carrying a field
+ * eight of them ignore.
+ */
+let declinedReasons: ReadonlyMap<string, string> = new Map();
+
+/**
+ * The same codes reached by owning symbol.
+ *
+ * A divergence in a propagated dimension — authority, capabilities, the
+ * propagated effect set — has a symbol and no location, because it is the
+ * *function's* result rather than one call's. The gap that produced it is
+ * still a call site inside that function, so the codes are indexed both ways
+ * and the symbol lookup answers the propagated half. Fifteen divergences on
+ * `test/fixtures/backend-smoke` that had to read `unclassified` are exactly
+ * this: one unported call site, seen from four dimensions up.
+ */
+let declinedBySymbol: ReadonlyMap<SymbolId, readonly string[]> = new Map();
+
+function indexDeclinedBySymbol(
+  calls: readonly CallFacts[],
+  byLocation: ReadonlyMap<string, string>,
+): ReadonlyMap<SymbolId, readonly string[]> {
+  const index = new Map<SymbolId, string[]>();
+  for (const call of calls) {
+    const code = byLocation.get(call.location);
+    if (code === undefined) continue;
+    const codes = index.get(call.owner) ?? [];
+    if (!codes.includes(code)) codes.push(code);
+    index.set(call.owner, codes);
+  }
+  return index;
+}
+
 function classify(
   category: DivergenceCategory,
   authorityValue: string | null,
   shadowValue: string | null,
+  location: string | undefined,
+  symbol: SymbolId | undefined,
 ): { classification: DivergenceClassification; note?: string } {
+  // Structured first. A code here was written by the backend at the point it
+  // declined, so it says what the gap *is* rather than what the rendered pair
+  // happens to look like.
+  const code = location === undefined ? undefined : declinedReasons.get(location);
+  if (code !== undefined) {
+    return {
+      classification: "not-yet-ported",
+      note: `the shadow backend reported \`${code}\` at this site (NOT_PORTED)`,
+    };
+  }
+  // Only where there is no location of its own. A call-site divergence has
+  // both a symbol and a location, and consulting the symbol index for one of
+  // those would hand `not-yet-ported` to every call site inside a function
+  // that happens to contain one declined site — which is precisely the failure
+  // the substring classifier had, rebuilt out of structured data. Measured:
+  // eight genuine `shadow-less-authority` disagreements on the corpus
+  // (`mutation=local|Set.add|` against `builtin=Set.add`) read as accounted
+  // for when they are not.
+  const codes =
+    location !== undefined || symbol === undefined ? undefined : declinedBySymbol.get(symbol);
+  if (codes !== undefined && codes.length > 0) {
+    return {
+      classification: "not-yet-ported",
+      note: `propagated from a call site in this function the shadow backend declined: ${codes.join(", ")} (NOT_PORTED)`,
+    };
+  }
   for (const rule of KNOWN_DIVERGENCES) {
     if (rule.category !== category) continue;
     if (
@@ -254,6 +316,8 @@ function divergence(
     input.category,
     input.authorityValue,
     input.shadowValue,
+    input.location,
+    input.symbol,
   );
   const risk =
     input.risk ??
@@ -263,11 +327,34 @@ function divergence(
   return { ...input, risk, classification, ...(note ? { note } : {}) };
 }
 
+/**
+ * Which way a pair of values differs, read off the values and nothing else.
+ *
+ * Losing authority is checked before losing an `unknown`, and both before
+ * either gain, so a pair that both loses and gains reports the unsafe half.
+ * A pair with no signals, or with equal ones, is a `value-mismatch` — a real
+ * difference whose direction this cannot decide, which is not the same as a
+ * safe one and is not reported as one.
+ */
+function directionOf(
+  authority: Signal | undefined,
+  shadow: Signal | undefined,
+): DivergenceDirection {
+  if (!authority || !shadow) return "value-mismatch";
+  const missing = (from: readonly string[], into: readonly string[]): boolean =>
+    from.some((token) => !into.includes(token));
+  if (missing(authority.authority, shadow.authority)) return "shadow-less-authority";
+  if (missing(authority.unknown, shadow.unknown)) return "shadow-less-unknown";
+  if (missing(shadow.authority, authority.authority)) return "shadow-more-authority";
+  if (missing(shadow.unknown, authority.unknown)) return "shadow-more-unknown";
+  return "value-mismatch";
+}
+
 /** Compare two keyed sets of rendered values, one divergence per key that differs. */
 function compareKeyed(
   category: DivergenceCategory,
-  authority: ReadonlyMap<string, string>,
-  shadow: ReadonlyMap<string, string>,
+  authority: ReadonlyMap<string, ComparedValue>,
+  shadow: ReadonlyMap<string, ComparedValue>,
   describe: (key: string) => { symbol?: SymbolId; location?: string },
 ): { readonly divergences: readonly Divergence[]; readonly count: ParityCount } {
   const divergences: Divergence[] = [];
@@ -286,21 +373,21 @@ function compareKeyed(
           direction: "shadow-missing",
           risk: "high",
           ...describe(key),
-          authorityValue,
+          authorityValue: authorityValue.rendered,
           shadowValue: null,
         }),
       );
-    } else if (shadowValue === authorityValue) {
+    } else if (shadowValue.rendered === authorityValue.rendered) {
       agreed++;
     } else {
       disagreed++;
       divergences.push(
         divergence({
           category,
-          direction: "value-mismatch",
+          direction: directionOf(authorityValue.signal, shadowValue.signal),
           ...describe(key),
-          authorityValue,
-          shadowValue,
+          authorityValue: authorityValue.rendered,
+          shadowValue: shadowValue.rendered,
         }),
       );
     }
@@ -314,7 +401,7 @@ function compareKeyed(
         direction: "shadow-extra",
         ...describe(key),
         authorityValue: null,
-        shadowValue,
+        shadowValue: shadowValue.rendered,
       }),
     );
   }
@@ -328,6 +415,86 @@ function callKey(call: CallFacts | SummaryCallFacts): string {
 function describeCallKey(key: string): { symbol?: SymbolId; location?: string } {
   const [symbol, location] = key.split(" ");
   return { symbol: symbol as SymbolId, ...(location ? { location } : {}) };
+}
+
+/**
+ * A call site's signal.
+ *
+ * A resolved callee, a qualified name, a proven-pure builtin and a recorded
+ * mutation are all authority the site reported; an unresolved reason and an
+ * opaque callback are admissions that it did not know. Losing either is the
+ * unsafe direction, which is why both are read off the facts rather than off
+ * the rendered line.
+ */
+function callSignal(call: CallFacts): Signal {
+  const authority: string[] = [];
+  if (call.resolvedCallee) authority.push(`resolved:${call.resolvedCallee}`);
+  if (call.calleeQualifiedName) authority.push(`name:${call.calleeQualifiedName}`);
+  if (call.pureBuiltinName) authority.push(`builtin:${call.pureBuiltinName}`);
+  if (call.inlinedCallee) authority.push("inlined");
+  const unknown: string[] = [];
+  if (call.unresolvedReason) unknown.push(`reason:${call.unresolvedReason}`);
+  if (call.callbackByReference) unknown.push("callbackByReference");
+  // A mutation's parts belong on opposite sides. What was mutated and whether
+  // it escapes is reported authority; `unknownCallback` is the site admitting
+  // that a callable it was handed is opaque (DESIGN.md §4.2 rule 4). Folding
+  // the rendered triple into one token made the conservative side — the one
+  // that adds `unknownCallback` — read as *losing* authority, which inverts
+  // the very direction this is here to get right.
+  if (call.mutation) {
+    const [escaping = "", qualifiedName = "", unknownCallback = ""] = call.mutation.split("|");
+    authority.push(`mutation:${escaping}|${qualifiedName}`);
+    if (unknownCallback) unknown.push(`mutation:${unknownCallback}`);
+  }
+  return { authority, unknown };
+}
+
+/**
+ * A summarized call's signal: every effect and capability it reported, plus
+ * the stub match that produced them, against the `unknown` it admitted.
+ */
+function summaryCallSignal(call: SummaryCallFacts): Signal {
+  const authority = [
+    ...call.effects.map((effect) => `effect:${effect}`),
+    ...call.capabilities.map((capability) => `capability:${capability}`),
+    ...(call.kind === "unresolved" ? [] : [`kind:${call.kind}`]),
+    ...(call.operation ? [`operation:${call.operation}`] : []),
+  ];
+  const unknown = call.kind === "unresolved" ? [`reason:${call.reason ?? "-"}`] : [];
+  return { authority, unknown };
+}
+
+function effectsSignal(record: AuthorityRecord): Signal {
+  return {
+    authority: [...record.effects.observed].map((effect) => `effect:${effect}`),
+    unknown: record.effects.unknown ? ["effects-unknown"] : [],
+  };
+}
+
+function capabilitiesSignal(record: AuthorityRecord): Signal {
+  return {
+    authority: [...record.capabilities.required].map((capability) => `capability:${capability}`),
+    unknown: record.capabilities.unknown ? ["capabilities-unknown"] : [],
+  };
+}
+
+/**
+ * A runtime wrapper's signal. A wrapper's capabilities and its **budget** are
+ * both enforcement: a budget that reads as absent is what silences AMB-E011,
+ * which is how four error diagnostics went missing on
+ * `test/fixtures/wrappers` while the pair still read as an ordinary value
+ * mismatch.
+ */
+function wrapperSignal(rest: readonly string[]): Signal {
+  return {
+    authority: rest.filter((field) => field !== "caps=-" && field !== "budget=-"),
+    unknown: rest.filter((field) => field.startsWith("unmatched=")),
+  };
+}
+
+/** A diagnostic's signal: its severity is the enforcement it carries. */
+function diagnosticSignal(rest: readonly string[]): Signal {
+  return { authority: rest.slice(0, 1), unknown: [] };
 }
 
 function calleeResolutionOf(call: CallFacts): string {
@@ -349,9 +516,54 @@ function unresolvedClassificationOf(call: CallFacts): string {
     .join(" ");
 }
 
-function mapOf<T>(items: readonly T[], key: (item: T) => string, value: (item: T) => string) {
-  const map = new Map<string, string>();
-  for (const item of items) map.set(key(item), value(item));
+/**
+ * `id` and location out of `${id} ${severity} ${location} ${message}` — a
+ * diagnostic's identity. Severity and message are content: if they differ, the
+ * pair is a `value-mismatch` that names the site, not a missing entry.
+ */
+const DIAGNOSTIC_KEY_FIELDS: readonly number[] = [0, 2];
+
+/** Location and wrapper name out of a runtime-wrapper line; capabilities, budget and handler are content. */
+const WRAPPER_KEY_FIELDS: readonly number[] = [0, 1];
+
+/** Split each space-joined line into (identity fields, everything else). */
+function keyedLines(
+  lines: readonly string[],
+  keyFields: readonly number[],
+  signal?: (rest: readonly string[]) => Signal,
+): ReadonlyMap<string, ComparedValue> {
+  const map = new Map<string, ComparedValue>();
+  for (const line of lines) {
+    const fields = line.split(" ");
+    const key = keyFields.map((index) => fields[index] ?? "").join(" ");
+    const rest = fields.filter((_, index) => !keyFields.includes(index));
+    // A duplicate key would silently drop one of the two. Numbering makes the
+    // pair comparable instead, the same way call sites are keyed by ordinal.
+    let unique = key;
+    for (let n = 2; map.has(unique); n++) unique = `${key} #${n}`;
+    map.set(unique, {
+      rendered: rest.join(" "),
+      ...(signal ? { signal: signal(rest) } : {}),
+    });
+  }
+  return map;
+}
+
+/** The identity half of a line key, reported as the divergence's location. */
+function describeLineKey(key: string): { symbol?: SymbolId; location?: string } {
+  return { location: key };
+}
+
+function mapOf<T>(
+  items: readonly T[],
+  key: (item: T) => string,
+  value: (item: T) => string,
+  signal?: (item: T) => Signal,
+): ReadonlyMap<string, ComparedValue> {
+  const map = new Map<string, ComparedValue>();
+  for (const item of items) {
+    map.set(key(item), { rendered: value(item), ...(signal ? { signal: signal(item) } : {}) });
+  }
   return map;
 }
 
@@ -370,6 +582,13 @@ export interface CompareInput {
   readonly authority: ShadowFacts;
   readonly shadow: ShadowFacts;
   readonly notPorted: readonly string[];
+  /**
+   * `location -> NOT_PORTED code`, as the shadow backend reported them. What
+   * makes classification read data instead of parsing rendered text; absent
+   * for a self-check, where both sides are the adopted backend and nothing
+   * declines.
+   */
+  readonly shadowDeclined?: ReadonlyMap<string, string>;
   readonly errors?: readonly {
     readonly backend: string;
     readonly phase: string;
@@ -379,6 +598,8 @@ export interface CompareInput {
 
 export function compareFacts(input: CompareInput): ShadowReport {
   const { authority, shadow } = input;
+  declinedReasons = input.shadowDeclined ?? new Map();
+  declinedBySymbol = indexDeclinedBySymbol(shadow.calls, declinedReasons);
   const divergences: Divergence[] = [];
 
   // --- functions ----------------------------------------------------------
@@ -403,8 +624,8 @@ export function compareFacts(input: CompareInput): ShadowReport {
   // --- callee resolution --------------------------------------------------
   const calleeResolution = compareKeyed(
     "callee-resolution",
-    mapOf(authority.calls, callKey, calleeResolutionOf),
-    mapOf(shadow.calls, callKey, calleeResolutionOf),
+    mapOf(authority.calls, callKey, calleeResolutionOf, callSignal),
+    mapOf(shadow.calls, callKey, calleeResolutionOf, callSignal),
     describeCallKey,
   );
   divergences.push(...calleeResolution.divergences);
@@ -429,8 +650,8 @@ export function compareFacts(input: CompareInput): ShadowReport {
   // --- unresolved / unknown classification --------------------------------
   const unresolvedClassification = compareKeyed(
     "unresolved-classification",
-    mapOf(authority.calls, callKey, unresolvedClassificationOf),
-    mapOf(shadow.calls, callKey, unresolvedClassificationOf),
+    mapOf(authority.calls, callKey, unresolvedClassificationOf, callSignal),
+    mapOf(shadow.calls, callKey, unresolvedClassificationOf, callSignal),
     describeCallKey,
   );
   divergences.push(...unresolvedClassification.divergences);
@@ -443,12 +664,14 @@ export function compareFacts(input: CompareInput): ShadowReport {
       callKey,
       (call) =>
         `kind=${call.kind} effects=[${call.effects.join(",")}] capabilities=[${call.capabilities.join(",")}] reason=${call.reason ?? "-"} operation=${call.operation ?? "-"}`,
+      summaryCallSignal,
     ),
     mapOf(
       shadow.summaryCalls,
       callKey,
       (call) =>
         `kind=${call.kind} effects=[${call.effects.join(",")}] capabilities=[${call.capabilities.join(",")}] reason=${call.reason ?? "-"} operation=${call.operation ?? "-"}`,
+      summaryCallSignal,
     ),
     describeCallKey,
   );
@@ -457,16 +680,21 @@ export function compareFacts(input: CompareInput): ShadowReport {
   // --- propagated effects / capabilities ----------------------------------
   const propagatedEffects = compareKeyed(
     "propagated-effect",
-    mapOf(authority.authority, (record) => record.symbol, authorityEffectsOf),
-    mapOf(shadow.authority, (record) => record.symbol, authorityEffectsOf),
+    mapOf(authority.authority, (record) => record.symbol, authorityEffectsOf, effectsSignal),
+    mapOf(shadow.authority, (record) => record.symbol, authorityEffectsOf, effectsSignal),
     (key) => ({ symbol: key as SymbolId }),
   );
   divergences.push(...propagatedEffects.divergences);
 
   const capabilities = compareKeyed(
     "capability",
-    mapOf(authority.authority, (record) => record.symbol, authorityCapabilitiesOf),
-    mapOf(shadow.authority, (record) => record.symbol, authorityCapabilitiesOf),
+    mapOf(
+      authority.authority,
+      (record) => record.symbol,
+      authorityCapabilitiesOf,
+      capabilitiesSignal,
+    ),
+    mapOf(shadow.authority, (record) => record.symbol, authorityCapabilitiesOf, capabilitiesSignal),
     (key) => ({ symbol: key as SymbolId }),
   );
   divergences.push(...capabilities.divergences);
@@ -521,35 +749,26 @@ export function compareFacts(input: CompareInput): ShadowReport {
   increases = authorityIncreases(diff).length;
 
   // --- diagnostics, wrappers, skipped, uncarried --------------------------
+  // Keyed on identity, valued on content. Keying a diagnostic or a wrapper on
+  // its *whole* rendered line made every difference read as one entry missing
+  // and one extra, with `present` on both sides and no symbol or location to
+  // read — 16 such pairs on `test/fixtures/wrappers` said nothing about what
+  // differed. Splitting the line puts the disagreement in the value, where a
+  // reader can see it, and makes `shadow-missing` mean what it says: the
+  // shadow backend produced no diagnostic there at all.
   const diagnostics = compareKeyed(
     "diagnostic",
-    mapOf(
-      authority.diagnostics,
-      (line) => line,
-      () => "present",
-    ),
-    mapOf(
-      shadow.diagnostics,
-      (line) => line,
-      () => "present",
-    ),
-    () => ({}),
+    keyedLines(authority.diagnostics, DIAGNOSTIC_KEY_FIELDS, diagnosticSignal),
+    keyedLines(shadow.diagnostics, DIAGNOSTIC_KEY_FIELDS, diagnosticSignal),
+    describeLineKey,
   );
   divergences.push(...diagnostics.divergences);
 
   const runtimeWrappers = compareKeyed(
     "runtime-wrapper",
-    mapOf(
-      authority.runtimeWrappers,
-      (line) => line,
-      () => "present",
-    ),
-    mapOf(
-      shadow.runtimeWrappers,
-      (line) => line,
-      () => "present",
-    ),
-    () => ({}),
+    keyedLines(authority.runtimeWrappers, WRAPPER_KEY_FIELDS, wrapperSignal),
+    keyedLines(shadow.runtimeWrappers, WRAPPER_KEY_FIELDS, wrapperSignal),
+    describeLineKey,
   );
   divergences.push(...runtimeWrappers.divergences);
 

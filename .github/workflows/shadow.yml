@@ -1,0 +1,49 @@
+# The shadow backend's own regression gate.
+#
+# Separate from `ci.yml`, and opt-in, because the compiler it needs is
+# deliberately not a dependency: `typescript@7` declares `bin: { tsc }` and
+# would hijack `pnpm exec tsc` (scripts/m05-probe/native-compiler.ts records
+# the observation). So this job installs it into `.m05-native/` first and
+# nothing in the normal build can reach it.
+#
+# It changes no product outcome. DESIGN.md §3.5 and ADR-0001 adopted
+# `typescript-legacy`; this job compares a shadow port against it and fails
+# only when the *shadow* side regressed. A red run here is never a reason to
+# doubt `ambit check`.
+name: shadow
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly. The gate protects a measurement instrument, not a release.
+    - cron: "0 3 * * 1"
+
+jobs:
+  shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: install the native compiler outside the dependency tree
+        run: node scripts/m05-native-install.ts
+      - name: the adopted backend must still diverge from itself nowhere
+        run: node scripts/shadow-analysis.ts src --self-check
+      - name: compare against the recorded baseline
+        run: node scripts/shadow-check.ts
+      - name: record the reports for reading
+        if: always()
+        run: |
+          for root in src test/fixtures/backend-conformance test/fixtures/backend-smoke; do
+            node scripts/shadow-analysis.ts "$root" --json ".shadow/$(echo "$root" | tr / -).json"
+          done
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: shadow-reports
+          path: .shadow/
