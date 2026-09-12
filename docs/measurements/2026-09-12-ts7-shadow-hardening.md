@@ -506,10 +506,12 @@ made within-engine instead.
    corpus. See `docs/measurements/2026-09-12-any-typed-divergence.md`.
 2. **Re-measure the corpus with `--with-deps` before trusting any of its
    counts**, including the 204 below. On `drizzle-orm` the dependency-resolved
-   arm is now *below* the hermetic one (31 against 43), which is the direction
-   it should move in; the other four have not been measured with their
-   dependencies present, and each one's generated tsconfig is part of the
-   measurement.
+   arm is now *below* the hermetic one (31 against 43); the other four have not
+   been measured with their dependencies present, and each one's generated
+   tsconfig is part of the measurement. What to watch for is a divergence count
+   that *multiplies* when the types arrive — that is a broken corpus. A count
+   that merely moves either way is not, since types can turn a site both
+   backends called `unknown` into one they answer differently.
 3. **Root-cause the 204 `unresolved-classification/shadow-more-unknown`** across
    the corpus. Safe direction, largest class, unexplained — and until it is
    explained, "the shadow side is more conservative" is a description rather

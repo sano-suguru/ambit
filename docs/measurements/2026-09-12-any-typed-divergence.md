@@ -35,10 +35,17 @@ Two details of that table are worth reading rather than skipping.
   same count. `node scripts/bench-corpus.ts` is byte-identical before and after
   for the same reason, so no number in `docs/status.md` moves.
 - **With dependencies the count is now *below* the hermetic one** — 31 against
-  43. Supplying the types resolves twelve divergences rather than creating
-  them, which is the direction a parity measurement should move in when the
-  project is given what it actually compiles against. The previous reading, in
-  which dependencies quadrupled the divergence count, was the artifact.
+  43. Supplying the types resolved twelve divergences rather than creating
+  them.
+
+  That is a fact about this target, **not a law**. Adding types can perfectly
+  well *create* a divergence: a site where both backends said `unknown` becomes
+  a site where one says `A` and the other says `B`, and that is a real
+  disagreement the hermetic arm was unable to see. So "more information, fewer
+  divergences" is not the rule to carry forward. The usable rule is the weaker
+  and more specific one: **when supplying information multiplies the divergence
+  count, suspect the corpus before suspecting either compiler.** 43 → 167 was
+  that signal; 43 → 31 is merely a healthy outcome on one repository.
 
 ## The first branch point
 
@@ -130,14 +137,15 @@ Two guards follow from that, and both are in this change:
 - `corpus.json`'s `drizzle-orm` entry carries the reason `baseUrl` is absent, so
   a future edit that re-adds it has to argue with a measured number rather than
   with a plausible-looking option.
-- A gap between `--with-deps` and the hermetic run is a signal about the corpus
-  before it is a signal about either compiler, and that is the order to read
-  them in. The gap has not closed — 31 against 43 — and it should not: the
-  hermetic arm is missing types and some of its divergences are that, not
-  semantics. What changed is its *sign*. Dependencies now resolve divergences
-  (43 → 31) where before they quadrupled them (43 → 167), and a run where
-  supplying more information makes the two backends disagree more is the shape
-  to distrust.
+- A *large* gap between `--with-deps` and the hermetic run is a signal about the
+  corpus before it is a signal about either compiler, and that is the order to
+  read them in. The gap has not closed — 31 against 43 — and it should not: the
+  hermetic arm is missing types, and some of its divergences are that rather
+  than semantics. What is worth distrusting is not a gap but a *multiplication*:
+  43 → 167 said the measurement was broken, where 43 → 31 says only that this
+  repository behaves sensibly when given its types. A small increase would say
+  nothing either way, because supplying types can legitimately turn a site both
+  backends called `unknown` into one they answer differently.
 
 ## What is left
 
