@@ -4,17 +4,22 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { afterEach, describe, expect, it } from "vitest";
+import { MUTATIONS } from "../scripts/m05-probe/mutations.ts";
 import {
   type AnalysisResult,
   type ConfigDependencies,
   computeFingerprint,
   configDependencies,
   fingerprintPermitsReuse,
+  type ImpactReport,
   openResidentSession,
+  type PropagatedFunction,
+  propagate,
   type ResidentSession,
   type ResidentStore,
 } from "../src/checker/index.ts";
 import { analyze } from "../src/cli/analyze.ts";
+import type { SymbolId } from "../src/core/index.ts";
 import { renderAnalysis } from "./support/render-analysis.ts";
 
 /**
@@ -1047,12 +1052,571 @@ describe("resident session: nothing snapshot-bound is retained", () => {
     expect(result.timings.summarize).toBeGreaterThanOrEqual(0);
     expect(result.timings.propagate).toBeGreaterThanOrEqual(0);
     expect(result.timings.report).toBeGreaterThanOrEqual(0);
-    expect(result.timings.impact).toBe(0);
+    // Phase 3 measures the changed-summary comparison and the reverse-call
+    // closure, so this is a real number. It is not asserted `> 0`: the phase
+    // is genuinely fast enough to round to zero on a small tree, and a test
+    // demanding a nonzero duration would be a test of the clock.
+    expect(result.timings.impact).toBeGreaterThanOrEqual(0);
+    expect(Number.isFinite(result.timings.impact)).toBe(true);
     // The full-rebuild adapter cannot separate project construction from
     // extraction, and says so by leaving the field absent rather than by
     // reporting a zero that would read as free.
     expect(result.timings.projectUpdate).toBeUndefined();
     expect(result.full).toBe(true);
+    // Extraction is still whole-project in phase 3; only the fixed point is
+    // scoped. `full` therefore stays true, and `impact.scoped` is the separate
+    // fact that the fixed point was not the whole one.
+    expect(result.impact.scoped).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * The propagated state as bytes, in iteration order.
+ *
+ * Phase 3's own law, the one the equivalence law does not reach: the scoped
+ * fixed point's whole state must equal `propagate`'s over the same summaries —
+ * every symbol, every witness, every per-body split, not only the parts a
+ * report happens to print. `expect(a).toEqual(b)` would not see a `Map` whose
+ * entries moved, so this renders them.
+ */
+function renderState(state: ReadonlyMap<SymbolId, PropagatedFunction>): string {
+  return [...state]
+    .map(([id, propagated]) =>
+      JSON.stringify({
+        id,
+        summary: propagated.summary.id,
+        observed: [...propagated.observed.effects],
+        observedUnknown: propagated.observed.unknown,
+        effectWitness: [...propagated.effectWitness],
+        unknownWitness: propagated.unknownWitness ?? null,
+        required: propagated.required.capabilities,
+        requiredUnknown: propagated.required.unknown,
+        capabilityWitness: [...propagated.capabilityWitness],
+        capabilityUnknownWitness: propagated.capabilityUnknownWitness ?? null,
+        bodies:
+          propagated.bodies?.map((body) => ({
+            observed: [...body.observed.effects],
+            observedUnknown: body.observed.unknown,
+            required: body.required.capabilities,
+            requiredUnknown: body.required.unknown,
+          })) ?? null,
+      }),
+    )
+    .join("\n");
+}
+
+/**
+ * One generation, with every phase-3 obligation asserted:
+ *
+ * 1. the resident result equals a cold `analyze()` byte for byte (§6.2);
+ * 2. the **scoped** state equals `propagate` over the same summaries, symbol
+ *    for symbol — the oracle `propagateScoped` is written against;
+ * 3. the fixed point actually ran scoped, so a row that silently fell back to
+ *    the whole fixed point cannot pass as evidence of phase 3.
+ *
+ * The summaries handed to the oracle are read off the committed state rather
+ * than re-derived, so the oracle sees exactly the summaries this generation
+ * propagated, in the order it propagated them.
+ */
+async function updateAndProveScoped(
+  session: ResidentSession,
+  dir: string,
+): Promise<{ readonly resident: AnalysisResult; readonly impact: ImpactReport }> {
+  const result = await session.update();
+  if (!result.ok) throw result.error;
+  const cold = await analyze(dir);
+  expect(render(result.analysis)).toBe(render(cold));
+  expect(render(session.current())).toBe(render(cold));
+
+  const store = session.committed().store;
+  const summaries = [...store.state.values()].map((propagated) => propagated.summary);
+  expect(renderState(store.state)).toBe(renderState(propagate(summaries)));
+
+  expect(result.impact.scoped).toBe(true);
+  expect(result.impact.totalFunctions).toBe(summaries.length);
+  // `I ⊇ S`, always. A changed symbol outside the impact set is a symbol whose
+  // committed value would be reused after its inputs moved.
+  for (const id of result.impact.changed) expect(result.impact.impacted).toContain(id);
+  return { resident: result.analysis, impact: result.impact };
+}
+
+describe("resident session: the scoped fixed point (phase 3)", () => {
+  it("puts nothing in S for an edit no summary records, and still equals cold", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+    const original = render(session.current());
+
+    // Same line count, same column count, same calls — the only thing that
+    // moved is a literal inside an expression statement nothing summarizes.
+    edit(dir, "callee.ts", "  return 0;", "  return 1;");
+    const { impact, resident } = await updateAndProveScoped(session, dir);
+
+    expect(impact.changed).toEqual([]);
+    expect(impact.impacted).toEqual([]);
+    expect(render(resident)).toBe(original);
+    // And the point of the row: the whole tree was reused, not recomputed.
+    expect(impact.totalFunctions).toBeGreaterThan(5);
+  });
+
+  it("scopes a direct effect added and removed to the callee and its callers", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+    const before = session.current();
+    expect(effectsOf(before, "callee.ts#fetchRate")).toEqual(["network"]);
+
+    edit(dir, "callee.ts", '  fetch("https://example.com/rate");\n', "");
+    const added = await updateAndProveScoped(session, dir);
+    expect(effectsOf(added.resident, "callee.ts#fetchRate")).toEqual([]);
+    // `S` is the one function whose body changed — it is the only function in
+    // that file, so nothing else moved a line. `I` adds its callers: the
+    // direct importer and the two that reach it through `index.ts`.
+    expect(added.impact.changed).toEqual(["callee.ts#fetchRate"]);
+    expect(added.impact.impacted.toSorted()).toEqual([
+      "barrel-import.ts#pureCallsBarrelImportedNetwork",
+      "callee.ts#fetchRate",
+      "direct-import.ts#pureCallsImportedNetwork",
+    ]);
+    // The evidence that phase 3 is doing anything at all.
+    expect(added.impact.impacted.length).toBeLessThan(added.impact.totalFunctions);
+
+    edit(
+      dir,
+      "callee.ts",
+      "export function fetchRate(): number {\n",
+      'export function fetchRate(): number {\n  fetch("https://example.com/rate");\n',
+    );
+    const removed = await updateAndProveScoped(session, dir);
+    // The non-monotonic direction, back up. A seed-and-union fixed point would
+    // have kept the lowered value in `added` and be caught here.
+    expect(effectsOf(removed.resident, "callee.ts#fetchRate")).toEqual(["network"]);
+  });
+
+  it("re-resolves a caller whose callee changed identity", async () => {
+    const dir = copyFixture("cross-module");
+    write(
+      dir,
+      "other-rate.ts",
+      "/** @effects fs_read */\nexport function fetchRate(): number {\n  return 1;\n}\n",
+    );
+    const session = await open(dir);
+
+    edit(dir, "direct-import.ts", './callee.ts"', './other-rate.ts"');
+    const { resident, impact } = await updateAndProveScoped(session, dir);
+
+    expect(effectsOf(resident, "direct-import.ts#pureCallsImportedNetwork")).toEqual(["fs_read"]);
+    // The caller's `calls[0].callee` moved, so the caller itself is in `S` —
+    // the callees did not change at all.
+    expect(impact.changed).toEqual(["direct-import.ts#pureCallsImportedNetwork"]);
+  });
+
+  it("handles a call edge added and then removed", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+
+    edit(
+      dir,
+      "direct-import.ts",
+      "  return fetchRate();",
+      "  void fetchRate();\n  return fetchRate();",
+    );
+    const added = await updateAndProveScoped(session, dir);
+    expect(added.impact.changed).toEqual(["direct-import.ts#pureCallsImportedNetwork"]);
+
+    edit(dir, "direct-import.ts", "  void fetchRate();\n", "");
+    const removed = await updateAndProveScoped(session, dir);
+    expect(effectsOf(removed.resident, "direct-import.ts#pureCallsImportedNetwork")).toEqual([
+      "network",
+    ]);
+  });
+
+  it("invalidates the callers of a deleted callee through the old reverse graph", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+    const before = session.current();
+    expect(effectsOf(before, "direct-import.ts#pureCallsImportedNetwork")).toEqual(["network"]);
+
+    // The deleted symbol is only in the *old* graph, and its callers are only
+    // reachable from there. They must fall to `unknown`, not keep the value
+    // they inherited from a function that no longer exists.
+    remove(dir, "callee.ts");
+    edit(dir, "index.ts", 'export { fetchRate } from "./callee.ts";\n', "");
+    const { resident, impact } = await updateAndProveScoped(session, dir);
+
+    expect(symbols(resident)).not.toContain("callee.ts#fetchRate");
+    expect(effectsOf(resident, "direct-import.ts#pureCallsImportedNetwork")).toContain("unknown");
+    expect(impact.changed).toContain("callee.ts#fetchRate");
+    expect(impact.impacted).toContain("direct-import.ts#pureCallsImportedNetwork");
+  });
+
+  it("propagates an authority added inside a cycle, and removed again", async () => {
+    const dir = copyFixture("cross-module");
+    write(
+      dir,
+      "cycle.ts",
+      [
+        "export function ping(n: number): number {",
+        "  return n <= 0 ? 0 : pong(n - 1);",
+        "}",
+        "",
+        "export function pong(n: number): number {",
+        "  return n <= 0 ? 0 : ping(n - 1);",
+        "}",
+        "",
+        "export function callsCycle(): number {",
+        "  return ping(3);",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const session = await open(dir);
+
+    edit(
+      dir,
+      "cycle.ts",
+      "  return n <= 0 ? 0 : pong(n - 1);",
+      '  void fetch("https://example.com/");\n  return n <= 0 ? 0 : pong(n - 1);',
+    );
+    const added = await updateAndProveScoped(session, dir);
+    expect(effectsOf(added.resident, "cycle.ts#pong")).toContain("network");
+    expect(effectsOf(added.resident, "cycle.ts#callsCycle")).toContain("network");
+    // All three are in `S`, and only the first for a body reason: inserting a
+    // line moves every declaration below it, and `location` is compared
+    // because a diagnostic's reported position is part of the bytes §6.2
+    // compares. That is the comparator being conservative in the direction it
+    // is allowed to be wrong in — it costs a recomputation, never an answer.
+    expect(added.impact.changed.toSorted()).toEqual([
+      "cycle.ts#callsCycle",
+      "cycle.ts#ping",
+      "cycle.ts#pong",
+    ]);
+    expect(added.impact.impacted.toSorted()).toEqual([
+      "cycle.ts#callsCycle",
+      "cycle.ts#ping",
+      "cycle.ts#pong",
+    ]);
+    expect(added.impact.impacted.length).toBeLessThan(added.impact.totalFunctions);
+
+    edit(dir, "cycle.ts", '  void fetch("https://example.com/");\n', "");
+    const removed = await updateAndProveScoped(session, dir);
+    // Removing it has to drain the whole cycle. A value that only unions would
+    // leave `network` on all three forever.
+    expect(effectsOf(removed.resident, "cycle.ts#ping")).toEqual([]);
+    expect(effectsOf(removed.resident, "cycle.ts#pong")).toEqual([]);
+    expect(effectsOf(removed.resident, "cycle.ts#callsCycle")).toEqual([]);
+  });
+
+  it("follows an overload implementation swapped under an unchanged signature", async () => {
+    const dir = copyFixture("cross-module");
+    write(
+      dir,
+      "overloaded.ts",
+      [
+        "export function load(key: string): number;",
+        "export function load(key: number): number;",
+        "export function load(key: string | number): number {",
+        "  void key;",
+        '  void fetch("https://example.com/");',
+        "  return 0;",
+        "}",
+        "",
+        "export function callsOverload(): number {",
+        '  return load("a");',
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const session = await open(dir);
+    expect(effectsOf(session.current(), "overloaded.ts#callsOverload")).toContain("network");
+
+    // Only the implementation's body changes; the signatures, and so the
+    // symbol id the call resolves to, do not move.
+    edit(dir, "overloaded.ts", '  void fetch("https://example.com/");\n', "");
+    const { resident, impact } = await updateAndProveScoped(session, dir);
+
+    expect(effectsOf(resident, "overloaded.ts#callsOverload")).toEqual([]);
+    // The implementation, because its body lost a call; the caller, because
+    // deleting that line moved it up — see the cycle row.
+    expect(impact.changed).toContain("overloaded.ts#load");
+    expect(impact.impacted).toContain("overloaded.ts#callsOverload");
+    expect(impact.impacted.length).toBeLessThan(impact.totalFunctions);
+  });
+
+  it("re-derives the per-body split when the inline-callback owner gains and loses a body", async () => {
+    const dir = copyFixture("cross-module");
+    write(
+      dir,
+      "inline.ts",
+      [
+        "declare const router: {",
+        "  post(name: string, handler: () => void): void;",
+        "};",
+        "",
+        'router.post("first", () => {',
+        '  void fetch("https://example.com/first");',
+        "});",
+        "",
+        'router.post("second", () => {',
+        "  void 1;",
+        "});",
+        "",
+      ].join("\n"),
+    );
+    const session = await open(dir);
+    const owner = symbols(session.current()).find((id) => id.startsWith("inline.ts#"));
+    expect(owner).toBeDefined();
+
+    // A third body. `bodies` changes, so the owner is in `S`, and the per-body
+    // derivation has to run again against the new split — the one pass
+    // `propagate` makes after its fixed point.
+    edit(
+      dir,
+      "inline.ts",
+      'router.post("second", () => {\n  void 1;\n});',
+      'router.post("second", () => {\n  void 1;\n});\n\nrouter.post("third", () => {\n  void fetch("https://example.com/third");\n});',
+    );
+    const gained = await updateAndProveScoped(session, dir);
+    expect(gained.impact.changed).toEqual([owner]);
+
+    edit(
+      dir,
+      "inline.ts",
+      '\n\nrouter.post("third", () => {\n  void fetch("https://example.com/third");\n});',
+      "",
+    );
+    const lost = await updateAndProveScoped(session, dir);
+    expect(lost.impact.changed).toEqual([owner]);
+  });
+
+  it("starts and stops cutting a body off when @boundary is added and removed", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+    expect(effectsOf(session.current(), "callee.ts#fetchRate")).toEqual(["network"]);
+
+    // `@boundary` with no `@capabilities` makes the capability requirement
+    // `unknown` rather than empty, and that has to reach the caller.
+    edit(
+      dir,
+      "callee.ts",
+      "/** @effects network */",
+      "/**\n * @effects network\n * @boundary vendor code\n */",
+    );
+    const bounded = await updateAndProveScoped(session, dir);
+    expect(bounded.impact.changed).toEqual(["callee.ts#fetchRate"]);
+    expect(bounded.impact.impacted).toContain("direct-import.ts#pureCallsImportedNetwork");
+
+    edit(
+      dir,
+      "callee.ts",
+      "/**\n * @effects network\n * @boundary vendor code\n */",
+      "/** @effects network */",
+    );
+    const unbounded = await updateAndProveScoped(session, dir);
+    expect(effectsOf(unbounded.resident, "callee.ts#fetchRate")).toEqual(["network"]);
+  });
+
+  it("rebuilds AMB-W006 from the per-file matched keys, not from a whole-project run", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+
+    // Two exact keys: one names a real symbol, one names nothing. The union of
+    // what the files matched has to subtract exactly the first.
+    write(
+      dir,
+      "ambit.config.ts",
+      'export default {\n  contracts: {\n    "callee.ts#fetchRate": { effects: ["network"] },\n    "nowhere.ts#missing": { effects: [] },\n  },\n};\n',
+    );
+    const partial = await updateAndProveScoped(session, dir);
+    const unmatched = session.committed().store.unmatchedExactKeys;
+    expect(unmatched).toEqual(["nowhere.ts#missing"]);
+    expect(
+      partial.resident.diagnostics.filter((d) => d.id === "AMB-W006").map((d) => d.message),
+    ).toHaveLength(1);
+    // The per-file record the union came from.
+    expect(session.committed().store.files.get("callee.ts")?.matchedConfigKeys).toEqual([
+      "callee.ts#fetchRate",
+    ]);
+    expect(session.committed().store.files.get("index.ts")?.matchedConfigKeys).toEqual([]);
+
+    // The unmatched key starts matching. Nothing about the source changed, so
+    // the only thing that can move the diagnostic is the config path.
+    write(dir, "nowhere.ts", "export function missing(): number {\n  return 1;\n}\n");
+    const matched = await updateAndProveScoped(session, dir);
+    expect(session.committed().store.unmatchedExactKeys).toEqual([]);
+    expect(matched.resident.diagnostics.some((d) => d.id === "AMB-W006")).toBe(false);
+  });
+
+  it("returns byte-identically after a change is reverted", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+    const original = render(session.current());
+    const originalState = renderState(session.committed().store.state);
+
+    edit(dir, "callee.ts", "/** @effects network */", "/** @effects fs_read */");
+    const changed = await updateAndProveScoped(session, dir);
+    expect(render(changed.resident)).not.toBe(original);
+
+    edit(dir, "callee.ts", "/** @effects fs_read */", "/** @effects network */");
+    const reverted = await updateAndProveScoped(session, dir);
+    expect(render(reverted.resident)).toBe(original);
+    // And the internal state too, not only what the report prints: a witness
+    // map left pointing at the wrong callee would survive the first check.
+    expect(renderState(session.committed().store.state)).toBe(originalState);
+  });
+
+  it("survives twelve sequential mutations, proving the scoped state each time", async () => {
+    const dir = copyFixture("cross-module");
+    write(
+      dir,
+      "chain.ts",
+      [
+        "export function leaf(): number {",
+        "  return 1;",
+        "}",
+        "",
+        "export function middle(): number {",
+        "  return leaf();",
+        "}",
+        "",
+        "export function top(): number {",
+        "  return middle();",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const session = await open(dir);
+
+    const steps: readonly (() => void)[] = [
+      () =>
+        edit(dir, "chain.ts", "  return 1;", '  void fetch("https://example.com/1");\n  return 1;'),
+      () =>
+        edit(
+          dir,
+          "chain.ts",
+          "export function leaf(): number {",
+          "/** @effects network */\nexport function leaf(): number {",
+        ),
+      () => edit(dir, "chain.ts", "  return middle();", "  return middle() + leaf();"),
+      () => edit(dir, "chain.ts", '  void fetch("https://example.com/1");\n', ""),
+      () =>
+        write(
+          dir,
+          "chain-extra.ts",
+          'import { top } from "./chain.ts";\n\nexport function outer(): number {\n  return top();\n}\n',
+        ),
+      () => edit(dir, "chain.ts", "/** @effects network */\n", ""),
+      () => edit(dir, "chain.ts", "  return middle() + leaf();", "  return middle();"),
+      () =>
+        write(
+          dir,
+          "ambit.config.ts",
+          'export default {\n  contracts: {\n    "chain.ts#leaf": { effects: ["fs_read"] },\n  },\n};\n',
+        ),
+      () =>
+        edit(
+          dir,
+          "chain.ts",
+          "export function middle(): number {",
+          "/** @effects pure */\nexport function middle(): number {",
+        ),
+      () => remove(dir, "ambit.config.ts"),
+      () => remove(dir, "chain-extra.ts"),
+      () => edit(dir, "chain.ts", "  return middle();", "  return middle() + 1;"),
+      () => remove(dir, "chain.ts"),
+    ];
+
+    const rendered: string[] = [];
+    for (const step of steps) {
+      step();
+      const { resident } = await updateAndProveScoped(session, dir);
+      rendered.push(render(resident));
+    }
+
+    expect(new Set(rendered).size).toBeGreaterThan(1);
+    expect(session.committed().store.generation).toBe(rendered.length + 1);
+  });
+
+  it("answers §3.5's gate-3 mutations from the new tree, never from a stale one", async () => {
+    const dir = copyFixture("cross-module");
+    // The gate-3 subject, as `scripts/m05-probe/mutations.ts` expects to find
+    // it. ADR-0001's headline failure was a contract comment rewritten and a
+    // stale answer returned with no error; a resident path that reintroduces
+    // it has failed whatever else it achieves.
+    write(
+      dir,
+      "recursion.ts",
+      [
+        "/** @effects fs_read */",
+        "export function leafReadsFile(): number {",
+        "  return 1;",
+        "}",
+        "",
+        "export function selfRecursive(n: number): number {",
+        "  if (n <= 0) return leafReadsFile();",
+        "  return selfRecursive(n - 1);",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const session = await open(dir);
+    expect(declaredOf(session.current(), "recursion.ts#leafReadsFile")).toEqual(["fs_read"]);
+    expect(effectsOf(session.current(), "recursion.ts#selfRecursive")).toEqual(["fs_read"]);
+
+    for (const mutation of MUTATIONS) {
+      mutation.apply(dir);
+      const { resident, impact } = await updateAndProveScoped(session, dir);
+      expect(impact.changed.length).toBeGreaterThan(0);
+      expect(impact.impacted.length).toBeLessThan(impact.totalFunctions);
+      // Each mutation moves exactly one observable, and the one that matters
+      // is the contract comment: `@effects fs_read` becoming `network` has to
+      // reach the recursive caller.
+      if (mutation.id === "contract") {
+        expect(declaredOf(resident, "recursion.ts#leafReadsFile")).toEqual(["network"]);
+        expect(effectsOf(resident, "recursion.ts#selfRecursive")).toEqual(["network"]);
+      }
+      if (mutation.id === "body") {
+        expect(effectsOf(resident, "recursion.ts#selfRecursive")).toContain("network");
+      }
+    }
+  });
+
+  it("runs the scoped path even though the fingerprint refuses reuse", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+
+    // `undecidable` carries a permanent entry until phase 4's `openProject`,
+    // so this is false on every update. Phase 3 does not live inside that
+    // branch — it reuses no compiler or extraction result, only Ambit's own
+    // summaries — and this is the row that says so.
+    const fingerprint = session.committed().store.fingerprint;
+    expect(fingerprint.undecidable.length).toBeGreaterThan(0);
+    expect(fingerprintPermitsReuse(fingerprint, fingerprint)).toBe(false);
+
+    edit(dir, "callee.ts", "  return 0;", "  return 1;");
+    const { impact } = await updateAndProveScoped(session, dir);
+    expect(impact.scoped).toBe(true);
+    expect(impact.impacted).toEqual([]);
+  });
+
+  it("reuses most of a real tree when one function in it changes", async () => {
+    const dir = copyFixture("realistic-api");
+    const session = await open(dir);
+
+    const risk = path.join(dir, "src", "domain", "risk.ts");
+    const text = readText(risk);
+    const marker = text.indexOf("export ");
+    writeFileSync(
+      risk,
+      `${text.slice(0, marker)}export function addedByPhaseThree(): void {\n  void fetch("https://example.com/");\n}\n\n${text.slice(marker)}`,
+    );
+
+    const { impact } = await updateAndProveScoped(session, dir);
+    // The evidence the goal asks for: `I` is a small fraction of the tree, on
+    // a tree big enough for the fraction to mean something.
+    expect(impact.totalFunctions).toBeGreaterThan(20);
+    expect(impact.impacted.length).toBeLessThan(impact.totalFunctions);
+    expect(impact.changed).toContain("src/domain/risk.ts#addedByPhaseThree");
   });
 });
 
@@ -1076,6 +1640,61 @@ describe("resident session: self-hosting", () => {
     if (!second.ok) throw new Error("unreachable");
     expect(second.generation).toBe(2);
     expect(render(second.analysis)).toBe(render(cold));
+  });
+
+  it("scopes a real mutation on a copy of src/, and equals cold", async () => {
+    // A copy, never the real tree: other test files read `src/` concurrently,
+    // and `node_modules` is deliberately not linked in — resolution is worse
+    // here than in the repository, which changes nothing about what is being
+    // asserted. Both paths see the same tree.
+    const dir = mkdtempSync(path.join(tmpdir(), "ambit-selfhost-"));
+    temporaries.push(dir);
+    cpSync(path.join(REPO_ROOT, "src"), path.join(dir, "src"), { recursive: true });
+    writeFileSync(path.join(dir, "package.json"), `${JSON.stringify({ name: "selfhost" })}\n`);
+    writeFileSync(
+      path.join(dir, "tsconfig.json"),
+      `${JSON.stringify(
+        {
+          compilerOptions: {
+            target: "ES2023",
+            module: "NodeNext",
+            moduleResolution: "NodeNext",
+            strict: true,
+            skipLibCheck: true,
+            noEmit: true,
+            allowImportingTsExtensions: true,
+          },
+          include: ["**/*.ts"],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const session = await open(dir);
+    const total = session.committed().store.state.size;
+    expect(total).toBeGreaterThan(200);
+
+    // One real function in one real file, chosen because it has callers.
+    edit(
+      dir,
+      path.join("src", "checker", "impact.ts"),
+      "export function impactClosure(",
+      "/** @effects pure */\nexport function impactClosure(",
+    );
+    const result = await session.update();
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+
+    expect(render(result.analysis)).toBe(render(await analyze(dir)));
+    const state = session.committed().store.state;
+    const summaries = [...state.values()].map((propagated) => propagated.summary);
+    expect(renderState(state)).toBe(renderState(propagate(summaries)));
+    expect(result.impact.scoped).toBe(true);
+    // The shape this row exists to show: a one-function edit on a real
+    // codebase recomputes a small part of it.
+    expect(result.impact.changed).toContain("src/checker/impact.ts#impactClosure");
+    expect(result.impact.impacted.length).toBeLessThan(result.impact.totalFunctions);
   });
 
   it("equals a cold run over a mutated copy of a realistic tree", async () => {

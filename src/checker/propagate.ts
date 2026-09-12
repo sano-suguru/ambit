@@ -144,6 +144,116 @@ export function propagate(
 }
 
 /**
+ * The same fixed point, restricted to an impact set — phase 3 of
+ * `docs/resident-check-path.md`.
+ *
+ * {@link propagate} above is untouched and stays the oracle: the differential
+ * suite asserts this function's whole output against it, symbol for symbol.
+ *
+ * The contract the caller owes, and which this function does not re-derive:
+ * **`impacted` must contain every symbol whose summary moved, and every caller
+ * that reaches one through the call graph** — `changedSymbols` and
+ * `impactClosure` in `src/checker/impact.ts` are what compute it. A symbol
+ * outside `impacted` has, by construction, an unchanged summary and no callee
+ * whose value changed, so its committed value is still its value.
+ *
+ * **Initialization is a reset, not a seed.** Every `f ∈ impacted` starts at
+ * exactly what {@link propagate} initializes with — `observed =
+ * directEffects(f)`, `required` empty, both witness maps empty — and never at
+ * its previous value. Starting from the previous value and unioning upward
+ * would be monotone in the wrong dimension: authority that a change *removed*
+ * would survive as a value nothing can now lower, which is the one direction
+ * §6.2's equivalence law cannot tolerate and the reason the differential
+ * suite's revert rows exist.
+ *
+ * **Termination** is `propagate`'s own argument, restricted: values outside
+ * `impacted` are fixed, values inside only grow under union, the effect set is
+ * finite and the capability set is drawn from the finite set of strings the
+ * summaries hold.
+ *
+ * The returned map is built by walking `summaries` in order, so its iteration
+ * order is `propagate`'s — which the coverage report and the diagnostic order
+ * are functions of.
+ */
+export function propagateScoped(input: {
+  readonly summaries: readonly FunctionSummary[];
+  readonly previous: ReadonlyMap<SymbolId, PropagatedFunction>;
+  readonly impacted: ReadonlySet<SymbolId>;
+}): ReadonlyMap<SymbolId, PropagatedFunction> {
+  const { summaries, previous, impacted } = input;
+  const byId = new Map(summaries.map((s) => [s.id, s] as const));
+  const state = new Map<SymbolId, PropagatedFunction>();
+  const scoped: FunctionSummary[] = [];
+
+  for (const summary of summaries) {
+    if (impacted.has(summary.id)) {
+      scoped.push(summary);
+      state.set(summary.id, {
+        summary,
+        observed: directEffects(summary),
+        effectWitness: new Map(),
+        required: emptyCapabilitySet(),
+        capabilityWitness: new Map(),
+      });
+      continue;
+    }
+    const committed = previous.get(summary.id);
+    if (!committed) {
+      // A symbol with no committed value and no place in the impact set has no
+      // value at all. Falling back to an initial one here would put an
+      // un-propagated function into the output as though it had been analyzed
+      // — "unknown" reported as "nothing found" (§3.4). The caller's impact set
+      // is wrong, and the generation must not commit.
+      throw new Error(
+        `scoped propagation has no committed value for ${summary.id}, and it is not in the impact set`,
+      );
+    }
+    // The *new* summary object, carrying the committed lattice values. The two
+    // are interchangeable by `summariesEqual`, which is what put this symbol
+    // outside the impact set; holding the new one means a field the comparator
+    // does not read cannot reach the output stale either.
+    state.set(summary.id, { ...committed, summary });
+  }
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const summary of scoped) {
+      const next = deriveState(summary, byId, state);
+      const current = state.get(summary.id);
+      if (
+        !current ||
+        !effectSetsEqual(current.observed, next.observed) ||
+        !capabilitySetsEqual(current.required, next.required)
+      ) {
+        changed = true;
+      }
+      state.set(summary.id, next);
+    }
+  }
+
+  // The per-body pass, after the fixed point and for the impact set only —
+  // `propagate`'s own order and its own reason. A multi-body owner outside the
+  // impact set keeps the split it committed: a body is not a callee, so the
+  // split is a function of that owner's summary and of its callees' values,
+  // and neither moved.
+  for (const summary of scoped) {
+    if (!summary.bodies || summary.bodies.length < 2) continue;
+    const propagated = state.get(summary.id);
+    if (!propagated) continue;
+    state.set(summary.id, {
+      ...propagated,
+      bodies: summary.bodies.map((calls) => {
+        const derived = deriveState({ ...summary, calls }, byId, state);
+        return { observed: derived.observed, required: derived.required };
+      }),
+    });
+  }
+
+  return state;
+}
+
+/**
  * The capabilities a function's own body requires before anything is
  * propagated into it: what its bundled-operation call sites fix statically,
  * plus `unknown` when one of them has a target the source does not fix, or

@@ -618,6 +618,23 @@ interface ResolvedEntry {
 }
 
 /**
+ * What one {@link ResolvedConfig.contractFor} lookup found: the contract, and
+ * the exact key that supplied it.
+ *
+ * `exactKey` is what lets a caller rebuild `AMB-W006`'s unmatched set from a
+ * *union of per-file matches* instead of from a whole-project run's side
+ * effects (`docs/resident-check-path.md`, correction 3). It is absent for a
+ * glob match on purpose: a glob matching nothing is normal and is never
+ * reported, so recording which glob matched would be recording something
+ * nothing reads.
+ */
+export interface ConfigMatch {
+  readonly contract: ConfigContract;
+  /** The exact key that declared this contract, when an exact key did. */
+  readonly exactKey?: string;
+}
+
+/**
  * A config resolved against one analysis root: contract lookup by symbol id,
  * per-directory `strict`, and the user-defined effect table.
  */
@@ -636,14 +653,33 @@ export interface ResolvedConfig {
   readonly sourceText: string;
   /** User-defined effect names → the standard effects they stand for (§4.1 (d)). */
   readonly effectAliases: ReadonlyMap<string, readonly KnownEffect[]>;
-  /** The contract declared for `id`, or `undefined`. Records the match for {@link unmatchedExactKeys}. */
-  contractFor(id: SymbolId): ConfigContract | undefined;
+  /**
+   * The contract declared for `id`, or `undefined`. Records the match for
+   * {@link unmatchedExactKeys}, and reports it to the caller as
+   * {@link ConfigMatch.exactKey} so a caller holding per-file results can
+   * compute the same unmatched set without relying on this object's
+   * accumulated state.
+   */
+  contractFor(id: SymbolId): ConfigMatch | undefined;
   /** Whether `relativeFile`'s diagnostics get `--strict`'s promotion (§4.3). */
   isStrictFile(relativeFile: string): boolean;
+  /**
+   * Every exact key the config declares, in the order it declares them.
+   *
+   * The order is load-bearing: `AMB-W006` is emitted per key, and
+   * {@link unmatchedExactKeys} preserves this order, so a caller subtracting a
+   * matched set from this list produces the same diagnostics in the same order
+   * as a whole-project run (§6.2's byte equivalence).
+   */
+  exactKeys(): readonly string[];
   /**
    * Exact keys that named no extracted symbol, after every lookup has run.
    * Glob keys are excluded on purpose: a glob matching nothing under the
    * directory being checked is normal, an exact key naming nothing is a typo.
+   *
+   * Depends on every lookup for this generation having gone through *this*
+   * object. A caller that summarizes only part of a tree must subtract its own
+   * union of {@link ConfigMatch.exactKey} from {@link exactKeys} instead.
    */
   unmatchedExactKeys(): readonly string[];
 }
@@ -697,7 +733,7 @@ export function resolveConfig(loaded: LoadedConfig, rootDir: string): ResolvedCo
     displayPath,
     sourceText: loaded.sourceText,
     effectAliases,
-    contractFor(id: SymbolId): ConfigContract | undefined {
+    contractFor(id: SymbolId): ConfigMatch | undefined {
       const hash = id.indexOf("#");
       if (hash < 0) return undefined;
       const file = id.slice(0, hash);
@@ -718,7 +754,8 @@ export function resolveConfig(loaded: LoadedConfig, rootDir: string): ResolvedCo
             `${loaded.configPath}: ${exact.map((e) => JSON.stringify(e.key)).join(" and ")} both name ${id}`,
           );
         }
-        return exact[0]?.contract;
+        const winner = exact[0];
+        return winner ? { contract: winner.contract, exactKey: winner.key } : undefined;
       }
       if (candidates.length > 1) {
         throw new ConfigError(
@@ -728,10 +765,16 @@ export function resolveConfig(loaded: LoadedConfig, rootDir: string): ResolvedCo
         );
       }
       for (const entry of candidates) matchedKeys.add(entry.key);
-      return candidates[0]?.contract;
+      const winner = candidates[0];
+      // A glob match carries no `exactKey`: glob keys are never reported as
+      // unmatched, so there is nothing for a caller to subtract.
+      return winner ? { contract: winner.contract } : undefined;
     },
     isStrictFile(relativeFile: string): boolean {
       return strictMatchers.some((matcher) => matcher.test(relativeFile));
+    },
+    exactKeys(): readonly string[] {
+      return entries.filter((entry) => entry.exact).map((entry) => entry.key);
     },
     unmatchedExactKeys(): readonly string[] {
       return entries

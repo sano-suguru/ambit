@@ -38,9 +38,10 @@ import type {
 } from "../core/index.ts";
 import { legacyTsBackend } from "./backend/legacy-ts.ts";
 import { configDependencies, loadConfig, type ResolvedConfig, resolveConfig } from "./config.ts";
-import { type PropagatedFunction, propagate } from "./propagate.ts";
+import { changedSymbols, impactClosure } from "./impact.ts";
+import { type PropagatedFunction, propagate, propagateScoped } from "./propagate.ts";
 import { type AnalysisResult, buildReport } from "./report.ts";
-import { summarizeExtractedFiles } from "./summarize.ts";
+import { summarizeFiles } from "./summarize.ts";
 
 // ---- what the caller tells the session -------------------------------------
 
@@ -314,6 +315,18 @@ export interface FileEntry {
   readonly module: ExtractedModule;
   readonly extracted?: ExtractedFile;
   readonly summaries: readonly FunctionSummary[];
+  /**
+   * The exact `ambit.config.ts` keys the symbols in this file matched.
+   *
+   * Per file rather than per generation because `AMB-W006` must be derivable
+   * from a **union over the files**, not from a whole-project run's
+   * accumulated state: `ResolvedConfig` records matches as a side effect of
+   * every lookup, so a generation that re-summarized only some files would
+   * report every key the others matched as unmatched. Phase 3 still
+   * re-summarizes everything, and the union is computed anyway — a field first
+   * exercised by the phase that needs it is a field nobody has watched fail.
+   */
+  readonly matchedConfigKeys: readonly string[];
 }
 
 /**
@@ -341,13 +354,10 @@ export interface ResidentStore {
   /**
    * Exact `ambit.config.ts` keys that named no extracted symbol, for AMB-W006.
    *
-   * Held per generation rather than per file. `ResolvedConfig.contractFor`
-   * records a match into a private set and does not report *which* key matched,
-   * so the per-file `matchedConfigKeys` the design note describes needs an
-   * addition to that API — and nothing reads it until phase 3 re-summarizes a
-   * subset of files. Recomputing it here from a whole-project run is correct
-   * for as long as every update is a full rebuild, which is exactly as long as
-   * this phase lasts.
+   * Computed as `ResolvedConfig.exactKeys()` minus the union of every
+   * {@link FileEntry.matchedConfigKeys}, in the config's own key order — not
+   * from `ResolvedConfig.unmatchedExactKeys()`, whose answer is only correct
+   * after a whole project has been looked up through that one object.
    */
   readonly unmatchedExactKeys: readonly string[];
 }
@@ -423,6 +433,27 @@ export interface ResidentSessionOptions {
   readonly backend?: TsBackend;
 }
 
+/**
+ * What one generation's impact analysis decided — phase 3's `S` and `I`.
+ *
+ * Reported so that a caller, and the differential suite, can see *that* the
+ * scoped path ran and how far it reached. Both lists are sorted by symbol id:
+ * they are sets, and a stable order is what makes them comparable between runs.
+ */
+export interface ImpactReport {
+  /** `S` — symbols added, removed, or whose summary is not `summariesEqual`. */
+  readonly changed: readonly SymbolId[];
+  /** `I` — `S` closed under callers over the union of the old and new reverse call graphs. */
+  readonly impacted: readonly SymbolId[];
+  /** Functions in the new generation. `impacted.length < totalFunctions` is the scoped path doing something. */
+  readonly totalFunctions: number;
+  /**
+   * Whether the fixed point was scoped to `I`. False for the first generation,
+   * which has no previous state to reuse and runs `propagate` whole.
+   */
+  readonly scoped: boolean;
+}
+
 /** What one {@link ResidentSession.update} produced, or why it produced nothing. */
 export type UpdateResult =
   | {
@@ -431,6 +462,8 @@ export type UpdateResult =
       readonly generation: number;
       readonly analysis: AnalysisResult;
       readonly timings: PhaseTimings;
+      /** What the scoped fixed point recomputed, and what it reused. */
+      readonly impact: ImpactReport;
       /** False once phase 4 lands and an update patches the store instead of replacing it. */
       readonly full: boolean;
     }
@@ -545,7 +578,7 @@ export class ResidentSession {
         projectSession: this.#projectSession,
         generationNumber: this.#store.generation + 1,
         changes,
-        previousFingerprint: this.#store.fingerprint,
+        previous: this.#store,
       });
       // The commit. Everything above this line is a local.
       this.#store = generation.store;
@@ -556,6 +589,7 @@ export class ResidentSession {
         generation: generation.store.generation,
         analysis: generation.analysis,
         timings: generation.timings,
+        impact: generation.impact,
         full: generation.full,
       };
     } catch (error) {
@@ -635,6 +669,7 @@ interface Generation {
   readonly store: ResidentStore;
   readonly analysis: AnalysisResult;
   readonly timings: PhaseTimings;
+  readonly impact: ImpactReport;
   readonly full: boolean;
 }
 
@@ -645,7 +680,8 @@ interface GenerationInput {
   readonly projectSession: TsProjectSession;
   readonly generationNumber: number;
   readonly changes?: readonly FileChange[];
-  readonly previousFingerprint?: ProjectFingerprint;
+  /** The committed generation this one follows, or absent for the first check. */
+  readonly previous?: ResidentStore;
 }
 
 /**
@@ -687,8 +723,8 @@ async function runGeneration(input: GenerationInput): Promise<Generation> {
   // invalidation merely because the fingerprint refused compiler-level reuse.
   // Phase 4 is where this verdict begins gating anything.
   const reusePermitted =
-    input.previousFingerprint !== undefined &&
-    fingerprintPermitsReuse(input.previousFingerprint, fingerprint) &&
+    input.previous !== undefined &&
+    fingerprintPermitsReuse(input.previous.fingerprint, fingerprint) &&
     !(input.changes ?? []).some((change) => change.kind === "added");
   void reusePermitted;
 
@@ -727,18 +763,37 @@ async function runGeneration(input: GenerationInput): Promise<Generation> {
     throw new Error(`no analyzable functions found under ${rootDir}`);
   }
 
-  // 4. summarize.
+  // 4. summarize. Whole-project in this phase: extraction is not reused, so
+  //    there is no subset to summarize. The per-file matched config keys are
+  //    what `AMB-W006` is rebuilt from, instead of from `ResolvedConfig`'s
+  //    accumulated state.
   const summarizeStarted = now();
-  const summaries = summarizeExtractedFiles(update.files, config);
+  const { summaries, matchedConfigKeys } = summarizeFiles(update.files, config);
   const summarizeMs = now() - summarizeStarted;
 
-  // 5. impact. A full rebuild's impact set is every function, and deciding that
-  //    costs nothing — reported as a measured 0, not as absent.
-  const impactMs = 0;
+  // 5. impact. The changed-summary comparison and the reverse-call closure,
+  //    including building the new generation's reverse-call graph — that graph
+  //    is one of the two the closure is taken over, so its cost belongs here
+  //    and not in the store construction below.
+  const impactStarted = now();
+  const reverseCalls = buildReverseCalls(summaries);
+  const previous = input.previous;
+  const scope = previous === undefined ? undefined : scopeOf(previous, summaries, reverseCalls);
+  const impactMs = now() - impactStarted;
 
-  // 6. propagate.
+  // 6. propagate. Scoped to `I` whenever there is a committed generation to
+  //    reuse; the whole fixed point on the first check, which has nothing to
+  //    reuse. The two are separate functions on purpose — `propagate` stays the
+  //    oracle the differential suite asserts the scoped one against.
   const propagateStarted = now();
-  const state = propagate(summaries);
+  const state =
+    scope === undefined
+      ? propagate(summaries)
+      : propagateScoped({
+          summaries,
+          previous: previous?.state ?? new Map(),
+          impacted: scope.impacted,
+        });
   const propagateMs = now() - propagateStarted;
 
   // 7. report. Whole-tree by design (ADR-0014): diagnostics, authority records
@@ -746,9 +801,11 @@ async function runGeneration(input: GenerationInput): Promise<Generation> {
   //    and scoping them would buy a fraction of a phase for a second equality
   //    proof.
   const reportStarted = now();
-  // Read after every lookup has run, which is what `unmatchedExactKeys`
-  // requires — `contractFor` records matches as a side effect.
-  const unmatchedExactKeys = config ? config.unmatchedExactKeys() : [];
+  // The union of what the files matched, subtracted from the config's own exact
+  // keys, in the config's key order. Not `ResolvedConfig.unmatchedExactKeys()`:
+  // that answer is only correct once a whole project has been looked up through
+  // that one object, and phase 4 re-summarizes a subset.
+  const unmatchedExactKeys = config ? unmatchedFrom(config, matchedConfigKeys) : [];
   const analysis = buildReport({
     state,
     summaries,
@@ -772,10 +829,10 @@ async function runGeneration(input: GenerationInput): Promise<Generation> {
     engine: { name: backend.name, version: backend.version },
     generation: input.generationNumber,
     fingerprint,
-    files: buildFileEntries(update.modules, update.files, summaries),
+    files: buildFileEntries(update.modules, update.files, summaries, matchedConfigKeys),
     state,
     reverseImports: buildReverseImports(update.modules),
-    reverseCalls: buildReverseCalls(summaries),
+    reverseCalls,
     unmatchedExactKeys,
   };
 
@@ -793,8 +850,55 @@ async function runGeneration(input: GenerationInput): Promise<Generation> {
       // fills the same field with a real number (§6.2).
       transfer: 0,
     },
+    impact: {
+      // `toSorted`, not `sort`: an in-place sort is a mutation Ambit cannot
+      // prove local on a value it did not watch being allocated, so it reads
+      // as an escaping `state_write` this function does not declare.
+      changed: scope ? [...scope.changed].toSorted() : summaries.map((s) => s.id).toSorted(),
+      impacted: scope ? [...scope.impacted].toSorted() : summaries.map((s) => s.id).toSorted(),
+      totalFunctions: summaries.length,
+      scoped: scope !== undefined,
+    },
     full: update.full,
   };
+}
+
+/**
+ * `S` and `I` for one generation, against the generation it follows.
+ *
+ * The previous generation's summaries are read off its committed state rather
+ * than out of its `files` entries: `propagate` puts exactly one entry per
+ * summary into the state and carries the summary on it, so the state is the
+ * complete id set — which is what makes a *deleted* id visible.
+ */
+function scopeOf(
+  previous: ResidentStore,
+  summaries: readonly FunctionSummary[],
+  reverseCalls: ReadonlyMap<SymbolId, ReadonlySet<SymbolId>>,
+): { readonly changed: ReadonlySet<SymbolId>; readonly impacted: ReadonlySet<SymbolId> } {
+  const previousSummaries = new Map<SymbolId, FunctionSummary>();
+  for (const [id, propagated] of previous.state) previousSummaries.set(id, propagated.summary);
+  const nextSummaries = new Map(summaries.map((summary) => [summary.id, summary] as const));
+  const changed = changedSymbols(previousSummaries, nextSummaries);
+  return {
+    changed,
+    impacted: impactClosure(changed, previous.reverseCalls, reverseCalls),
+  };
+}
+
+/**
+ * The config's exact keys that nothing matched, in the order the config
+ * declares them — `AMB-W006` is emitted per key and §6.2 compares the order.
+ */
+function unmatchedFrom(
+  config: ResolvedConfig,
+  matchedConfigKeys: ReadonlyMap<string, readonly string[]>,
+): readonly string[] {
+  const matched = new Set<string>();
+  for (const keys of matchedConfigKeys.values()) {
+    for (const key of keys) matched.add(key);
+  }
+  return config.exactKeys().filter((key) => !matched.has(key));
 }
 
 /**
@@ -818,6 +922,7 @@ function buildFileEntries(
   modules: readonly ExtractedModule[],
   files: readonly ExtractedFile[],
   summaries: readonly FunctionSummary[],
+  matchedConfigKeys: ReadonlyMap<string, readonly string[]>,
 ): ReadonlyMap<string, FileEntry> {
   const extractedByPath = new Map(files.map((file) => [file.filePath, file] as const));
   // Grouped by the id's own file half rather than by walking `files` again: a
@@ -845,6 +950,7 @@ function buildFileEntries(
       module,
       ...(extracted ? { extracted } : {}),
       summaries: summariesByPath.get(module.filePath) ?? [],
+      matchedConfigKeys: matchedConfigKeys.get(module.filePath) ?? [],
     });
   }
   return entries;

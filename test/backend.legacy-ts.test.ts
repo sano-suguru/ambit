@@ -361,7 +361,7 @@ describe("legacyTsBackend.extractProject (self-hosting)", () => {
     const { files } = await extractFixture(SRC_ROOT);
     const summarize = files
       .find((f) => f.filePath === "checker/summarize.ts")
-      ?.functions.find((fn) => fn.id === "checker/summarize.ts#summarizeExtractedFiles");
+      ?.functions.find((fn) => fn.id === "checker/summarize.ts#summarizeFiles");
     expect(summarize?.calls).toContainEqual(
       expect.objectContaining({
         pureBuiltinName: "ReadonlyArray.flatMap",
