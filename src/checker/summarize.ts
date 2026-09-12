@@ -53,15 +53,49 @@ import {
 import type { ResolvedConfig } from "./config.ts";
 
 /**
+ * What {@link summarizeFiles} produced: the summaries, and which exact
+ * `ambit.config.ts` keys each file's symbols matched.
+ *
+ * The second half exists because `AMB-W006` must be computable from a *union
+ * of per-file results* rather than from a whole-project run's accumulated
+ * state — the resident path re-summarizes and has to arrive at the same
+ * unmatched set (`docs/resident-check-path.md`, correction 3).
+ */
+export interface SummarizedFiles {
+  readonly summaries: readonly FunctionSummary[];
+  /**
+   * `ExtractedFile.filePath` → the exact config keys the symbols in that file
+   * matched, in lookup order. A file matching nothing has no entry.
+   *
+   * Order inside one entry is the order the file's functions were summarized
+   * in; nothing reads it as an order, only as a set to subtract, so it is
+   * recorded as written rather than sorted.
+   */
+  readonly matchedConfigKeys: ReadonlyMap<string, readonly string[]>;
+}
+
+/**
  * Turn a backend's raw extraction into Ambit's own analysis representation
  * (DESIGN.md §3.4 layer 2), independent of which backend produced it.
+ *
+ * The summaries alone. {@link summarizeFiles} is the same walk reporting the
+ * config keys it matched as well.
  */
 export function summarizeExtractedFiles(
   files: readonly ExtractedFile[],
   config?: ResolvedConfig,
 ): readonly FunctionSummary[] {
+  return summarizeFiles(files, config).summaries;
+}
+
+/** {@link summarizeExtractedFiles}, reporting the matched config keys too. */
+export function summarizeFiles(
+  files: readonly ExtractedFile[],
+  config?: ResolvedConfig,
+): SummarizedFiles {
   const aliases = config?.effectAliases;
   const summaries: FunctionSummary[] = [];
+  const matchedConfigKeys = new Map<string, readonly string[]>();
   for (const file of files) {
     const specs = specContracts(file.runtimeWrappers);
     for (const fn of file.functions) {
@@ -78,8 +112,19 @@ export function summarizeExtractedFiles(
       // would be one sentence standing for several functions the author
       // cannot see separately, which is the guarantee surface growing by
       // notation alone (P4).
-      const declaredContract = fn.undeclarable ? undefined : config?.contractFor(fn.id);
-      const merged = mergeContract(jsDoc, declaredContract, specs.get(fn.id), aliases);
+      const match = fn.undeclarable ? undefined : config?.contractFor(fn.id);
+      if (match?.exactKey !== undefined) {
+        // Replaced rather than pushed into: a `push` onto a value that came
+        // back from `Map.get` is a mutation Ambit cannot follow to a local
+        // allocation, so it reads as an escaping `state_write` this function
+        // does not declare. The same choice `resident.ts` makes, for the same
+        // reason.
+        matchedConfigKeys.set(file.filePath, [
+          ...(matchedConfigKeys.get(file.filePath) ?? []),
+          match.exactKey,
+        ]);
+      }
+      const merged = mergeContract(jsDoc, match?.contract, specs.get(fn.id), aliases);
       summaries.push({
         id: fn.id,
         location: fn.location,
@@ -95,7 +140,7 @@ export function summarizeExtractedFiles(
       });
     }
   }
-  return summaries;
+  return { summaries, matchedConfigKeys };
 }
 
 /** The five contract tags as JSDoc alone declares them. */

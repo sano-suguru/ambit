@@ -176,7 +176,7 @@ interface FileEntry {
   readonly module: ExtractedModule;
   readonly extracted?: ExtractedFile;          // absent for a file that declares nothing
   readonly summaries: readonly FunctionSummary[];
-  // `matchedConfigKeys` is phase 3's — see correction 3
+  readonly matchedConfigKeys: readonly string[];  // phase 3 — see correction 3
 }
 
 interface ProjectFingerprint {
@@ -511,7 +511,7 @@ resident path that reintroduces it has failed whatever else it achieves.
 | 1 | `ExtractedProject` gains `modules` — see **Components**, not `ExtractedFile`, and the aggregates stay where they are | `check src --coverage` counts unchanged |
 | 2 | `resident.ts` with the store and a full-rebuild-only `update` (architecture A) | The differential suite passes on every mutation — slowly is fine |
 
-Phases 0, 1 and 2 are done. What building them corrected is recorded under
+Phases 0, 1, 2 and 3 are done. What building them corrected is recorded under
 **Corrections from the implementation** below.
 | 3 | The scoped fixed point in `propagate.ts`; extraction still whole-project. **Not gated on `fingerprintPermitsReuse`** — see the lifecycle's step 1 | Suite still passes; `impact` appears in the timings |
 | 4 | `openProject` in the legacy backend; reverse-import closure re-extraction | Suite still passes; `extraction` shrinks |
@@ -545,14 +545,15 @@ changed, so a reader of an earlier draft is not left with a stale picture.
    0 leaving something order-dependent. Nothing is, so the field does not
    exist.
 
-3. **`FileEntry.matchedConfigKeys` is deferred to phase 3.**
-   `ResolvedConfig.contractFor` records a match into a private set and does not
-   report *which* key matched, so filling the field needs an addition to that
-   API — and nothing reads it while every update is a full rebuild. The store
-   holds a per-generation `unmatchedExactKeys` instead, taken from
-   `unmatchedExactKeys()` after a whole run, which is correct for exactly as
-   long as phase 2 lasts. **Teaching `ResolvedConfig` to report the matched key
-   is the first step of phase 3**, before any subset of files is re-summarized.
+3. **`FileEntry.matchedConfigKeys` was deferred to phase 3, and phase 3 built
+   it.** `ResolvedConfig.contractFor` now returns a `ConfigMatch`
+   (`{ contract, exactKey? }`) and `ResolvedConfig` gained `exactKeys()`;
+   `summarizeFiles` reports the keys each file matched beside its summaries,
+   and the store's `unmatchedExactKeys` is `exactKeys()` minus the union over
+   the files, in the config's own key order. `unmatchedExactKeys()` stays on
+   `ResolvedConfig` for the cold path, which does look every symbol up through
+   one object. A glob match carries no `exactKey`: a glob matching nothing is
+   never reported, so there would be nothing to subtract.
 
 4. **`FileEntry.extracted` is optional.** A file that declares no function and
    registers no runtime wrapper has no `ExtractedFile` at all — which is the
@@ -650,6 +651,55 @@ changed, so a reader of an earlier draft is not left with a stale picture.
    reason is the equivalence law — two compositions of the same diagnostics are
    two orders to keep in step, and the first divergence between them would read
    as an analysis difference rather than a reporting one.
+
+9. **A line-shifting edit puts every later declaration in the file into `S`.**
+   `location` is compared, because a diagnostic's reported position is part of
+   the bytes §6.2 compares, so inserting or deleting a line moves every
+   function below it and each of them is "changed". This is the comparator
+   being conservative in the direction it is allowed to be wrong in — it costs
+   a recomputation, never an answer — and the differential suite asserts it
+   rather than working around it. Narrowing it would mean separating "the
+   summary moved" from "the summary is at a different place", which is a real
+   design question and not a small one: the second still has to reach the
+   report. Not attempted; recorded so the next reader does not mistake the
+   wide `S` for a defect.
+
+10. **The old/new reverse-graph union is a second reason, not the only one.**
+    With `S` decided by `summariesEqual`, a caller that lost an edge to a
+    changed callee is in `S` by construction — its `calls` array lost an
+    entry, or its callee vanished and the call fell to `unresolved` — so on
+    that argument the union adds nothing. Whether any *measured* case needs it
+    was not established either way, and the union is implemented and tested
+    anyway (`test/impact.test.ts`, "reaches a caller that exists
+    only in the old graph"), because it is the half of the argument that does
+    not depend on the comparator being complete, and it costs one map lookup
+    per visited node.
+
+11. **`propagateScoped` holds the *new* summary object on a reused value.** A
+    symbol outside `I` keeps its committed `observed`, `required`, witnesses
+    and per-body split, but its `PropagatedFunction.summary` is replaced with
+    the new generation's object. The two are interchangeable by
+    `summariesEqual` — that is what put the symbol outside `I` — so this
+    changes nothing that the comparator covers. What it buys is that a field
+    the comparator does *not* cover cannot reach the report stale either: only
+    the lattice values are reused, never the description. A symbol outside `I`
+    with no committed value throws rather than falling back to an initial one,
+    because an un-propagated function in the output would read as a function
+    that was analyzed and found clean (§3.4).
+
+## What phase 3 found and left for phase 4
+
+- **`fingerprintPermitsReuse` is still computed and still unused.** Phase 3 is
+  outside it by design (lifecycle step 1) and phase 4 is where it starts
+  gating extraction. Its `undecidable` list is still permanently non-empty.
+- **`ExtractedUpdate.full === false` still throws.** Nothing patches the store
+  yet; the scoped fixed point reuses propagated values, never extraction
+  results. Phase 4 is what makes a partial update committable, and the
+  invalidation table above is what it has to implement.
+- **The per-file `matchedConfigKeys` is built and is not yet load-bearing.**
+  Every generation still summarizes every file, so the union it is subtracted
+  from is a whole-project union. It becomes load-bearing the first time phase
+  4 re-summarizes a subset.
 
 ## Undecided
 
