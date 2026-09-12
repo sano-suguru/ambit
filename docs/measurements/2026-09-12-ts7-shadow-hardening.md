@@ -515,7 +515,11 @@ made within-engine instead.
 3. **Root-cause the 204 `unresolved-classification/shadow-more-unknown`** across
    the corpus. Safe direction, largest class, unexplained — and until it is
    explained, "the shadow side is more conservative" is a description rather
-   than a finding.
+   than a finding. Partly answered on `drizzle-orm --with-deps`: 6 of its 21
+   went with the optional-callback fix in
+   `docs/measurements/2026-09-12-optional-callback-opacity.md`, which also took
+   that target's `direct-effect/shadow-less-authority` 6 → 0. 15 survive there,
+   and the other four targets are untouched.
 4. **The locally-owned mutating builtin branch order** (class 1 above). Eight
    high-risk entries that are not actually unsafe; fixing the port would remove
    them and make the remaining high-risk count mean what it says.
@@ -535,5 +539,7 @@ What the A/B changes about the shape of this work is worth stating plainly. The
 remaining question is no longer "how much of the adopted backend is still
 unported". `NOT_PORTED` is three shapes and none of them appears anywhere in the
 corpus. The question is **how much of the difference between two TypeScript
-implementations can be explained semantically** — and one of the answers so far
-points at the adopted backend, not at the shadow one.
+implementations can be explained semantically** — and none of the answers so far
+has pointed at the shadow backend: the `any-typed` class was a corpus artifact,
+and `drizzle-orm`'s six high-risk `direct-effect` rows were an adopted-backend
+bug the shadow side had already got right.

@@ -2218,11 +2218,23 @@ function callableArgumentFields(
  * reference resolves to an extracted function, and the effects come from
  * there, or it does not, and the call is `unknown`.
  *
+ * Callability is decided by {@link isCallableType}, which is union
+ * aware, and that is load-bearing rather than tidy. An *optional* callback
+ * parameter — `cb?: (v: T) => R`, the shape `Promise.then`, `Array.map` and
+ * most callback APIs declare — gives the argument the type
+ * `((v: T) => R) | null | undefined`, and a union has no call signatures of
+ * its own even though one constituent does. Asking the union directly
+ * answered "not callable", so the reference was never scanned, `opaque`
+ * stayed false, and `this.execute().then(onFulfilled, onRejected)` — both
+ * arguments opaque parameters — summarized as `known-pure`, losing the
+ * callbacks' effects entirely. Measured on `drizzle-orm`, six sites, in
+ * `docs/measurements/2026-09-12-optional-callback-opacity.md`.
+ *
  * An `any`/`unknown`-typed argument has no call signatures of its own
- * (`getCallSignatures()` returns `[]`), so it must be treated as opaque
- * rather than as "not callable" — otherwise `arr.map(fnFromAnyRecord)`
- * would slip past this guard the same way `classifyCall`'s own
- * `any-typed` callee case treats `any` as unresolved, not as safe.
+ * either, so it too is treated as opaque rather than as "not callable" —
+ * otherwise `arr.map(fnFromAnyRecord)` would slip past this guard the same
+ * way `classifyCall`'s own `any-typed` callee case treats `any` as
+ * unresolved, not as safe.
  *
  * Only argument positions whose *declared* parameter type can itself be
  * called are scanned (`acceptsCallableArgument`) — otherwise a
@@ -2234,7 +2246,7 @@ function callableArgumentFields(
  * (`getResolvedSignature` returns nothing, a JSDoc-only signature, an
  * out-of-range or rest parameter) falls back to scanning that argument
  * rather than skipping it, so this narrowing can only add opacity checks
- * back in, never silently drop the `any`/`unknown` fail-open guard above.
+ * back in, never silently drop the fail-open guards above.
  */
 function callableArgumentsOf(
   node: ts.CallExpression | ts.NewExpression,
@@ -2247,11 +2259,7 @@ function callableArgumentsOf(
   for (const [index, arg] of (node.arguments ?? []).entries()) {
     if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) continue;
     if (signature && !acceptsCallableArgument(signature, index, checker)) continue;
-    const type = checker.getTypeAtLocation(arg);
-    const callable =
-      (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0 ||
-      type.getCallSignatures().length > 0;
-    if (!callable) continue;
+    if (!isCallableType(checker.getTypeAtLocation(arg))) continue;
     const target = extractedFunctionTarget(arg, checker, declaredNodeToId);
     if (target) targets.push(target);
     else opaque = true;
@@ -2309,12 +2317,25 @@ function acceptsCallableArgument(
   // (whose declared type is the array type, not the element type), can't
   // be classified from the declaration either — stay conservative.
   if (!parameter || parameter.dotDotDotToken) return true;
-  return isCallableParameterType(checker.getTypeAtLocation(parameter));
+  return isCallableType(checker.getTypeAtLocation(parameter));
 }
 
-function isCallableParameterType(type: ts.Type): boolean {
+/**
+ * Whether a type can be called — asked of a *declared parameter* type by
+ * {@link acceptsCallableArgument} and of an *argument's own* type by
+ * {@link callableArgumentsOf}, and it must be the same predicate for both:
+ * the two answers meet at an optional callback (`cb?: (v: T) => R`), where
+ * the declared type and the argument type are the same
+ * `((v: T) => R) | null | undefined` union.
+ *
+ * Both fail-open cases are deliberate. `any`/`unknown` has no call signatures
+ * and is still treated as callable, and a union is decided by its
+ * constituents rather than by the union itself, which has none however
+ * callable its members are.
+ */
+function isCallableType(type: ts.Type): boolean {
   if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) return true;
-  if (type.isUnion()) return type.types.some(isCallableParameterType);
+  if (type.isUnion()) return type.types.some(isCallableType);
   return type.getCallSignatures().length > 0;
 }
 

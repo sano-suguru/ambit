@@ -26,9 +26,9 @@
       "byClassification": {
         "not-yet-ported": 7
       },
-      "authorityParity": 0.9792,
-      "calleeResolutionParity": 0.9737,
-      "unknownRateDelta": 0.0208,
+      "authorityParity": 0.9808,
+      "calleeResolutionParity": 0.9756,
+      "unknownRateDelta": 0.0192,
       "decisionsAgree": true
     },
     "test/fixtures/backend-smoke": {

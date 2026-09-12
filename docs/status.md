@@ -35,7 +35,7 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | Third-party backends `ambit diff` is silent on when nothing changed | **3** — Unleash ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)), immich ([2026-09-11](measurements/2026-09-11-second-third-party-validation-immich.md)), outline ([2026-09-11](measurements/2026-09-11-third-third-party-validation-outline.md)) | — |
 | `unknown` rate, second third-party backend (immich `server/src`, 3,191 functions) | 79.9% (2,550/3,191) | no target (see below) |
 | `unknown` rate, third third-party backend (outline `server`, 2,245 functions) | 72.8% (1,635/2,245) | no target (see below) |
-| Tests | 604 passing, 34 files | green |
+| Tests | 623 passing, 35 files | green |
 | `tsc --noEmit` / `biome ci .` | pass / pass | pass |
 | `check src` latency, 40 files | ~1.1 s | §3.5's 3 s allowance |
 | Incremental / resident analysis | no | yes (§6.2) |
@@ -289,7 +289,7 @@ package no bundled table covers has no exit short of `@boundary`
    the change improved anything. The corpus refuses to run against a drifted
    checkout, so the number is comparable across commits.
 2. `check src --coverage`'s `unresolved-by-reason` breakdown alongside it —
-   currently `builtin-method` 13, and `external-module` carrying the rest.
+   currently `builtin-method` 17, and `external-module` carrying the rest.
 3. Re-run M0.5 gates 3 and 4 once §6.2's resident path exists. Until then
    native's 1 ms re-query has nowhere in the product to appear, which is the
    second of §3.5's three conditions for reopening the backend decision.
