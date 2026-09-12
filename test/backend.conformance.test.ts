@@ -320,6 +320,55 @@ describe("backend conformance: optional callback slots (§3.5 gate 1)", () => {
     expect(then?.callbackTargets).toEqual(["optional-callbacks.ts#double"]);
     expect(then?.callbackByReference).toBeUndefined();
   });
+
+  /**
+   * The narrowing's other half, and the one a backend loses *silently*: the
+   * declared parameter list decides whether a position is a callback slot at
+   * all. `Object.keys(o: {})` and `new Proxy(…, handler: ProxyHandler<T>)`
+   * are not callback slots, so an argument the argument-side test calls
+   * "may be callable" — `any` — must not make either site opaque.
+   *
+   * A backend that cannot read the parameter list falls open at every index
+   * and reports `callbackByReference` on both. That is the conservative
+   * direction, so no verdict is unsafe; what it costs is the `unknown` rate,
+   * on every call in the project at once. Measured as eleven of the fifteen
+   * `drizzle-orm` divergences in
+   * `docs/measurements/2026-09-12-callable-slot-handle.md`.
+   */
+  it("does not count an any-typed argument in a non-callback slot as opaque", async () => {
+    const calls = await callsOf(
+      "optional-callbacks.ts",
+      "optional-callbacks.ts#passesAnyToNonCallbackSlot",
+    );
+    const keys = calls.find((c) => c.pureBuiltinName === "ObjectConstructor.keys");
+    expect(keys).toBeDefined();
+    expect(keys?.callbackByReference).toBeUndefined();
+  });
+
+  it("does not count an any-typed constructor argument in a non-callback slot as opaque", async () => {
+    const calls = await callsOf(
+      "optional-callbacks.ts",
+      "optional-callbacks.ts#passesAnyToNonCallbackConstructorSlot",
+    );
+    const proxy = calls.find((c) => c.calleeQualifiedName === "new Proxy");
+    expect(proxy).toBeDefined();
+    expect(proxy?.callbackByReference).toBeUndefined();
+  });
+
+  /**
+   * The union case, where the argument test genuinely answers "may be
+   * callable" and is right to — one constituent is a function. The slot is
+   * still not a callback slot, and that is what decides.
+   */
+  it("does not count a callable union in a non-callback slot as opaque", async () => {
+    const calls = await callsOf(
+      "optional-callbacks.ts",
+      "optional-callbacks.ts#passesCallableUnionToNonCallbackSlot",
+    );
+    const boolean = calls.find((c) => c.calleeQualifiedName === "Boolean");
+    expect(boolean).toBeDefined();
+    expect(boolean?.callbackByReference).toBeUndefined();
+  });
 });
 
 describe("backend conformance: unions (§3.5 gate 1)", () => {
