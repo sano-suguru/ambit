@@ -36,7 +36,7 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | Third-party backends `ambit diff` is silent on when nothing changed | **3** — Unleash ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)), immich ([2026-09-11](measurements/2026-09-11-second-third-party-validation-immich.md)), outline ([2026-09-11](measurements/2026-09-11-third-third-party-validation-outline.md)) | — |
 | `unknown` rate, second third-party backend (immich `server/src`, 3,191 functions) | 79.9% (2,550/3,191) | no target (see below) |
 | `unknown` rate, third third-party backend (outline `server`, 2,245 functions) | 72.8% (1,635/2,245) | no target (see below) |
-| Tests | 686 passing, 38 files | green |
+| Tests | 689 passing, 38 files | green |
 | `tsc --noEmit` / `biome ci .` | pass / pass | pass |
 | `check src` latency, 42 files | ~1.1 s (last timed at 40 files; not re-timed) | §3.5's 3 s allowance |
 | Incremental / resident analysis | a resident session exists and recomputes everything | yes (§6.2), with a scoped fixed point |
@@ -297,7 +297,7 @@ What is built, and what says so:
 |---|---|---|
 | 0 — canonical diagnostic order | yes | `test/diagnostic-order.test.ts` drives the adopted backend with `files` reversed and asserts the diagnostics, authority records and coverage bytes are identical. `check src --format json` order changed; announced in `CHANGELOG.md` |
 | 1 — `ExtractedProject.modules` | yes | `test/extracted-modules.test.ts`: one entry per source file including a re-export-only barrel, and the per-file slices re-sum to the project aggregates on five fixture roots |
-| 2 — resident session, full rebuild only | yes | `test/resident.differential.test.ts`: 36 cases, every mutation row comparing a resident generation's rendered bytes against a cold `analyze()` over the same tree. The config rows are compared against a cold run in a **separate process** (`test/support/cold-oracle.ts`) as well, because both in-process paths share one module registry and a stale config would make them agree on the same wrong answer |
+| 2 — resident session, full rebuild only | yes | `test/resident.differential.test.ts`: 39 cases, every mutation row comparing a resident generation's rendered bytes against a cold `analyze()` over the same tree. The config rows are compared against a cold run in a **separate process** (`test/support/cold-oracle.ts`) as well, because both in-process paths share one module registry and a stale config would make them agree on the same wrong answer |
 | 3 — scoped fixed point | no | — |
 | 4 — `openProject`, reverse-import re-extraction | no | — |
 | 5 — benchmark, measured numbers | no | — |
@@ -317,16 +317,26 @@ update succeeds, **and the cold path fails on the same tree with the same
 message** — the doubly-broken row is what makes that last clause mean something.
 One self-hosting row runs a session on `src/` itself across two generations.
 
-**An `ambit.config.ts` that imports another module is loaded in a worker
-thread**, because Node's module registry would otherwise hand the config a
-cached copy of what that module exported before it was edited. A config that
-imports nothing pays nothing. The fingerprint's `configHash` covers the same
+**An `ambit.config.ts` that imports anything is loaded in a worker thread**,
+because Node's module registry would otherwise hand the config a cached copy of
+what that module exported before it was edited. "Imports anything" means any
+static `import` or `export … from`, bare or relative, however it is written —
+not the size of the hash closure, which counts only resolved *relative*
+specifiers and so missed both a bare `ambit-ts/config` import and a relative one
+written across several lines. A config that imports nothing pays nothing. The fingerprint's `configHash` covers the same
 transitive closure of *relative* imports; a bare specifier is not followed,
 because a change to an installed package is a resolution change that §6.2
 already answers with a whole rebuild. What the closure walk cannot decide — a
 specifier resolving to no file on disk, a dynamic import — goes into
 `undecidable`. Starting a thread is authority, so `analyze` and the resident
 entry points declare `process` alongside `fs_read`.
+
+One gap is stated rather than closed: a package rewritten in place moves neither
+`configHash` (bare specifiers are outside the closure by design) nor
+`resolutionHash` (the lockfile did not change). The config is still evaluated
+fresh, so the answer is right; what would be wrong is the fingerprint's reuse
+decision, and it is covered today only because `undecidable` is permanently
+non-empty. Phase 4 removes that entry and must answer this first.
 
 **What the design's adversarial table asks for and the suite does not yet
 cover**, so the next phase starts from a known list rather than from a

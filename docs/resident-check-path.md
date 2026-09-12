@@ -560,6 +560,28 @@ changed, so a reader of an earlier draft is not left with a stale picture.
      nothing. The cost is one worker start, and it buys the only behaviour §6.2
      accepts. `AmbitConfig` is plain data, so it crosses the thread boundary by
      structured clone.
+
+     **"Imports anything" is its own question, and deriving it from the hash
+     closure was wrong.** The first attempt used `files.length > 1`, which is
+     the count of *relative* specifiers that resolved — so a config importing
+     only `ambit-ts/config`, and a config whose relative import was written
+     across several lines, both produced a one-element closure and took the path
+     that cannot see an edited dependency. Both were reproduced. The load
+     decision is now `ConfigDependencies.hasImports`, which is set by any static
+     `import` or `export … from`, bare or relative, however it is written, and
+     the scanner no longer stops at the first newline. A shape it still cannot
+     read a specifier out of is counted and reported as `undecidable` rather
+     than passed over — the scan is allowed to see an import that is not there,
+     and never allowed to miss one that is.
+
+     What this does *not* close: a package rewritten in place changes neither
+     `configHash` (bare specifiers are not in the closure, by design) nor
+     `resolutionHash` (the lockfile did not move). The config is still
+     *evaluated* fresh, so the answer is right; it is the fingerprint's reuse
+     decision that would be wrong, and it is covered only because
+     `undecidable` is permanently non-empty until phase 4. **Phase 4 must not
+     remove that entry without answering this**, which is why it is written
+     here rather than left to be rediscovered.
    - **The fingerprint.** `configHash` now covers the config *and the
      transitive closure of its relative imports*, not the config's text alone.
      A bare specifier is not followed: it names a package, and a change there is

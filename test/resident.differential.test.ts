@@ -6,7 +6,9 @@ import process from "node:process";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   type AnalysisResult,
+  type ConfigDependencies,
   computeFingerprint,
+  configDependencies,
   fingerprintPermitsReuse,
   openResidentSession,
   type ResidentSession,
@@ -531,6 +533,94 @@ describe("resident session: each mutation's update equals a cold run over the sa
     expect(render(result.analysis)).toBe(render(await analyze(dir)));
   });
 
+  it("an ambit.config.ts helper reached through a multiline import, edited", async () => {
+    const dir = copyFixture("cross-module");
+    write(
+      dir,
+      "config-contracts.ts",
+      'export const contracts = {\n  "builtin-named-import.ts#callsBuiltinNamedImport": { effects: ["fs_read"] },\n};\n',
+    );
+    // The binding list runs across several lines. A scanner that stops at the
+    // first newline reads this file as importing nothing, takes the path that
+    // cannot see an edited dependency, and answers out of the previous
+    // generation — with the in-process oracle agreeing, because it went stale
+    // too. That was a live defect, not a hypothetical.
+    write(
+      dir,
+      "ambit.config.ts",
+      'import {\n  contracts,\n} from "./config-contracts.ts";\n\nexport default { contracts };\n',
+    );
+    const session = await open(dir);
+    expect(
+      declaredOf(session.current(), "builtin-named-import.ts#callsBuiltinNamedImport"),
+    ).toEqual(["fs_read"]);
+
+    write(
+      dir,
+      "config-contracts.ts",
+      'export const contracts = {\n  "builtin-named-import.ts#callsBuiltinNamedImport": { effects: ["network"] },\n};\n',
+    );
+    const result = await session.update();
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+
+    expect(declaredOf(result.analysis, "builtin-named-import.ts#callsBuiltinNamedImport")).toEqual([
+      "network",
+    ]);
+    expect(render(result.analysis)).toBe(renderColdInSeparateProcess(dir));
+  });
+
+  it("an ambit.config.ts whose only import is a bare specifier", async () => {
+    const dir = copyFixture("cross-module");
+    // A real installed package, so the bare specifier resolves the way a
+    // consumer's `ambit-ts/config` would. `node_modules` is outside the
+    // analysis root's file set, so it changes nothing about what is checked.
+    write(
+      dir,
+      "node_modules/config-helper/package.json",
+      `${JSON.stringify({ name: "config-helper", version: "1.0.0", type: "module", main: "index.js" })}\n`,
+    );
+    write(
+      dir,
+      "node_modules/config-helper/index.js",
+      'export const contracts = { "builtin-named-import.ts#callsBuiltinNamedImport": { effects: ["network"] } };\n',
+    );
+    // Nothing relative is imported, so the hash closure is the config alone —
+    // and the config still has a dependency Node caches by URL. Deciding how to
+    // load from the closure's *size* put this config on the cheap path; the
+    // decision is `hasImports`, which a bare specifier sets exactly as a
+    // relative one does.
+    write(
+      dir,
+      "ambit.config.ts",
+      'import { contracts } from "config-helper";\n\nexport default { contracts };\n',
+    );
+    const session = await open(dir);
+    expect(
+      declaredOf(session.current(), "builtin-named-import.ts#callsBuiltinNamedImport"),
+    ).toEqual(["network"]);
+    expect(render(session.current())).toBe(renderColdInSeparateProcess(dir));
+
+    // Rewrite the installed package. The config file's own text does not
+    // change and neither does the hash closure — a bare specifier is
+    // deliberately not in it. What has to happen anyway is that the next
+    // generation *evaluates* the config against the new package rather than
+    // against the copy Node cached, which is what `hasImports` decides.
+    write(
+      dir,
+      "node_modules/config-helper/index.js",
+      'export const contracts = { "builtin-named-import.ts#callsBuiltinNamedImport": { effects: ["fs_read"] } };\n',
+    );
+    const result = await session.update();
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+
+    expect(declaredOf(result.analysis, "builtin-named-import.ts#callsBuiltinNamedImport")).toEqual([
+      "fs_read",
+    ]);
+    expect(render(result.analysis)).toBe(renderColdInSeparateProcess(dir));
+  });
+
   it("a change, then the same change reverted", async () => {
     const dir = copyFixture("cross-module");
     const session = await open(dir);
@@ -859,6 +949,47 @@ describe("ProjectFingerprint fails toward rebuilding", () => {
     expect(fingerprintOf(dir).undecidable.some((reason) => /dynamic import/.test(reason))).toBe(
       true,
     );
+  });
+
+  it("sets hasImports for every import shape, and only for a real one", async () => {
+    const dir = copyFixture("cross-module");
+    const dependenciesFor = (source: string): ConfigDependencies => {
+      write(dir, "ambit.config.ts", source);
+      return configDependencies(path.join(dir, "ambit.config.ts"));
+    };
+
+    // No import at all: the cheap content-query path, and it must stay cheap —
+    // this is what almost every config looks like.
+    expect(dependenciesFor("export default { contracts: {} };\n").hasImports).toBe(false);
+
+    // A bare specifier. Not in the hash closure (a package change is a
+    // resolution change), but still a module Node caches by URL.
+    expect(
+      dependenciesFor(
+        'import { defineConfig } from "ambit-ts/config";\nexport default defineConfig({});\n',
+      ).hasImports,
+    ).toBe(true);
+
+    // The shape that was silently missed: a binding list across several lines.
+    const multiline = dependenciesFor(
+      'import {\n  contracts,\n} from "./config-contracts.ts";\nexport default { contracts };\n',
+    );
+    expect(multiline.hasImports).toBe(true);
+
+    // Side-effect import, and a re-export.
+    expect(dependenciesFor('import "./side-effect.ts";\nexport default {};\n').hasImports).toBe(
+      true,
+    );
+    expect(dependenciesFor('export * from "./other.ts";\nexport default {};\n').hasImports).toBe(
+      true,
+    );
+
+    // A string containing the word `from` inside the exported object is not an
+    // import — but if the scan ever reads it as one, the cost is a worker
+    // start, never a stale answer. The direction this is allowed to be wrong in
+    // is the expensive one.
+    const prose = dependenciesFor('export default { contracts: { "a.ts#f": { effects: [] } } };\n');
+    expect(prose.undecidable).toEqual([]);
   });
 
   it("reports an `extends` chain as undecidable rather than hashing past it", async () => {

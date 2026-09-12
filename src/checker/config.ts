@@ -84,19 +84,60 @@ function isProjectBoundary(dir: string): boolean {
 export interface ConfigDependencies {
   readonly files: readonly string[];
   readonly undecidable: readonly string[];
+  /**
+   * Whether the config's graph contains a static `import` or `export … from`
+   * at all — **bare specifiers included**, and independent of whether the
+   * specifier could be followed.
+   *
+   * Separate from `files.length > 1` because the two answer different
+   * questions. {@link files} is what to *hash*, and a bare specifier is
+   * deliberately not in it: it names a package, and a change there is a
+   * resolution change that DESIGN.md §6.2 already answers with a whole
+   * rebuild. This flag is what decides how to *load*, and there a bare
+   * specifier matters exactly as much as a relative one — Node caches both by
+   * URL, so a config that imports anything must be evaluated in a registry of
+   * its own or it is rebuilt out of whatever was cached.
+   *
+   * Deriving the load decision from `files.length` was a live defect: a config
+   * importing only `ambit-ts/config`, or one whose relative import was written
+   * across several lines, produced a one-element `files` and an empty
+   * `undecidable`, and took the path that cannot see an edited dependency.
+   */
+  readonly hasImports: boolean;
 }
 
-/**
- * A static `import` / `export … from`, or a dynamic `import(...)`, with a
- * string-literal specifier. Deliberately a text scan and not a parse: this
- * runs on one small file, it must not pull in a compiler (§6.1 keeps
- * `src/checker/config.ts` compiler-free), and every shape it *fails* to
- * recognize is caught by {@link DYNAMIC_IMPORT} below, which fails toward
- * "undecidable" rather than toward a smaller closure.
+/*
+ * Reading a config's imports without a parser.
+ *
+ * A text scan rather than a parse, because this runs on one small file and
+ * §6.1 keeps this module compiler-free. A scan can be wrong in two directions
+ * and only one of them is tolerable: seeing an import that is not there costs a
+ * worker start, while missing one that is there means loading a config out of a
+ * cached dependency and reporting the stale answer as current (§3.4). So the
+ * patterns below over-match by design, and {@link UNREAD_SPECIFIER_REASON}
+ * covers what they still cannot read.
  */
-const STATIC_SPECIFIER = /(?:^|[\s;}])(?:import|export)\s[^;\n]*?["']([^"']+)["']/g;
+
+/**
+ * `import … from "x"` and `export … from "x"`.
+ *
+ * `[^;]*?` excludes only the statement terminator, so the binding list may run
+ * across as many lines as it likes — which is the shape the first version of
+ * this scanner (`[^;\n]*?`) silently missed.
+ */
+const FROM_SPECIFIER = /(?:^|[\s;}])(?:import|export)\b[^;]*?\bfrom\s*["']([^"']+)["']/g;
+/** `import "x"` — a side-effect import, which has no `from`. */
+const SIDE_EFFECT_IMPORT = /(?:^|[\s;}])import\s*["']([^"']+)["']/g;
+/**
+ * Anything that *starts* a static import or an `export … from`. Counted, not
+ * captured: comparing this count with the specifiers actually read is how a
+ * shape neither pattern above understands becomes `undecidable` instead of
+ * becoming silence.
+ */
+const IMPORT_LIKE = /(?:^|[\s;}])(?:import\b|export\b[^;]*?\bfrom\b)/g;
 /** Any `import(` at all, whether or not its argument is a literal. */
-const DYNAMIC_IMPORT = /\bimport\s*\(/;
+const DYNAMIC_IMPORT = /\bimport\s*\(/g;
+const UNREAD_SPECIFIER_REASON = "has an import whose specifier could not be read statically";
 
 /**
  * The config's dependency closure, walked from `configPath`.
@@ -112,6 +153,7 @@ const DYNAMIC_IMPORT = /\bimport\s*\(/;
 export function configDependencies(configPath: string): ConfigDependencies {
   const files = new Set<string>();
   const undecidable: string[] = [];
+  let hasImports = false;
   const queue: string[] = [path.resolve(configPath)];
 
   while (queue.length > 0) {
@@ -128,9 +170,20 @@ export function configDependencies(configPath: string): ConfigDependencies {
     }
     files.add(current);
 
-    for (const match of text.matchAll(STATIC_SPECIFIER)) {
-      const specifier = match[1];
-      if (specifier === undefined || !specifier.startsWith(".")) continue;
+    const specifiers: string[] = [];
+    for (const match of text.matchAll(FROM_SPECIFIER)) {
+      if (match[1] !== undefined) specifiers.push(match[1]);
+    }
+    for (const match of text.matchAll(SIDE_EFFECT_IMPORT)) {
+      if (match[1] !== undefined) specifiers.push(match[1]);
+    }
+    if (specifiers.length > 0) hasImports = true;
+
+    for (const specifier of specifiers) {
+      // Only relative specifiers join the closure. A bare one names a package
+      // — see `ConfigDependencies.hasImports` for why it still decides how the
+      // config is loaded.
+      if (!specifier.startsWith(".")) continue;
       const resolved = resolveRelativeSpecifier(current, specifier);
       if (resolved === undefined) {
         undecidable.push(`${current} imports ${specifier}, which resolves to no file on disk`);
@@ -138,12 +191,23 @@ export function configDependencies(configPath: string): ConfigDependencies {
       }
       queue.push(resolved);
     }
-    if (DYNAMIC_IMPORT.test(text)) {
+
+    const dynamic = [...text.matchAll(DYNAMIC_IMPORT)].length;
+    if (dynamic > 0) {
       undecidable.push(`${current} uses a dynamic import, whose target cannot be read statically`);
+      hasImports = true;
+    }
+    // What started like an import and produced no specifier is a shape the
+    // patterns do not understand. It has to be reported, because the whole
+    // value of this walk is that an unchanged hash means something.
+    const importLike = [...text.matchAll(IMPORT_LIKE)].length;
+    if (importLike > 0) hasImports = true;
+    if (importLike - dynamic > specifiers.length) {
+      undecidable.push(`${current} ${UNREAD_SPECIFIER_REASON}`);
     }
   }
 
-  return { files: [...files].sort(), undecidable };
+  return { files: [...files].sort(), undecidable, hasImports };
 }
 
 /**
@@ -210,7 +274,11 @@ export async function loadConfig(startDir: string): Promise<LoadedConfig | undef
   // module satisfies that by re-deriving from stale data, which is the failure
   // §3.4 forbids wearing the shape of a success.
   const dependencies = configDependencies(configPath);
-  const importsSomething = dependencies.files.length > 1 || dependencies.undecidable.length > 0;
+  // `hasImports`, not `files.length > 1`. The closure holds only the relative
+  // specifiers worth hashing, so a config importing `ambit-ts/config` — or one
+  // whose relative import is written across several lines — has a one-element
+  // closure and still has a dependency Node will serve from cache.
+  const importsSomething = dependencies.hasImports || dependencies.undecidable.length > 0;
 
   let defaultExport: unknown;
   try {
