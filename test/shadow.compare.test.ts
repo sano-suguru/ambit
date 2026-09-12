@@ -211,19 +211,19 @@ describe("divergence shapes are reported with their own category", () => {
       root: "t",
       authority: { ...EMPTY, calls: [{ ...call, resolvedCallee: "a.ts#g" as SymbolId }] },
       shadow: { ...EMPTY, calls: [{ ...call, unresolvedReason: "unresolved-symbol" }] },
-      notPorted: ["resolution:instance-member"],
+      notPorted: ["resolution:example-shape"],
       // What the real pipeline passes: the code the backend reported at the
       // moment it declined. A shape the port has not taken on must not read as
       // a compiler disagreement, or the remaining divergences stop being worth
       // reading — but the claim has to come from the backend, not from the
       // rendered pair resembling a rule.
-      shadowDeclined: new Map([[call.location, "resolution:instance-member"]]),
+      shadowDeclined: new Map([[call.location, "resolution:example-shape"]]),
     });
     const found = report.divergences.find((d) => d.category === "callee-resolution");
     expect(found?.authorityValue).toBe("resolved=a.ts#g");
     expect(found?.shadowValue).toBe("unresolvedReason=unresolved-symbol");
     expect(found?.classification).toBe("not-yet-ported");
-    expect(found?.note).toContain("resolution:instance-member");
+    expect(found?.note).toContain("resolution:example-shape");
   });
 
   it("leaves the same pair unclassified when the backend declared nothing", () => {
@@ -341,13 +341,13 @@ describe("classification reads structured codes, and never lowers risk", () => {
           call(other, { kind: "unresolved", reason: "external-module" }),
         ],
       },
-      notPorted: ["resolution:instance-member"],
-      shadowDeclined: new Map([[declined, "resolution:instance-member"]]),
+      notPorted: ["resolution:example-shape"],
+      shadowDeclined: new Map([[declined, "resolution:example-shape"]]),
     });
     const at = (location: string) =>
       report.divergences.find((d) => d.category === "direct-effect" && d.location === location);
     expect(at(declined)?.classification).toBe("not-yet-ported");
-    expect(at(declined)?.note).toContain("resolution:instance-member");
+    expect(at(declined)?.note).toContain("resolution:example-shape");
     expect(at(other)?.classification).toBe("unclassified");
     // Classifying one of them changed neither's risk.
     expect(at(declined)?.risk).toBe("high");

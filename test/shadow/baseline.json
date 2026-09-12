@@ -1,7 +1,6 @@
 {
   "schema": "ambit-shadow-baseline/1",
   "notPorted": [
-    "resolution:instance-member",
     "project:no-tsconfig-fallback"
   ],
   "roots": {
@@ -26,15 +25,13 @@
       "decisionsAgree": true
     },
     "test/fixtures/backend-smoke": {
-      "divergences": 7,
-      "highRisk": 4,
+      "divergences": 0,
+      "highRisk": 0,
       "unclassified": 0,
-      "byClassification": {
-        "not-yet-ported": 7
-      },
-      "authorityParity": 0.9833,
-      "calleeResolutionParity": 0.9778,
-      "unknownRateDelta": 0.0167,
+      "byClassification": {},
+      "authorityParity": 1,
+      "calleeResolutionParity": 1,
+      "unknownRateDelta": 0,
       "decisionsAgree": true
     },
     "test/fixtures/cross-module": {

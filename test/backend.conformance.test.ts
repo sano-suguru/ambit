@@ -475,6 +475,73 @@ describe("backend conformance: the object-literal receiver (§4.2 rule 7)", () =
   });
 });
 
+describe("backend conformance: the constructed-instance receiver (§4.2 rule 7)", () => {
+  /**
+   * `X.p()` where `X` is a `const` bound to one `new`. §4.2 rule 7 names this
+   * and the object-literal receiver in the same breath, and the premise is the
+   * same one: `const` fixes the binding, not the object.
+   *
+   * Every receiver below carries a type annotation, and that is what makes
+   * these tests of the rule rather than of the checker. Without one the
+   * checker answers with the class's own member and the receiver is never
+   * consulted — so an unannotated `let` would pass a test it does not
+   * exercise.
+   */
+  it("follows the value through an annotation the checker would answer with", async () => {
+    const calls = await callsOf("instance-receiver.ts", "instance-receiver.ts#callsAnnotated");
+    expect(calls.map((c) => c.resolvedCallee)).toEqual(["instance-receiver.ts#Engine.run"]);
+  });
+
+  /**
+   * Both classes declare `run`. An override is the implementation reached at
+   * runtime, so the chain is walked derived-first; a walk that took the base's
+   * member would name a body that never runs and hand the call that body's
+   * declared authority.
+   */
+  it("prefers the override over the base member of the same name", async () => {
+    const calls = await callsOf("instance-receiver.ts", "instance-receiver.ts#callsOverride");
+    expect(calls.map((c) => c.resolvedCallee)).toEqual(["instance-receiver.ts#Tuned.run"]);
+  });
+
+  it("reaches the base for a member only the base declares", async () => {
+    const calls = await callsOf("instance-receiver.ts", "instance-receiver.ts#callsInherited");
+    expect(calls.map((c) => c.resolvedCallee)).toEqual(["instance-receiver.ts#Engine.idle"]);
+  });
+
+  it("does not follow a `let` receiver, which may hold another object by then", async () => {
+    const calls = await callsOf("instance-receiver.ts", "instance-receiver.ts#callsMutable");
+    expect(calls[0]?.resolvedCallee).toBeUndefined();
+  });
+
+  /**
+   * An ambient class is excluded by having no indexed member, not by a check
+   * on the declaring file: the walk reaches `Set` and finds nothing there.
+   * `Set.add` stays what it is — a mutation of an escaping receiver — rather
+   * than becoming a resolved project target.
+   */
+  it("finds nothing on an ambient class, leaving the builtin classified as one", async () => {
+    const calls = await callsOf(
+      "instance-receiver.ts",
+      "instance-receiver.ts#callsBuiltinInstance",
+    );
+    expect(calls[0]?.resolvedCallee).toBeUndefined();
+    expect(calls[0]?.mutation?.qualifiedName).toBe("Set.add");
+  });
+
+  /**
+   * A class *expression* bound to a `const` has no extracted members, so there
+   * is no id to resolve to. Recorded because it is the shape a reader would
+   * expect the rule to cover and it does not — not because it is desirable.
+   */
+  it("resolves nothing through a class expression, whose members are not extracted", async () => {
+    const calls = await callsOf(
+      "instance-receiver.ts",
+      "instance-receiver.ts#callsClassExpression",
+    );
+    expect(calls[0]?.resolvedCallee).toBeUndefined();
+  });
+});
+
 describe("backend conformance: recursion (§3.5 gate 1)", () => {
   /**
    * §4.2 rule 7 iterates the propagation to a fixed point; that needs the
