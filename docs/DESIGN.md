@@ -611,6 +611,45 @@ For agents and editors, a resident check path holds the analysis engine's state 
 - Do not carry snapshot-specific types and symbol IDs across an update. Maintain a correspondence to files and declaration paths.
 - Measure initial analysis, type-information retrieval, contract analysis, transfer, and diagnostic output separately.
 
+The rest of this section is what any implementation of that has to satisfy. The reasoning behind the architecture chosen for it is [ADR-0014](adr/0014-the-resident-check-path.md). How it is to be built is [`docs/resident-check-path.md`](resident-check-path.md), which is a design note and not a guarantee.
+
+**The equivalence law.** For any tree and any sequence of edits, the resident path's result must equal what a cold run over the same tree produces — the same diagnostics, the same `kind: "authority"` records, the same coverage counts, in the same order. Not "the same violations": the same bytes, including the `via` chains and the `unresolved` multisets, because `ambit diff` compares the records and an agent reads the chains. A resident path that is merely *usually* equal is a path by which a violation disappears without anyone being told, which is what §3.4 forbids. Speed is what the resident path is for; equality is what makes it usable at all, and the two are not traded against each other.
+
+**Being unable to update is a failure, not an answer.** An update that throws — a tsconfig that stopped parsing, a config file that no longer loads, two declarations that collided on one symbol id (§4.1) — leaves the resident state at the last generation it committed and is reported as a failure with the same exit code and the same distinction a one-shot run would give it. The previous generation's diagnostics are never re-served as though they described the current tree. An update is therefore all-or-nothing: a generation is committed only once every phase of it has completed.
+
+**What invalidates what.** The table is the minimum; an implementation may re-check more than a row requires and may never re-check less.
+
+| What changed | What must be re-checked |
+|---|---|
+| A file's text, including its JSDoc alone | That file, and every file that depends on it, transitively. A contract comment is a change like any other (§4.1) |
+| A file deleted | The same closure, plus the symbols the file held, which cease to exist. Every file whose resolution the deletion can change already held an edge to it, so the closure finds them all |
+| A file added | Every file. A specifier that resolved to nothing, or to a lower-precedence candidate, held no edge to the file that did not exist yet, so no closure over the edges already held can find the files a new file changes |
+| A file renamed | Treated as a delete and an add. The resident path makes no rename guess; `ambit diff` alone reconciles identity across a rename, and it does so from git (§6) |
+| A `.d.ts`, a global augmentation, or a file that is not a module | Every file. None of them is reached through an import edge, and all of them change how names elsewhere resolve |
+| A file the project holds but the checked directory does not contain | Every file. Nothing under the root points at it through an edge the analysis holds, and it can still decide what a name under the root resolves to |
+| `ambit.config.ts` — contracts, effect aliases, `strict` globs | Every function's contract is re-derived from the extraction already held. Extraction itself is unaffected: no contract in the config can change how a call resolves |
+| `tsconfig.json`, or any compiler option | Everything. A changed option can change which files are in the project and what every name in them resolves to |
+| Module resolution — `package.json`, a lockfile, anything installed | Everything. A resolution already made is not re-made by an incremental compiler update, so the only honest answer is to start again |
+| The analysis engine's name or version, or Ambit's own bundled stubs (§8) | Everything. The stub tables decide effects *and* take part in extraction, so a change to them is a change of engine |
+
+**Nothing snapshot-specific is retained.** What survives an update is Ambit's own representation and nothing else: symbol ids (§5.3), positions already converted to the 1-based convention, and the analysis representation §3.4's second layer describes. A compiler node, type, signature, or internal id is valid for the snapshot that produced it and is discarded with it — a rule the connection layer already enforces at the `ambit check` boundary, and which the resident path must not weaken by holding such a value in state that outlives one update. A symbol id needs no reconciliation across an update, because it is derived from the file path and the declaration path and from nothing the snapshot owns: the same declaration yields the same id in every generation, a moved or renamed declaration yields a different one, and the difference is a symbol appearing and another disappearing, which is what it is.
+
+**Phases are measured separately.** A resident update reports its own cost broken into the phases below, so that §3.5's gates 3 and 4 can be re-measured on the product rather than on a probe, and so that a later backend comparison measures the same phases on both sides.
+
+| Phase | What it covers |
+|---|---|
+| `project-update` | Bringing the analysis engine's state up to date with the changed files |
+| `extraction` | Obtaining declarations, contracts, and call sites for the files being re-extracted |
+| `impact` | Deciding which functions the change can reach, over the reverse call graph |
+| `summarize` | Turning extraction into function summaries, contracts merged |
+| `propagate` | The fixed point over the impact range |
+| `report` | Diagnostics, authority records, coverage |
+| `transfer` | Moving data between processes, where a backend is process-separated. Zero, and reported as zero, where it is not |
+
+The initial analysis reports the same phases, so a first check and a re-check are comparable without subtracting one schema from another.
+
+**None of this is the guaranteed surface.** §9.2 puts the existence of a resident path, and of any cache, outside what a release announces — an implementation may change, be turned off, or be replaced without notice, because the equivalence law means no consumer can tell which one answered. A command or flag that *exposes* it is on the list like every other flag, and is announced.
+
 ### 6.3 Approving an authority increase
 
 `ambit diff` (§6) detects that authority grew. Detection alone cannot gate a

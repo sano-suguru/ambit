@@ -291,6 +291,10 @@ directly — fixtures alone cannot catch a shape only the real codebase has.
   `docs/limitations.md`
 - The same at the AST corner-case level, for whoever maintains the checker →
   `docs/analysis-limitations.md`
+- How an unbuilt part of `docs/DESIGN.md` is to be built, for whoever builds it →
+  a design note beside it (`docs/resident-check-path.md` is the first).
+  A note like that is deleted, or folded into `docs/analysis-limitations.md`,
+  once `docs/status.md` says the thing is built — it describes work, not behavior
 - Current measured numbers, and the verdict they support → `docs/status.md`
 - The measurement runs behind those numbers, dated → `docs/measurements/`
 - What is undecided → `docs/open-questions.md`
