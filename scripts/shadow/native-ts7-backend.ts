@@ -62,7 +62,6 @@ import { isOnExceed, symbolId } from "../../src/core/index.ts";
 import { constructorStubKey } from "../../src/stubs/constructors.ts";
 import { isFirstArgumentMutator, isMutatingBuiltin } from "../../src/stubs/mutating-builtins.ts";
 import { loadAst, loadAstIs, loadSyncApi, nativeVersion } from "../m05-probe/native-compiler.ts";
-import { locationKey } from "./normalize.ts";
 
 // biome-ignore lint/suspicious/noExplicitAny: the compiler's own types are not available here
 type Node = any;
@@ -76,14 +75,11 @@ type Any = any;
  * see `scripts/shadow/compare.ts`.
  */
 export const NOT_PORTED: readonly string[] = [
-  // `constructedInstanceMemberTarget`: a call through a receiver whose value
-  // is certainly one constructed class instance. `objectLiteralMemberTarget`
-  // and `objectLiteralReceiverTarget` are both ported — a call through a
-  // receiver bound to one object literal is resolved here, not declined.
-  // `Extractor.recordDeclinedShape` emits this code at the sites it declines,
-  // so a divergence there is classified from the backend's own report rather
-  // than from the text of the rendered pair.
-  "resolution:instance-member",
+  // Every call-resolution shape `legacy-ts.ts` implements is now ported:
+  // `objectLiteralMemberTarget`, `objectLiteralReceiverTarget` and
+  // `constructedInstanceMemberTarget`. Nothing writes `Extractor.declined` as
+  // a result, and a resolution divergence is now a disagreement to explain
+  // rather than a gap to name.
   // The legacy backend scans for `.ts` files when there is no `tsconfig.json`;
   // this one throws instead, because the native API opens a project by config
   // path.
@@ -419,7 +415,13 @@ class Extractor {
   private readonly program: Any;
   private readonly checker: Any;
   private readonly declaredNodeToId = new Map<Node, SymbolId>();
-  /** See {@link DeclinedReasons}; filled as pass 2 declines a shape it has not ported. */
+  /**
+   * See {@link DeclinedReasons}. **Nothing writes this today** — every
+   * call-resolution shape `legacy-ts.ts` implements is ported, so pass 2 has
+   * no shape to decline. The channel stays because `NOT_PORTED` is the claim
+   * that a gap gets *declared* rather than left to look like a disagreement,
+   * and the next unported shape needs somewhere to say so.
+   */
   readonly declined = new Map<string, string>();
   private readonly project: Any;
   private readonly absoluteRoot: string;
@@ -1312,10 +1314,9 @@ class Extractor {
     // signature instead of the literal's own member — the shape of Ambit's own
     // `legacyTsBackend: TsBackend = { extractProject }`. Same position in the
     // chain as `legacy-ts.ts`'s `classifyCall`, and the same guards.
-    const receiverMemberId = this.objectLiteralReceiverTarget(callee);
+    const receiverMemberId =
+      this.objectLiteralReceiverTarget(callee) ?? this.constructedInstanceMemberTarget(callee);
     if (receiverMemberId) return { location, resolvedCallee: receiverMemberId };
-
-    this.recordDeclinedShape(callee, location);
 
     const importBindingReason: UnresolvedReason | undefined =
       isAlias && !declaration ? "import-binding" : undefined;
@@ -1495,43 +1496,54 @@ class Extractor {
   }
 
   /**
-   * Record, in a stable code, that this call site sits on a shape `NOT_PORTED`
-   * names — so `scripts/shadow/compare.ts` can classify the resulting
-   * divergence from *data the backend produced* rather than from a substring
-   * of the rendered pair.
+   * The extracted method a receiver bound by `const` to `new C(...)` names,
+   * when `C` is a class this project declares.
    *
-   * The test is the premise of the unported rule and nothing more: a property
-   * access whose receiver is a `const` holding one `new`
-   * (`resolution:instance-member`). It deliberately does not go on to find the
-   * member — that would *be* the port. Saying "this is the shape I did not
-   * implement" is a different and much cheaper claim than "here is what I
-   * would have found", and only the first one is honest for a gap.
+   * A line-for-line port of `legacy-ts.ts`'s `constructedInstanceMemberTarget`.
+   * `const` is the premise and the whole of it — it fixes the binding, not the
+   * object, which is the width DESIGN.md §4.2 rule 7 already states — and the
+   * `extends` chain is walked because an inherited method is the one that runs.
    *
-   * The object-literal receiver is no longer among them:
-   * `objectLiteralReceiverTarget` above is the port, and leaving a declined
-   * code behind for a rule that now exists would let a *genuine* future
-   * disagreement on that shape read as "not yet ported".
+   * Derived before base: a subclass overriding a method is the implementation
+   * reached at runtime, so the first match down the chain wins and the base's
+   * same-named member is never consulted.
+   *
+   * A member of an ambient class is excluded by `declaredNodeToId` having no
+   * id for it, not by a check on the declaring file — `new Set()` walks here
+   * and finds nothing, which is the same answer the adopted backend gives.
    */
-  private recordDeclinedShape(callee: Node, location: SourceLocation): void {
+  private constructedInstanceMemberTarget(callee: Node): SymbolId | undefined {
     const is = this.is;
-    if (!is.isPropertyAccessExpression(callee) || !is.isIdentifier(callee.expression)) return;
+    if (!is.isPropertyAccessExpression(callee) || !is.isIdentifier(callee.expression)) {
+      return undefined;
+    }
     const declaration = this.constInitializedVariableOf(callee.expression);
-    if (!declaration) return;
-    const initializer = unwrapTypeOnlyExpression(is, declaration.initializer);
-    // A `new` only counts when the class is one this project declares. The
-    // unported rule walks the class's own members for the method, so a
-    // receiver holding `new Set()` is not a shape it would have resolved
-    // either — recording one there claims a gap that does not exist, and
-    // claimed eight genuine `shadow-less-authority` disagreements on the
-    // corpus as accounted for when they are a branch-order difference in the
-    // builtin handling and nothing to do with this.
-    if (!is.isNewExpression(initializer)) return;
-    const classDeclaration = this.projectClassOf(initializer.expression);
-    if (classDeclaration) this.declined.set(locationKey(location), "resolution:instance-member");
+    if (!declaration) return undefined;
+    const initializer = this.unwrapTypeOnlyExpression(declaration.initializer);
+    if (!is.isNewExpression(initializer)) return undefined;
+
+    const name = callee.name.text;
+    const visited = new Set<Node>();
+    let current = this.classDeclarationOf(initializer.expression);
+    while (current && !visited.has(current)) {
+      visited.add(current);
+      for (const member of [...current.members]) {
+        if (!member.name || !is.isIdentifier(member.name) || member.name.text !== name) continue;
+        const id = this.declaredNodeToId.get(member);
+        if (id) return id;
+      }
+      const base = this.baseTypeExpressionOf(current);
+      current = base ? this.classDeclarationOf(base) : undefined;
+    }
+    return undefined;
   }
 
-  /** The class-like declaration an expression names, when this project declares it. */
-  private projectClassOf(expression: Node): Node | undefined {
+  /**
+   * The class-like declaration an expression names, ambient ones included —
+   * `legacy-ts.ts`'s `classDeclarationOf`, which applies no filter on the
+   * declaring file either.
+   */
+  private classDeclarationOf(expression: Node): Node | undefined {
     const is = this.is;
     const symbol = this.checker.getSymbolAtLocation(expression);
     if (!symbol) return undefined;
@@ -1539,10 +1551,8 @@ class Extractor {
       (symbol.flags & this.SymbolFlags.Alias) !== 0
         ? this.checker.getAliasedSymbol(symbol)
         : symbol;
-    return this.declarationsOf(resolved).find(
-      (declaration: Node) =>
-        (is.isClassDeclaration(declaration) || is.isClassExpression(declaration)) &&
-        !declaration.getSourceFile().isDeclarationFile,
+    return this.declarationsOf(resolved).find((declaration: Node) =>
+      is.isClassLikeDeclaration(declaration),
     );
   }
 

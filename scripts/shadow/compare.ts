@@ -131,19 +131,23 @@ export interface KnownDivergence {
   readonly note: string;
 }
 
-export const KNOWN_DIVERGENCES: readonly KnownDivergence[] = [
-  {
-    // The structured code is the first thing `classify` consults, and it
-    // covers the resolution shapes at the sites that carry a location. This
-    // rule only reaches the dimensions that carry a *symbol* instead — a
-    // call-graph edge the adopted backend gets from a receiver the shadow
-    // backend does not follow.
-    category: "call-edge",
-    whenAuthorityIncludes: "present",
-    classification: "not-yet-ported",
-    note: "an edge the adopted backend gets from resolution:instance-member (NOT_PORTED)",
-  },
-];
+/**
+ * Empty, and the emptiness is the current finding rather than a placeholder.
+ *
+ * The one rule that lived here matched any `call-edge` whose authoritative
+ * value read `present` — every `shadow-missing` edge, with no condition on the
+ * shadow side at all. `classify` consults `declinedBySymbol` first, so a
+ * missing edge with a declined site behind it never reached this rule; the
+ * only divergence it could still catch was a missing edge with *nothing*
+ * behind it, which is a genuine one, and it labelled that `not-yet-ported`.
+ * It was written when the call-edge dimension had no structured code to
+ * consult and it outlived that.
+ *
+ * A rule added here is a claim about *why* two compilers differ, so it carries
+ * the evidence line that justifies it — never a guess to make a number look
+ * better, and never a condition so wide that a real disagreement satisfies it.
+ */
+export const KNOWN_DIVERGENCES: readonly KnownDivergence[] = [];
 
 export interface ParityCount {
   readonly authorityOnly: number;
