@@ -336,6 +336,83 @@ Three things this says that `src` could not.
   shapes nothing accounted for as two lists, because collapsing them is how a
   parity number stops meaning anything.
 
+### Dependencies removed is a different question, and the A/B says so loudly
+
+The corpus installs nothing, and `corpus.json` justifies that with "moves the
+measurement in the conservative direction only". For the benchmark it describes
+— one backend's `unknown` rate — that is true. **It does not transfer to a
+parity measurement**, and the sentence above was quoted into
+`scripts/shadow-corpus.ts` where it does not hold. The absent types are exactly
+the receiver and type origins the two backends could disagree about, so removing
+them hides divergences as readily as it creates them.
+
+`--with-deps` installs what the measured subtree imports, at the ranges the
+pinned commit's own manifest declares, into `.corpus/<target>/.deps/` reached
+through an untracked symlink. Nothing is written into the pinned tree and no
+version is invented; the resolved versions are printed with the result, because
+a range like `>=8` is not reproducible the way a tree object is. A `--with-deps`
+run is an experiment, never a baseline.
+
+Run on `drizzle-orm` — the corpus target with by far the most external imports,
+and the ORM/driver shape where receiver-origin naming decides whether a call is
+a `db_read`:
+
+```sh
+node scripts/shadow-corpus.ts drizzle-orm            #  43 divergences,   6 high-risk
+node scripts/shadow-corpus.ts drizzle-orm --with-deps  # 167 divergences, 138 high-risk
+```
+
+| | no deps | with deps |
+|---|---|---|
+| divergences | 43 | **167** |
+| high-risk | 6 | **138** |
+| authority parity | 99.96% | 99.89% |
+| callee-resolution parity | 99.99% | 99.42% |
+| authority diff, increases | 0 | **2** |
+| `shadow-less-unknown` | 0 | **105** |
+
+The answer is the opposite of the comfortable one. Stripping dependencies did
+not merely inflate a safe-direction count — **it hid an entire unsafe-direction
+class.** 105 `shadow-less-unknown` divergences and 2 authority *increases*
+appear only with the types present, and every one of them is invisible in the
+numbers the table above this section reports.
+
+What they are, read off the values rather than guessed at: the adopted backend
+reports `reason=any-typed` where the shadow backend resolves the real package
+type.
+
+| ×35 | `reason=any-typed` → `reason=external-module` |
+| ---: | --- |
+| ×4 | `unresolvedReason=any-typed` → `kind=stub effects=[db_read,db_write] operation=mysql2.Connection.query` |
+| ×3 | `unresolvedReason=any-typed` → `name=expo-sqlite.SQLiteStatement.executeSync` |
+| ×2 | `unresolvedReason=any-typed` → `name=mysql2.Query.stream` |
+
+`expo-sqlite/session.ts#ExpoSQLitePreparedQuery.all` calls
+`stmt.executeSync(…)` on a `stmt: SQLiteStatement` imported from `expo-sqlite`.
+TypeScript 7 types that receiver and names the call; TypeScript 6.0.3 types it
+`any`. On four `mysql2` sites the consequence is not a name but an effect: the
+shadow side matches a stub and reports **`db_read, db_write`** where the adopted
+side reports nothing at all.
+
+Three things follow, and the third is the uncomfortable one.
+
+1. **The no-deps corpus understates the divergence by roughly 4x on a
+   dependency-heavy target**, and understates high-risk by more than 20x. The
+   five-repository table above is a floor, not a measurement of these projects.
+2. **`shadow-less-unknown` is correctly flagged high-risk by the rule and is
+   not the unsafe case here.** The rule says "the shadow side admitted less",
+   which is the right default; the values say the shadow side *knew* more.
+   Direction detection erring toward high-risk is what let this surface at all,
+   and the fix is to explain these 105, not to soften the rule.
+3. **This is a `ts6-suspect` on Ambit's own value chain.** If TypeScript 6.0.3
+   types an installed driver's receiver as `any` where 7.0.2 does not, then the
+   *adopted* backend is losing `db_read` and `db_write` on real ORM code — the
+   exact failure Ambit exists to prevent, in the product path, not the shadow
+   one. Not root-caused here: whether it is module resolution under the corpus
+   tsconfig, a checker difference, or an artifact of installing only what the
+   subtree imports is undecided, and asserting one would be a guess. It is the
+   first thing the next investigation should settle, ahead of the 204.
+
 ### New classes, seen only on third-party code
 
 1. **A locally-owned mutating builtin classifies differently** (8 high-risk
@@ -410,21 +487,38 @@ made within-engine instead.
 
 ## Remaining blockers, in order
 
-1. **Root-cause the 204 `unresolved-classification/shadow-more-unknown`** across
+1. **Settle the `any-typed` disagreement first** (the A/B above). 105
+   `shadow-less-unknown` divergences and 2 authority increases on `drizzle-orm`,
+   including four sites where the shadow side reports `db_read, db_write` and
+   the adopted side reports nothing. If TypeScript 6.0.3 really types an
+   installed driver's receiver as `any`, the defect is in the product path, and
+   everything else on this list is smaller than it.
+2. **Re-measure the corpus with `--with-deps` before trusting any of its
+   counts**, including the 204 below. The no-deps run understated `drizzle-orm`
+   by 4x; there is no reason to assume the other four are better behaved, and
+   part of the 204 may be the same artifact.
+3. **Root-cause the 204 `unresolved-classification/shadow-more-unknown`** across
    the corpus. Safe direction, largest class, unexplained — and until it is
    explained, "the shadow side is more conservative" is a description rather
    than a finding.
-2. **The locally-owned mutating builtin branch order** (class 1 above). Eight
+4. **The locally-owned mutating builtin branch order** (class 1 above). Eight
    high-risk entries that are not actually unsafe; fixing the port would remove
    them and make the remaining high-risk count mean what it says.
-3. **Port `resolution:literal-receiver` and `resolution:instance-member`.** The
+5. **Port `resolution:literal-receiver` and `resolution:instance-member`.** The
    last two `NOT_PORTED` shapes and all four of `src`'s high-risk entries.
-4. **`ts6-suspect`: the `@see` URL truncation** in the adopted backend. It
+6. **`ts6-suspect`: the `@see` URL truncation** in the adopted backend. It
    changes no verdict today, which is exactly why it will keep not being fixed
    unless it is written down. It is, in `docs/open-questions.md`.
-5. **The call-site key is still `(symbol, location, ordinal)`.** Two calls at one
+7. **The call-site key is still `(symbol, location, ordinal)`.** Two calls at one
    position in a different source order between backends would pair incorrectly;
    the self-check cannot catch it, and nothing has shown it.
 
 Only after 1–3 is there anything further to say about TypeScript 7, and the thing
 to say would still be about ecosystem parity rather than about `src`.
+
+What the A/B changes about the shape of this work is worth stating plainly. The
+remaining question is no longer "how much of the adopted backend is still
+unported". `NOT_PORTED` is three shapes and none of them appears anywhere in the
+corpus. The question is **how much of the difference between two TypeScript
+implementations can be explained semantically** — and one of the answers so far
+points at the adopted backend, not at the shadow one.

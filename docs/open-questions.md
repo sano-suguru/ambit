@@ -227,6 +227,23 @@ exit: when it fires, the question is decided, the answer goes in the
   carry a second backend as a product — meaningful only once §3.5's conditions
   are met.
   *Trigger:* an adopter whose tsconfig `ambit check` refuses to start on.
+- **`any-typed` on an installed package's receiver, where TypeScript 7 resolves
+  it.** With `drizzle-orm`'s dependencies installed, the adopted backend reports
+  `reason=any-typed` at 105 call sites where the TypeScript 7 shadow backend
+  resolves the declared package type — including four `mysql2` sites where the
+  shadow side matches a stub and reports `db_read, db_write` and the adopted
+  side reports nothing
+  (`docs/measurements/2026-09-12-ts7-shadow-hardening.md`, the `--with-deps`
+  A/B). Reproduce with `node scripts/shadow-corpus.ts drizzle-orm --with-deps`.
+  Undecided, and three readings are open: a module-resolution difference under
+  the corpus tsconfig (`moduleResolution: Bundler`, `types: []`, packages with
+  an `exports` map), a checker difference between 6.0.3 and 7.0.2, or an
+  artifact of installing only the packages the subtree imports. Which one it is
+  decides whether this is a defect in the product backend — losing `db_read` on
+  real ORM code is the failure Ambit exists to prevent — or a property of the
+  measurement. It must be settled before any of the corpus divergence counts
+  are quoted.
+
 - **The adopted backend truncates a JSDoc `@see` URL's scheme.** On `hono`,
   `@see https://developers.cloudflare.com/...` is extracted as
   `see://developers.cloudflare.com/...` by `typescript-legacy@6.0.3` and

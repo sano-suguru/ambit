@@ -3,6 +3,7 @@
  *
  *     node scripts/shadow-corpus.ts            # every corpus target
  *     node scripts/shadow-corpus.ts hono got   # named targets only
+ *     node scripts/shadow-corpus.ts drizzle-orm --with-deps
  *
  * `src` is a poor witness for the ecosystem: one coding style, one set of
  * dependencies, one tsconfig, one module pattern, and the very shapes the
@@ -14,8 +15,20 @@
  * The corpus is `test/corpus/corpus.json`, the same fixed, doubly-pinned set
  * `scripts/bench-corpus.ts` measures against — by commit SHA and by the git
  * tree object of each measured subtree, so a drifted checkout fails loudly
- * rather than quietly moving a number. Dependencies are deliberately not
- * installed, which moves every measurement in the conservative direction only.
+ * rather than quietly moving a number.
+ *
+ * **Dependencies are not installed, and for this measurement that is a
+ * confound rather than a conservative choice.** `corpus.json` says installing
+ * nothing "moves the measurement in the conservative direction only", and for
+ * the benchmark it describes — one backend's `unknown` rate — that is true: a
+ * call into a package whose types are absent stays unresolved, and unresolved
+ * is the safe answer. It does not transfer to a *parity* measurement. Stripping
+ * the types removes exactly the receiver and type origins the two backends
+ * could disagree about, so it can hide a divergence as easily as create one,
+ * and what is being compared stops being "TS6 against TS7 on this project" and
+ * becomes "TS6 against TS7 on this project with its dependencies removed".
+ * Those are different questions. `--with-deps` runs the first one; see
+ * `docs/measurements/2026-09-12-ts7-shadow-hardening.md`.
  *
  * It fetches from the network, so like `bench-corpus.ts` it is **not** in
  * `pnpm test` and not in any CI job. `scripts/shadow-check.ts` is the gate;
@@ -25,9 +38,11 @@
  * was compared, 2 when one could not be.
  */
 
+import { rmSync } from "node:fs";
 import process from "node:process";
 import { ensureCorpus } from "./corpus.ts";
 import type { Divergence } from "./shadow/compare.ts";
+import { corpusDepsLink, installCorpusDeps } from "./shadow/corpus-deps.ts";
 import { NOT_PORTED, nativeTs7Backend } from "./shadow/native-ts7-backend.ts";
 import { compareRoot } from "./shadow/run-root.ts";
 
@@ -44,6 +59,7 @@ async function main(): Promise<number> {
     return 2;
   }
 
+  const withDeps = process.argv.includes("--with-deps");
   const requested = process.argv.slice(2).filter((argument) => !argument.startsWith("--"));
   const targets = ensureCorpus().filter(
     (target) => requested.length === 0 || requested.includes(target.name),
@@ -58,6 +74,21 @@ async function main(): Promise<number> {
   let failed = false;
 
   for (const target of targets) {
+    if (withDeps) {
+      const { resolved, undeclared } = installCorpusDeps(target);
+      process.stdout.write(
+        `\n${target.name}: installed ${resolved.size} package(s) at the pinned manifest's ranges\n`,
+      );
+      process.stdout.write(
+        `  ${[...resolved].map(([name, version]) => `${name}@${version}`).join(" ")}\n`,
+      );
+      if (undeclared.length > 0) {
+        // Imported and not declared anywhere in the manifest — a runtime the
+        // project assumes (`bun`) or its own alias. Named rather than dropped,
+        // because "installed everything it imports" would be false.
+        process.stdout.write(`  not declared, so not installed: ${undeclared.join(" ")}\n`);
+      }
+    }
     const { report, errors } = await compareRoot(target.dir, false);
     if (!report) {
       for (const error of errors) {
@@ -108,6 +139,10 @@ async function main(): Promise<number> {
         `      ${String(row.total).padStart(5)}  ${shape.padEnd(42)} high-risk ${String(row.highRisk).padStart(4)}  classified ${row.classified}/${row.total}\n`,
       );
     }
+    // Taken back out so the next plain run measures the pinned tree. The
+    // install itself stays in `.corpus/<target>/.deps/`, which costs a repeat
+    // run nothing.
+    if (withDeps) rmSync(corpusDepsLink(target), { force: true });
   }
 
   process.stdout.write("\n## across the corpus\n");
