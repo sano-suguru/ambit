@@ -73,6 +73,36 @@ describe("architecture constraint: the resident path holds nothing the compiler 
     // placeholder that would pass the assertion by having no imports at all.
     expect(content).toContain("export class ResidentSession");
   });
+
+  // The resident path's reuse gate hashes every program input that is not an
+  // in-root implementation file, so that a dependency rewritten in place — which
+  // moves neither the lockfile nor `package.json` — cannot be reused past. An
+  // earlier version excluded the default lib's *directory* on the argument that
+  // those files are a function of the engine version and of `lib`/`target`.
+  //
+  // It is the one exclusion that has to stay deleted. It skipped the whole
+  // directory rather than the default libs — `typescript.d.ts` lives there too,
+  // and a project importing `typescript` reads it as a program input — and the
+  // argument behind it contradicts the threat model the map exists for: if a
+  // package can be rewritten without its version moving, so can a file inside
+  // the TypeScript installation, and a version string is not a proof of content
+  // identity.
+  //
+  // This is a source-level rule and it is weaker than a behavioural one, which
+  // is deliberate rather than lazy: exercising the case needs a file inside the
+  // live TypeScript installation to be rewritten mid-run, and a test doing that
+  // would corrupt the compiler every other test file is reading in parallel.
+  // The behaviour is covered where it *can* be exercised — a `node_modules`
+  // dependency and an outside-root source, both in
+  // `test/resident.differential.test.ts` — and those go through this same code
+  // path, because after the deletion there is no path-based branch left in it.
+  it("src/checker/backend/legacy-ts.ts excludes no program input by path", async () => {
+    const file = path.join(PROJECT_ROOT, "src/checker/backend/legacy-ts.ts");
+    const content = await readFile(file, "utf8");
+    expect(content).not.toMatch(/getDefaultLibFilePath|getDefaultLibFileName/);
+    // Positive control: the baseline this rule is about is still here.
+    expect(content).toContain("externalFiles.set(");
+  });
 });
 
 describe("architecture constraint: the M0.5 comparison probes stay out of the product", () => {

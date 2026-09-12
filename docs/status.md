@@ -36,7 +36,7 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | Third-party backends `ambit diff` is silent on when nothing changed | **3** — Unleash ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)), immich ([2026-09-11](measurements/2026-09-11-second-third-party-validation-immich.md)), outline ([2026-09-11](measurements/2026-09-11-third-third-party-validation-outline.md)) | — |
 | `unknown` rate, second third-party backend (immich `server/src`, 3,191 functions) | 79.9% (2,550/3,191) | no target (see below) |
 | `unknown` rate, third third-party backend (outline `server`, 2,245 functions) | 72.8% (1,635/2,245) | no target (see below) |
-| Tests | 742 passing, 39 files | green |
+| Tests | 744 passing, 39 files | green |
 | `tsc --noEmit` / `biome ci .` | pass / pass | pass |
 | `check src` latency, 42 files | ~1.1 s (last timed at 40 files; not re-timed) | §3.5's 3 s allowance |
 | Incremental / resident analysis | a resident session with a scoped fixed point **and a reverse-import closure re-extraction** ([2026-09-13](measurements/2026-09-13-resident-partial-extraction.md)); no CLI exposure, no benchmark | yes (§6.2), exposed and measured |
@@ -77,7 +77,7 @@ where it is measurable, as a Phase 1 exit metric in `ROADMAP.md`.
 ### Baseline commands
 
 ```sh
-pnpm test                                                    # 742 tests, 39 files — pass
+pnpm test                                                    # 744 tests, 39 files — pass
 pnpm exec tsc --noEmit                                       # pass
 ./node_modules/.bin/biome ci .                               # pass
 node src/cli/main.ts check src --coverage                    # exit 0
@@ -294,10 +294,10 @@ is recorded in full in
 [2026-09-13](measurements/2026-09-13-resident-partial-extraction.md): on a
 49-file copy of `src/` (412 functions), an edit to one file re-extracts the 6
 files in its reverse-import closure instead of all 49, and **extraction falls
-from 189–198 ms to 50–67 ms**. Three runs per verdict, one subject, one edit.
+from 172–198 ms to 50–79 ms**. Three runs per verdict, one subject, one edit.
 
 **What did not move is `project-update`, and it is now the dominant phase** —
-128–163 ms, about two thirds of a partial re-check's total. That is
+135–158 ms, about two thirds of a partial re-check's total. That is
 `ts.createProgram` with `oldProgram` passed, the type checker, and the baseline
 the reuse gate compares. `oldProgram`'s own contribution is unmeasured: no row
 was run without it. So the ordering of the remaining work is set by a number
@@ -316,9 +316,9 @@ What is built, and what says so:
 |---|---|---|
 | 0 — canonical diagnostic order | yes | `test/diagnostic-order.test.ts` drives the adopted backend with `files` reversed and asserts the diagnostics, authority records and coverage bytes are identical. `check src --format json` order changed; announced in `CHANGELOG.md` |
 | 1 — `ExtractedProject.modules` | yes | `test/extracted-modules.test.ts`: one entry per source file including a re-export-only barrel, and the per-file slices re-sum to the project aggregates on five fixture roots |
-| 2 — resident session, full rebuild only | yes | `test/resident.differential.test.ts`: 78 cases, every mutation row comparing a resident generation's rendered bytes against a cold `analyze()` over the same tree. The config rows are compared against a cold run in a **separate process** (`test/support/cold-oracle.ts`) as well, because both in-process paths share one module registry and a stale config would make them agree on the same wrong answer |
+| 2 — resident session, full rebuild only | yes | `test/resident.differential.test.ts`: 79 cases, every mutation row comparing a resident generation's rendered bytes against a cold `analyze()` over the same tree. The config rows are compared against a cold run in a **separate process** (`test/support/cold-oracle.ts`) as well, because both in-process paths share one module registry and a stale config would make them agree on the same wrong answer |
 | 3 — scoped fixed point | yes | `src/checker/impact.ts` (`summariesEqual`, `changedSymbols`, `impactClosure`) and `propagateScoped` in `src/checker/propagate.ts`. `test/impact.test.ts` pins the three decisions field by field; sixteen rows in the differential suite assert, for every mutation, that the scoped state equals `propagate` over the same summaries symbol for symbol *and* that the generation ran scoped |
-| 4 — `openProject`, reverse-import re-extraction | yes | `openProject` in `src/checker/backend/legacy-ts.ts` holds the `ts.Program` and compares the compiler-side half of the reuse gate; `planUpdate` / `patchStore` in `src/checker/resident.ts` decide and apply the closure. Twenty-two rows in the differential suite assert the verdict (full or partial) **and** the re-extracted set, alongside byte equivalence with cold and the scoped-state oracle. The hazards each have their own row: a file added, a rename, an unresolved specifier resolved by an addition, a tsconfig `paths` change, a lockfile-invisible `node_modules` rewrite, an in-root `.d.ts`, a `declare global`, a file entering the program with no root name moving, a path the session never extracted, an unreported change set, and a failed generation followed by a recovery |
+| 4 — `openProject`, reverse-import re-extraction | yes | `openProject` in `src/checker/backend/legacy-ts.ts` holds the `ts.Program` and compares the compiler-side half of the reuse gate; `planUpdate` / `patchStore` in `src/checker/resident.ts` decide and apply the closure. Twenty-three rows in the differential suite assert the verdict (full or partial) **and** the re-extracted set, alongside byte equivalence with cold and the scoped-state oracle. The hazards each have their own row: a file added, a rename, an unresolved specifier resolved by an addition, a tsconfig `paths` change, a lockfile-invisible `node_modules` rewrite, an in-root `.d.ts`, a `declare global`, a program input outside the checked root, a file entering the program with no root name moving, a path the session never extracted, an unreported change set, and a failed generation followed by a recovery |
 | 5 — benchmark, measured numbers | no | — |
 
 The differential suite covers §6.2's equivalence law over an ordinary edit, a
@@ -341,7 +341,7 @@ mutations from `scripts/m05-probe/mutations.ts`, a row proving the scoped path
 runs while the fingerprint refuses extraction reuse, and a mutation on a copy of
 `src/` itself.
 
-Phase 4 added twenty-two more, and each asserts the **verdict** and the
+Phase 4 added twenty-three more, and each asserts the **verdict** and the
 **re-extracted set** rather than equivalence alone — a row that asserted only
 equivalence would pass just as well against a session that re-extracted
 everything, which is the thing phase 4 stops doing. Partial: an edited file and
@@ -353,20 +353,24 @@ sequential partial updates, the three gate-3 mutations taken through the
 closure, and a one-file edit on a copy of `src/`. Full: a file added, a rename,
 an unresolved specifier whose target arrives, a tsconfig `paths` change, a
 changed `package.json`, a package rewritten in place under `node_modules`, an
-in-root `.d.ts`, a `declare global`, a path this session never extracted, a
-caller that reports no change set at all, a file that enters the program without
-a root name moving (an explicit `files:` tsconfig), and the first update after a
-failed one. One more row is about the import graph rather than the gate: a file
+in-root `.d.ts`, a `declare global`, a source file the program reads from
+outside the checked root, a path this session never extracted, a caller that
+reports no change set at all, a file that enters the program without a root name
+moving (an explicit `files:` tsconfig), and the first update after a failed one. One more row is about the import graph rather than the gate: a file
 that depends on another only through an `import("…")` **type node**, which
 writes no import statement and still resolves a call into the named file.
 
 **A package rewritten in place under `node_modules` moves neither the lockfile
 nor `package.json`**, so the disk-side fingerprint reads "nothing changed". What
-sees it is the backend session, which hashes every program input that is not an
-in-root implementation file — in-root `.d.ts`, `node_modules` typings, and
-sources pulled in from outside the root — excluding the compiler's own
-`lib.*.d.ts`, which are a function of the engine version and of `lib`/`target`
-and are compared through those. That clause is what let
+sees it is the backend session, which hashes **every** program input that is not
+an in-root implementation file — in-root `.d.ts`, `node_modules` typings,
+sources pulled in from outside the root, and the compiler's own `lib.*.d.ts`.
+Nothing is excluded by path. An earlier version skipped the default lib's
+directory; it skipped the whole directory rather than the default libs
+(`typescript.d.ts` lives there too), and the argument for it — those files are a
+function of the engine version — does not survive the threat model the hash
+exists for, since a version string is not a proof of content identity. Measured
+at 82 inputs, 2.94 M characters, 4.5 ms on that subject. That clause is what let
 `ProjectFingerprint`'s permanent "resolved compiler options are not available"
 unknown be removed: it was replaced, not deleted.
 

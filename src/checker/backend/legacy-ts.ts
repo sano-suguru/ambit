@@ -294,10 +294,17 @@ interface ProjectBaseline {
    * fingerprint reads "nothing changed" — and the program's own file list is
    * the one place the rewrite is visible.
    *
-   * The compiler's own `lib.*.d.ts` files are excluded: they are a function of
-   * the engine version and of the `lib`/`target` options, and both are already
-   * compared (`engineVersion` on the fingerprint, {@link optionsHash} here).
-   * Hashing several megabytes of them on every keystroke would buy nothing.
+   * **Nothing is excluded by path, the compiler's own `lib.*.d.ts` included.**
+   * An earlier version skipped the default lib's directory on the argument that
+   * those files are a function of the engine version and of `lib`/`target`,
+   * both compared already. Two things are wrong with it. It excluded the whole
+   * directory rather than the default libs — `typescript.d.ts` lives there too,
+   * and a project that imports `typescript` reads it as a program input. And
+   * the argument itself does not survive the threat model this map exists for:
+   * if a package can be rewritten in place without its version moving, so can
+   * a file inside the TypeScript installation, and a version string is not a
+   * proof of content identity. The cost of hashing them is a phase-5
+   * measurement; an unjustified exclusion is a stale answer now.
    */
   readonly externalFiles: ReadonlyMap<string, ExternalFile>;
   /**
@@ -408,7 +415,6 @@ function baselineOf(
   absoluteRoot: string,
   options: ts.CompilerOptions,
 ): ProjectBaseline {
-  const defaultLibDir = path.dirname(ts.getDefaultLibFilePath(options));
   const externalFiles = new Map<string, ExternalFile>();
   const globalScope = new Map<string, boolean>();
   for (const file of program.getSourceFiles()) {
@@ -416,7 +422,8 @@ function baselineOf(
       globalScope.set(relativePath(absoluteRoot, file), hasGlobalScope(file));
       continue;
     }
-    if (path.dirname(file.fileName) === defaultLibDir) continue;
+    // Every other program input, with no exception by path — see
+    // `ProjectBaseline.externalFiles`.
     externalFiles.set(file.fileName, {
       file,
       hash: createHash("sha256").update(file.text).digest("hex"),

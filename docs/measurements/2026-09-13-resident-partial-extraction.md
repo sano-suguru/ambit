@@ -39,40 +39,40 @@ All in milliseconds.
 
 | verdict | re-extracted | project-update | extraction | impact | summarize | propagate | report | total |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| reported | 6 / 49 | 162.5 | 67.3 | 1.74 | 0.63 | 0.36 | 1.74 | 234.3 |
-| reported | 6 / 49 | 139.4 | 52.8 | 1.18 | 0.45 | 0.16 | 1.45 | 195.5 |
-| reported | 6 / 49 | 142.4 | 49.6 | 0.93 | 0.43 | 0.17 | 7.76 | 201.3 |
-| unreported | 49 / 49 | 128.3 | 196.2 | 1.15 | 2.25 | 0.15 | 1.00 | 329.1 |
-| unreported | 49 / 49 | 140.1 | 188.6 | 1.17 | 2.61 | 0.18 | 1.32 | 334.0 |
-| unreported | 49 / 49 | 134.0 | 198.4 | 1.46 | 2.43 | 0.19 | 1.66 | 338.2 |
-
-The 7.76 ms `report` in row three is an outlier against six runs that are
-otherwise 1.0–1.8 ms, and nothing here explains it; it is left in rather than
-dropped, because six samples is not enough to call anything noise with
-authority.
+| reported | 6 / 49 | 158.0 | 78.9 | 1.77 | 0.59 | 0.30 | 1.60 | 241.2 |
+| reported | 6 / 49 | 135.0 | 61.0 | 1.18 | 0.46 | 0.17 | 1.43 | 199.3 |
+| reported | 6 / 49 | 141.8 | 50.1 | 0.97 | 0.44 | 0.17 | 1.09 | 194.6 |
+| unreported | 49 / 49 | 139.8 | 198.3 | 1.14 | 2.21 | 0.15 | 0.99 | 342.6 |
+| unreported | 49 / 49 | 135.2 | 193.5 | 1.01 | 2.44 | 0.17 | 1.25 | 333.5 |
+| unreported | 49 / 49 | 135.4 | 171.5 | 1.09 | 2.10 | 0.17 | 1.18 | 311.5 |
 
 The impact set is 6 of 412 functions in every row — the same edit, so the
 scoped fixed point does the same work whichever way extraction went.
 
 ## What it says
 
-**Extraction shrank, which is what phase 4 was for.** 189–198 ms for the whole
-project against 50–67 ms for a sixth of it. The two are the same code path with
+**Extraction shrank, which is what phase 4 was for.** 172–198 ms for the whole
+project against 50–79 ms for a sixth of it. The two are the same code path with
 a different `only` set, and the ratio tracks the file count rather than
 beating it, which is what a per-file pass-2 restriction should do: pass 1 stays
 whole-project by design, and it is inside both figures.
 
-**`project-update` is now the dominant phase of a re-check, at 128–163 ms.**
+**`project-update` is now the dominant phase of a re-check, at 135–158 ms.**
 That is `ts.createProgram` with `oldProgram` passed, plus `getTypeChecker()`,
 plus the baseline the reuse gate compares (root names, resolved options, and the
-program's non-implementation inputs). It did not fall when extraction did, and
+program's non-implementation inputs — 4.5 ms of the total, measured above). It did not fall when extraction did, and
 on the partial rows it is about two thirds of the total.
 
-The reuse gate's own cost is inside `project-update` and is not separated here.
-On this subject it is close to free — the copy has no `node_modules`, so the
-only program inputs the gate hashes are the compiler's own lib files, which are
-excluded. On a tree with dependencies installed it is a text hash over every
-`node_modules` typing the program read, and that is where it would show up.
+The reuse gate's own cost is inside `project-update` and is not separated by the
+phase timings. It was measured on its own instead: on this subject the gate
+hashes **82 program inputs totalling 2.94 M characters — the compiler's own
+`lib.*.d.ts` among them, because nothing is excluded by path — in 4.5 ms.**
+That is about 3% of `project-update` and it does not show up in the table: an
+earlier run of the same script with the default lib's directory excluded gave
+`project-update` 128–163 ms against 135–158 ms here, which is the same number
+inside run-to-run variation. On a tree with dependencies installed the hash
+covers every `node_modules` typing the program read as well, and 2.94 M
+characters is the floor rather than the figure.
 
 Three things this **does not** say, and each matters:
 

@@ -703,8 +703,8 @@ changed, so a reader of an earlier draft is not left with a stale picture.
 
 ## What phase 4 found and left for phase 5
 
-- **`project-update` is the dominant phase of a re-check.** 128–163 ms against
-  50–67 ms of extraction on a 49-file copy of `src/`
+- **`project-update` is the dominant phase of a re-check.** 135–158 ms against
+  50–79 ms of extraction on a 49-file copy of `src/`
   ([2026-09-13](measurements/2026-09-13-resident-partial-extraction.md)).
   Extraction shrank by about the ratio the closure did, which is what phase 4
   was for; the phase that did not move is now the one to point phase 5's
@@ -743,17 +743,18 @@ changed, so a reader of an earlier draft is not left with a stale picture.
     - the root-name set, which must equal the old one minus exactly the
       deletions the caller reported — a set that *grew* is a file addition
       whether or not anybody reported it;
-    - every program input that is not an in-root implementation file — in-root
-      `.d.ts`, `node_modules` typings, and sources pulled in from outside the
-      root — by **text hash**, with a `ts.SourceFile` identity check first;
+    - **every** program input that is not an in-root implementation file —
+      in-root `.d.ts`, `node_modules` typings, sources pulled in from outside
+      the root, and the compiler's own `lib.*.d.ts` — by **text hash**, with a
+      `ts.SourceFile` identity check first. Nothing is excluded by path: a
+      version string is not a proof of content identity, and the one exclusion
+      that was tried skipped the whole default-lib *directory* rather than the
+      default libs, `typescript.d.ts` included;
     - whether any changed or deleted file's declarations are global, in the old
       program or the new one: a non-module script, a `declare global`, an
       ambient `declare module "…"`.
 
-    The compiler's own `lib.*.d.ts` files are excluded from the hash: they are a
-    function of the engine version and of `lib`/`target`, and both are compared
-    already. **The external-file hash is what closes the hole correction 7 left
-    open** — a package rewritten in place moves neither the lockfile nor
+    **The external-file hash is what closes the hole correction 7 left open** — a package rewritten in place moves neither the lockfile nor
     `package.json`, and the program's own input list is the one place the
     rewrite is visible. The permanent `undecidable` entry is removed because
     that clause replaced it, not because the question went away.

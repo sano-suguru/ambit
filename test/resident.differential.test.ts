@@ -2173,6 +2173,63 @@ describe("resident session: the reverse-import closure (phase 4)", () => {
     expect(full).toBe(true);
   });
 
+  it("rebuilds everything when a program input outside the checked root changes", async () => {
+    // §6.2's row: "a file in the program but outside the checked root". The
+    // extraction is filtered to files under the root, so no import edge exists
+    // to close over — and the file can still change what names inside the root
+    // resolve to.
+    const dir = mkdtempSync(path.join(tmpdir(), "ambit-outside-root-"));
+    temporaries.push(dir);
+    writeFileSync(path.join(dir, "package.json"), `${JSON.stringify({ name: "subject" })}\n`);
+    writeFileSync(
+      path.join(dir, "tsconfig.json"),
+      `${JSON.stringify(
+        {
+          compilerOptions: {
+            target: "ES2023",
+            module: "NodeNext",
+            moduleResolution: "NodeNext",
+            strict: true,
+            skipLibCheck: true,
+            noEmit: true,
+            allowImportingTsExtensions: true,
+          },
+          include: ["**/*.ts"],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    write(
+      dir,
+      "shared/helper.ts",
+      '/** @effects network */\nexport function helper(): number {\n  fetch("https://example.com/");\n  return 1;\n}\n',
+    );
+    write(
+      dir,
+      "src/caller.ts",
+      'import { helper } from "../shared/helper.ts";\n\n/** @effects pure */\nexport function callsHelper(): number {\n  return helper();\n}\n',
+    );
+
+    // The checked root is `src/`; `shared/helper.ts` is in the program and
+    // outside it.
+    const root = path.join(dir, "src");
+    const session = await openResidentSession(root);
+    sessions.push(session);
+    expect(session.committed().store.files.has("caller.ts")).toBe(true);
+    expect([...session.committed().store.files.keys()]).not.toContain("../shared/helper.ts");
+
+    write(
+      dir,
+      "shared/helper.ts",
+      "/** @effects fs_read */\nexport function helper(): number {\n  return 1;\n}\n",
+    );
+    const result = await session.update([CHANGED("caller.ts")]);
+    if (!result.ok) throw result.error;
+    expect(render(result.analysis)).toBe(render(await analyze(root)));
+    expect(result.full).toBe(true);
+  });
+
   it("rebuilds everything when a `.d.ts` inside the root changes", async () => {
     const dir = copyFixture("cross-module");
     write(
