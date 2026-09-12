@@ -10,8 +10,11 @@ import {
   type ConfigDependencies,
   computeFingerprint,
   configDependencies,
+  type FileChange,
+  fingerprintPermitsExtractionReuse,
   fingerprintPermitsReuse,
   type ImpactReport,
+  legacyTsBackend,
   openResidentSession,
   type PropagatedFunction,
   propagate,
@@ -122,8 +125,14 @@ function renderColdInSeparateProcess(dir: string): string {
 async function updateAndCompare(
   session: ResidentSession,
   dir: string,
-): Promise<{ readonly resident: AnalysisResult; readonly cold: AnalysisResult }> {
-  const result = await session.update();
+  changes?: readonly FileChange[],
+): Promise<{
+  readonly resident: AnalysisResult;
+  readonly cold: AnalysisResult;
+  readonly full: boolean;
+  readonly reextracted: readonly string[];
+}> {
+  const result = await session.update(changes);
   if (!result.ok) throw result.error;
   const cold = await analyze(dir);
   expect(render(result.analysis)).toBe(render(cold));
@@ -131,7 +140,12 @@ async function updateAndCompare(
   // otherwise a caller reading `current()` gets a different answer from the one
   // the comparison passed.
   expect(render(session.current())).toBe(render(cold));
-  return { resident: result.analysis, cold };
+  return {
+    resident: result.analysis,
+    cold,
+    full: result.full,
+    reextracted: result.reextracted,
+  };
 }
 
 async function open(dir: string): Promise<ResidentSession> {
@@ -863,14 +877,26 @@ describe("ProjectFingerprint fails toward rebuilding", () => {
 
   it("never permits reuse while anything is undecidable, even against itself", async () => {
     const dir = copyFixture("cross-module");
-    const fingerprint = fingerprintOf(dir);
 
-    // The resolved compiler options are not reachable without a backend
-    // session, so today this is always non-empty — and the consequence is that
-    // reuse is refused even when every hash matches. That is the direction this
-    // is allowed to be wrong in (§3.4): rebuilding something it need not have.
-    expect(fingerprint.undecidable.length).toBeGreaterThan(0);
-    expect(fingerprintPermitsReuse(fingerprint, fingerprint)).toBe(false);
+    // Phase 4 removed the permanent "resolved compiler options are not
+    // available" entry, because the backend session now compares them from a
+    // program it built — so an ordinary project is decidable from here.
+    const plain = fingerprintOf(dir);
+    expect(plain.undecidable).toEqual([]);
+    expect(plain.projectUndecidable).toEqual([]);
+    expect(plain.configUndecidable).toEqual([]);
+
+    // The rule itself is unchanged: an unknown on *either* side refuses, and
+    // refuses even against an identical fingerprint. Asserted per list,
+    // because the two gate different things — a config the closure walk could
+    // not follow says nothing about extraction, which no contract reaches.
+    const projectUnknown = { ...plain, undecidable: ["?"], projectUndecidable: ["?"] };
+    expect(fingerprintPermitsReuse(projectUnknown, projectUnknown)).toBe(false);
+    expect(fingerprintPermitsExtractionReuse(projectUnknown, projectUnknown)).toBe(false);
+
+    const configUnknown = { ...plain, undecidable: ["?"], configUndecidable: ["?"] };
+    expect(fingerprintPermitsReuse(configUnknown, configUnknown)).toBe(false);
+    expect(fingerprintPermitsExtractionReuse(configUnknown, configUnknown)).toBe(true);
   });
 
   it("permits reuse only when every input is identical and nothing is undecidable", async () => {
@@ -1058,15 +1084,39 @@ describe("resident session: nothing snapshot-bound is retained", () => {
     // demanding a nonzero duration would be a test of the clock.
     expect(result.timings.impact).toBeGreaterThanOrEqual(0);
     expect(Number.isFinite(result.timings.impact)).toBe(true);
-    // The full-rebuild adapter cannot separate project construction from
-    // extraction, and says so by leaving the field absent rather than by
-    // reporting a zero that would read as free.
-    expect(result.timings.projectUpdate).toBeUndefined();
+    // The legacy backend's `openProject` separates building the program from
+    // walking it, so this is a real number (phase 4).
+    expect(result.timings.projectUpdate).toBeGreaterThan(0);
     expect(result.full).toBe(true);
     // Extraction is still whole-project in phase 3; only the fixed point is
     // scoped. `full` therefore stays true, and `impact.scoped` is the separate
     // fact that the fixed point was not the whole one.
     expect(result.impact.scoped).toBe(true);
+  });
+
+  it("leaves projectUpdate absent for a backend that cannot separate the phases", async () => {
+    const dir = copyFixture("cross-module");
+    // A backend with no `openProject` is driven through the full-rebuild
+    // adapter, which reaches the engine only through `extractProject` and so
+    // cannot see where building the program ends and walking it begins. It says
+    // so by leaving the field absent rather than by reporting a zero that would
+    // read as free (§3.4's distinction between "nothing found" and "nothing
+    // looked for").
+    const session = await openResidentSession(dir, {
+      backend: {
+        name: legacyTsBackend.name,
+        version: legacyTsBackend.version,
+        extractProject: (root) => legacyTsBackend.extractProject(root),
+      },
+    });
+    sessions.push(session);
+    const result = await session.update([{ kind: "changed", path: "callee.ts" }]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.timings.projectUpdate).toBeUndefined();
+    // And it never answers partially, so the adapter path stays exactly what
+    // ADR-0014 kept it as: architecture A.
+    expect(result.full).toBe(true);
   });
 });
 
@@ -1123,8 +1173,14 @@ function renderState(state: ReadonlyMap<SymbolId, PropagatedFunction>): string {
 async function updateAndProveScoped(
   session: ResidentSession,
   dir: string,
-): Promise<{ readonly resident: AnalysisResult; readonly impact: ImpactReport }> {
-  const result = await session.update();
+  changes?: readonly FileChange[],
+): Promise<{
+  readonly resident: AnalysisResult;
+  readonly impact: ImpactReport;
+  readonly full: boolean;
+  readonly reextracted: readonly string[];
+}> {
+  const result = await session.update(changes);
   if (!result.ok) throw result.error;
   const cold = await analyze(dir);
   expect(render(result.analysis)).toBe(render(cold));
@@ -1139,7 +1195,48 @@ async function updateAndProveScoped(
   // `I ⊇ S`, always. A changed symbol outside the impact set is a symbol whose
   // committed value would be reused after its inputs moved.
   for (const id of result.impact.changed) expect(result.impact.impacted).toContain(id);
-  return { resident: result.analysis, impact: result.impact };
+
+  // No stale edge survives a patch. Both reverse graphs are rebuilt from the
+  // committed file map every generation, and this is what says the map they
+  // were rebuilt from is the one a whole extraction would have produced.
+  expect(renderGraph(store.reverseImports)).toBe(
+    renderGraph(
+      importGraphOf(
+        [...store.files.values()].map((entry) => entry.module.filePath),
+        store,
+      ),
+    ),
+  );
+  return {
+    resident: result.analysis,
+    impact: result.impact,
+    full: result.full,
+    reextracted: result.reextracted,
+  };
+}
+
+/** A reverse graph as sorted bytes, so a comparison sees an entry that moved. */
+function renderGraph(graph: ReadonlyMap<string, ReadonlySet<string>>): string {
+  return [...graph]
+    .map(([key, values]) => `${key} <- ${[...values].toSorted().join(",")}`)
+    .toSorted()
+    .join("\n");
+}
+
+/** The reverse-import graph rebuilt from the store's own module records. */
+function importGraphOf(
+  paths: readonly string[],
+  store: ResidentStore,
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const reverse = new Map<string, Set<string>>();
+  for (const filePath of paths) {
+    for (const target of store.files.get(filePath)?.module.imports ?? []) {
+      const importers = reverse.get(target) ?? new Set<string>();
+      importers.add(filePath);
+      reverse.set(target, importers);
+    }
+  }
+  return reverse;
 }
 
 describe("resident session: the scoped fixed point (phase 3)", () => {
@@ -1583,18 +1680,30 @@ describe("resident session: the scoped fixed point (phase 3)", () => {
 
   it("runs the scoped path even though the fingerprint refuses reuse", async () => {
     const dir = copyFixture("cross-module");
+    // An `extends` chain is a file this layer will not resolve the way the
+    // compiler does, so the project half of the fingerprint is undecidable and
+    // no extraction is reused. Phase 3 does not live inside that branch — it
+    // reuses no compiler or extraction result, only Ambit's own summaries —
+    // and this is the row that says so.
+    write(dir, "base.json", '{ "compilerOptions": { "strict": true } }\n');
+    write(
+      dir,
+      "tsconfig.json",
+      '{ "extends": "./base.json", "compilerOptions": { "module": "nodenext", "moduleResolution": "nodenext", "target": "es2023" }, "include": ["**/*.ts"] }\n',
+    );
     const session = await open(dir);
 
-    // `undecidable` carries a permanent entry until phase 4's `openProject`,
-    // so this is false on every update. Phase 3 does not live inside that
-    // branch — it reuses no compiler or extraction result, only Ambit's own
-    // summaries — and this is the row that says so.
     const fingerprint = session.committed().store.fingerprint;
-    expect(fingerprint.undecidable.length).toBeGreaterThan(0);
-    expect(fingerprintPermitsReuse(fingerprint, fingerprint)).toBe(false);
+    expect(fingerprint.projectUndecidable.length).toBeGreaterThan(0);
+    expect(fingerprintPermitsExtractionReuse(fingerprint, fingerprint)).toBe(false);
 
     edit(dir, "callee.ts", "  return 0;", "  return 1;");
-    const { impact } = await updateAndProveScoped(session, dir);
+    const { impact, full } = await updateAndProveScoped(session, dir, [
+      { kind: "changed", path: "callee.ts" },
+    ]);
+    // Extraction was not reused — the fingerprint refused — and the fixed
+    // point was scoped anyway.
+    expect(full).toBe(true);
     expect(impact.scoped).toBe(true);
     expect(impact.impacted).toEqual([]);
   });
@@ -1717,5 +1826,613 @@ describe("resident session: self-hosting", () => {
     const { resident } = await updateAndCompare(session, dir);
     expect(symbols(before)).not.toContain("src/domain/risk.ts#addedByTheSuite");
     expect(symbols(resident)).toContain("src/domain/risk.ts#addedByTheSuite");
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Phase 4: the reverse-import closure, and the reuse gate that decides whether
+ * a closure may be taken at all.
+ *
+ * Every row asserts five things, because four of them can pass while the fifth
+ * is wrong:
+ *
+ * 1. the resident result equals a cold run byte for byte (§6.2);
+ * 2. the scoped state equals `propagate` over the same summaries;
+ * 3. the **verdict** — full or partial — is the one §6.2's table names;
+ * 4. the **closure** — which files were re-extracted — is the expected set;
+ * 5. no stale edge survives in either reverse graph.
+ *
+ * 1, 2 and 5 are `updateAndProveScoped`'s; 3 and 4 are each row's own. A row
+ * that asserted only equivalence would pass just as well against a session
+ * that re-extracted everything, which is exactly the thing phase 4 is supposed
+ * to stop doing.
+ */
+describe("resident session: the reverse-import closure (phase 4)", () => {
+  const CHANGED = (file: string): FileChange => ({ kind: "changed", path: file });
+
+  it("re-extracts an edited file and its transitive importers, and nothing else", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+    const everything = [...session.committed().store.files.keys()].toSorted();
+
+    edit(dir, "callee.ts", "  return 0;", "  return 1;");
+    const { full, reextracted } = await updateAndProveScoped(session, dir, [CHANGED("callee.ts")]);
+
+    expect(full).toBe(false);
+    // `callee.ts` itself, plus every file that reaches it through imports:
+    // `index.ts` and `direct-import.ts` import it, the two barrels import
+    // `index.ts`, and `deep-barrel-import.ts` imports `deep-barrel.ts`. The
+    // closure is transitive and it stops there.
+    expect(reextracted).toEqual([
+      "barrel-builtin-import.ts",
+      "barrel-import.ts",
+      "callee.ts",
+      "deep-barrel-import.ts",
+      "deep-barrel.ts",
+      "direct-import.ts",
+      "index.ts",
+    ]);
+    expect(reextracted.length).toBeLessThan(everything.length);
+    // The files outside it kept the entries they committed.
+    expect(everything).toContain("missing-module-import.ts");
+    expect(reextracted).not.toContain("missing-module-import.ts");
+  });
+
+  it("re-extracts a leaf's closure only, for a file nothing imports", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+
+    edit(dir, "direct-import.ts", "/** @effects pure */", "/** @effects network */");
+    const { full, reextracted, resident } = await updateAndProveScoped(session, dir, [
+      CHANGED("direct-import.ts"),
+    ]);
+
+    // A JSDoc-only edit: §6.2 requires it to propagate backwards, and the
+    // extraction closure is still just the file, because nothing imports it.
+    expect(full).toBe(false);
+    expect(reextracted).toEqual(["direct-import.ts"]);
+    expect(declaredOf(resident, "direct-import.ts#pureCallsImportedNetwork")).toEqual(["network"]);
+  });
+
+  it("closes over a re-pointed barrel, including one that declares nothing", async () => {
+    const dir = copyFixture("cross-module");
+    // A second target for the barrel to point at, present from the start so
+    // that the generation under test is an *edit*, not an addition.
+    write(
+      dir,
+      "other-rate.ts",
+      "/** @effects fs_read */\nexport function fetchRate(): number {\n  return 7;\n}\n",
+    );
+    const session = await open(dir);
+    expect(session.committed().store.files.get("index.ts")?.extracted).toBeUndefined();
+
+    // `index.ts` declares no function of its own — it is a barrel — and
+    // re-pointing it changes what every importer of it resolves to. A store
+    // built from `ExtractedFile` alone would hold no edge for it at all.
+    edit(dir, "index.ts", './callee.ts"', './other-rate.ts"');
+    const { full, reextracted, resident } = await updateAndProveScoped(session, dir, [
+      CHANGED("index.ts"),
+    ]);
+
+    expect(full).toBe(false);
+    expect(reextracted).toContain("index.ts");
+    // Every importer of the barrel is in the closure, transitively.
+    expect(reextracted).toContain("deep-barrel.ts");
+    expect(reextracted).not.toContain("callee.ts");
+    expect(symbols(resident)).toContain("other-rate.ts#fetchRate");
+  });
+
+  it("follows a deleted file through the old graph and leaves no stale edge", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+    // `deep-barrel.ts` re-exports `index.ts` and nothing imports it, so it can
+    // go without breaking the tree.
+    expect(session.committed().store.files.has("deep-barrel.ts")).toBe(true);
+
+    remove(dir, "deep-barrel.ts");
+    const { full, reextracted } = await updateAndProveScoped(session, dir, [
+      { kind: "deleted", path: "deep-barrel.ts" },
+    ]);
+
+    expect(full).toBe(false);
+    // Every file whose resolution a deletion can change had a specifier
+    // resolving *to* the deleted file — exactly an edge the old graph holds —
+    // so the closure is safe, and the deleted file itself is not re-extracted.
+    expect(reextracted).not.toContain("deep-barrel.ts");
+
+    const store = session.committed().store;
+    expect(store.files.has("deep-barrel.ts")).toBe(false);
+    for (const importers of store.reverseImports.values()) {
+      expect([...importers]).not.toContain("deep-barrel.ts");
+    }
+    expect([...store.state.keys()].some((id) => id.startsWith("deep-barrel.ts#"))).toBe(false);
+  });
+
+  it("rebuilds everything for an added file", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+
+    write(
+      dir,
+      "added.ts",
+      'import { fetchRate } from "./callee.ts";\n\n/** @effects pure */\nexport function usesRate(): number {\n  return fetchRate();\n}\n',
+    );
+    const { full, reextracted, resident } = await updateAndProveScoped(session, dir, [
+      { kind: "added", path: "added.ts" },
+    ]);
+
+    // No closure over the edges already held can find the importers a new file
+    // changes: a specifier that resolved to nothing held no edge at all.
+    expect(full).toBe(true);
+    expect(reextracted).toContain("added.ts");
+    expect(effectsOf(resident, "added.ts#usesRate")).toContain("network");
+  });
+
+  it("rebuilds everything for a rename, and makes no `moved` guess", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+
+    write(dir, "callee-renamed.ts", readText(path.join(dir, "callee.ts")));
+    remove(dir, "callee.ts");
+    edit(dir, "direct-import.ts", './callee.ts"', './callee-renamed.ts"');
+    edit(dir, "index.ts", './callee.ts"', './callee-renamed.ts"');
+
+    const { full, resident } = await updateAndProveScoped(session, dir, [
+      { kind: "added", path: "callee-renamed.ts" },
+      { kind: "deleted", path: "callee.ts" },
+      CHANGED("direct-import.ts"),
+      CHANGED("index.ts"),
+    ]);
+
+    expect(full).toBe(true);
+    expect(symbols(resident)).toContain("callee-renamed.ts#fetchRate");
+    expect(symbols(resident)).not.toContain("callee.ts#fetchRate");
+  });
+
+  it("rebuilds everything when the file an unresolved specifier names arrives", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+    const before = session.current();
+    expect(unresolvedTotal(before)).toBeGreaterThan(0);
+
+    write(
+      dir,
+      "missing-target.ts",
+      "/** @effects network */\nexport function absent(): number {\n  return 1;\n}\n",
+    );
+    write(
+      dir,
+      "missing-module-import.ts",
+      'import { absent } from "./missing-target.ts";\n\n/** @effects pure */\nexport function callsAbsent(): number {\n  return absent();\n}\n',
+    );
+
+    const { full, resident } = await updateAndProveScoped(session, dir, [
+      { kind: "added", path: "missing-target.ts" },
+      CHANGED("missing-module-import.ts"),
+    ]);
+    expect(full).toBe(true);
+    expect(effectsOf(resident, "missing-module-import.ts#callsAbsent")).toContain("network");
+  });
+
+  it("reuses extraction and re-summarizes every file for a config-only change", async () => {
+    const dir = copyFixture("cross-module");
+    // Present before the session opens: writing a `.ts` file into the root is
+    // a file *addition*, and this row is about editing a config, not adding
+    // one.
+    write(dir, "ambit.config.ts", "export default { contracts: {} };\n");
+    const session = await open(dir);
+
+    // A symbol with no JSDoc contract of its own, so the config's contract is
+    // what the summary carries rather than a divergence against one.
+    const target = "deep-barrel-import.ts#callsTwiceReExportedBuiltin";
+    write(
+      dir,
+      "ambit.config.ts",
+      `export default { contracts: { ${JSON.stringify(target)}: { effects: ["fs_read"] } } };\n`,
+    );
+    const { full, reextracted, resident } = await updateAndProveScoped(session, dir, []);
+
+    // §6.2's config row: extraction untouched, every contract re-derived. The
+    // closure is empty because no source file moved.
+    expect(full).toBe(false);
+    // Only the config file itself: no source file moved, and no contract in the
+    // config can change how a call resolves. Its own module record is refreshed
+    // because it is a `.ts` file under the root like any other.
+    expect(reextracted).toEqual(["ambit.config.ts"]);
+    expect(declaredOf(resident, target)).toEqual(["fs_read"]);
+
+    // And every file's summaries were rebuilt, not only the empty closure's:
+    // the store's own `matchedConfigKeys` is what AMB-W006 is derived from, and
+    // a subset re-summarization would report a matched key as unmatched.
+    expect(session.committed().store.unmatchedExactKeys).toEqual([]);
+
+    write(
+      dir,
+      "ambit.config.ts",
+      'export default { contracts: { "callee.ts#nobody": { effects: ["fs_read"] } } };\n',
+    );
+    const second = await updateAndProveScoped(session, dir, []);
+    expect(second.full).toBe(false);
+    expect(second.reextracted).toEqual(["ambit.config.ts"]);
+    expect(session.committed().store.unmatchedExactKeys).toEqual(["callee.ts#nobody"]);
+  });
+
+  it('closes over an `import("…")` type node, which is a dependency with no import statement', async () => {
+    const dir = copyFixture("cross-module");
+    write(
+      dir,
+      "svc.ts",
+      'export class Svc {\n  /** @effects network */\n  run(): number {\n    fetch("https://example.com/");\n    return 1;\n  }\n}\n',
+    );
+    write(
+      dir,
+      "import-type-user.ts",
+      '/** @effects pure */\nexport function callsThroughImportType(s: import("./svc.ts").Svc): number {\n  return s.run();\n}\n',
+    );
+    const session = await open(dir);
+    // Probed rather than assumed: the annotation is what makes the checker
+    // resolve this call, and the file writes no import statement at all.
+    expect(session.committed().store.files.get("import-type-user.ts")?.module.imports).toEqual([
+      "svc.ts",
+    ]);
+
+    edit(dir, "svc.ts", "  run(): number {", "  runRenamed(): number {");
+    edit(dir, "import-type-user.ts", "  return s.run();", "  return s.runRenamed();");
+    const { full, reextracted } = await updateAndProveScoped(session, dir, [
+      CHANGED("svc.ts"),
+      CHANGED("import-type-user.ts"),
+    ]);
+
+    expect(full).toBe(false);
+    expect(reextracted).toContain("import-type-user.ts");
+  });
+
+  it("rebuilds everything when a file enters the program without a root name moving", async () => {
+    const dir = copyFixture("cross-module");
+    // An explicit `files:` list, so the program's in-root file set is not the
+    // root-name set: a file enters by being imported, and no root name moves
+    // when it does.
+    write(
+      dir,
+      "tsconfig.json",
+      `${JSON.stringify(
+        {
+          compilerOptions: {
+            target: "ES2023",
+            module: "NodeNext",
+            moduleResolution: "NodeNext",
+            strict: true,
+            skipLibCheck: true,
+            noEmit: true,
+            allowImportingTsExtensions: true,
+          },
+          files: ["direct-import.ts"],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    const session = await open(dir);
+    expect(session.committed().store.files.has("barrel-import.ts")).toBe(false);
+
+    edit(
+      dir,
+      "direct-import.ts",
+      'import { fetchRate } from "./callee.ts";',
+      'import { fetchRate } from "./callee.ts";\nimport { pureCallsBarrelImportedNetwork } from "./barrel-import.ts";\nvoid pureCallsBarrelImportedNetwork;',
+    );
+    const { full } = await updateAndProveScoped(session, dir, [CHANGED("direct-import.ts")]);
+
+    // `barrel-import.ts` arrived in the program. A closure would have minted
+    // its ids in pass 1 and never extracted it, so cold would report its
+    // functions and the resident path would not.
+    expect(full).toBe(true);
+    expect(session.committed().store.files.has("barrel-import.ts")).toBe(true);
+  });
+
+  it("rebuilds everything when the tsconfig changes", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+
+    const tsconfig = JSON.parse(readText(path.join(dir, "tsconfig.json")));
+    tsconfig.compilerOptions.paths = { "#alias/*": ["./*"] };
+    tsconfig.compilerOptions.baseUrl = ".";
+    write(dir, "tsconfig.json", `${JSON.stringify(tsconfig, null, 2)}\n`);
+
+    const { full } = await updateAndProveScoped(session, dir, [CHANGED("callee.ts")]);
+    expect(full).toBe(true);
+  });
+
+  it("rebuilds everything when the resolution inputs change", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+
+    write(dir, "package.json", `${JSON.stringify({ name: "subject", version: "2" })}\n`);
+    const { full } = await updateAndProveScoped(session, dir, [CHANGED("callee.ts")]);
+    expect(full).toBe(true);
+  });
+
+  it("rebuilds everything when a package under node_modules is rewritten in place", async () => {
+    const dir = copyFixture("cross-module");
+    write(dir, "node_modules/dep/package.json", '{ "name": "dep", "types": "index.d.ts" }\n');
+    write(dir, "node_modules/dep/index.d.ts", "export declare function helper(): number;\n");
+    write(
+      dir,
+      "uses-dep.ts",
+      'import { helper } from "dep";\n\n/** @effects pure */\nexport function callsHelper(): number {\n  return helper();\n}\n',
+    );
+    const session = await open(dir);
+
+    // Neither `package.json` nor a lockfile moves, so the disk-side
+    // fingerprint reads "nothing changed". What sees the rewrite is the
+    // program's own input list, which the backend hashes.
+    write(dir, "node_modules/dep/index.d.ts", "export declare function helper(): string;\n");
+    const { full } = await updateAndProveScoped(session, dir, [CHANGED("callee.ts")]);
+    expect(full).toBe(true);
+  });
+
+  it("rebuilds everything when a `.d.ts` inside the root changes", async () => {
+    const dir = copyFixture("cross-module");
+    write(
+      dir,
+      "ambient.d.ts",
+      'declare module "ambient-thing" {\n  export function go(): void;\n}\n',
+    );
+    const session = await open(dir);
+
+    write(
+      dir,
+      "ambient.d.ts",
+      'declare module "ambient-thing" {\n  export function go(): number;\n}\n',
+    );
+    const { full } = await updateAndProveScoped(session, dir, [CHANGED("callee.ts")]);
+    expect(full).toBe(true);
+  });
+
+  it("rebuilds everything for a change to a file whose declarations are global", async () => {
+    const dir = copyFixture("cross-module");
+    write(dir, "globals.ts", "declare global {\n  var ambitGlobal: number;\n}\nexport {};\n");
+    const session = await open(dir);
+
+    write(dir, "globals.ts", "declare global {\n  var ambitGlobal: string;\n}\nexport {};\n");
+    const { full } = await updateAndProveScoped(session, dir, [CHANGED("globals.ts")]);
+    expect(full).toBe(true);
+  });
+
+  it("rebuilds everything when the caller reports no change set at all", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+
+    // The one honest gap §6.2 leaves open, made explicit: a caller that does
+    // not report changes gets a whole re-extraction, because a closure over
+    // nothing would answer from the previous tree.
+    edit(dir, "callee.ts", "  return 0;", "  return 1;");
+    const { full } = await updateAndProveScoped(session, dir);
+    expect(full).toBe(true);
+  });
+
+  it("rebuilds everything for a path this session never extracted", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+
+    edit(dir, "callee.ts", "  return 0;", "  return 1;");
+    const { full } = await updateAndProveScoped(session, dir, [
+      CHANGED("callee.ts"),
+      CHANGED("not-a-file-this-session-saw.ts"),
+    ]);
+    expect(full).toBe(true);
+  });
+
+  it("survives a mid-edit syntax error and recovers on the next update", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+
+    // The compiler recovers from a syntax error, so this is not a failure: the
+    // answer changes and still equals cold.
+    write(dir, "callee.ts", "/** @effects network */\nexport function fetchRate(): number {\n");
+    await updateAndProveScoped(session, dir, [CHANGED("callee.ts")]);
+
+    write(
+      dir,
+      "callee.ts",
+      '/** @effects network */\nexport function fetchRate(): number {\n  fetch("https://example.com/rate");\n  return 0;\n}\n',
+    );
+    const { resident } = await updateAndProveScoped(session, dir, [CHANGED("callee.ts")]);
+    expect(effectsOf(resident, "callee.ts#fetchRate")).toContain("network");
+  });
+
+  it("re-extracts everything on the first update after a failed one", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+
+    // A generation that throws leaves the backend one program ahead of the
+    // committed store. Comparing the next update against that baseline would
+    // read a change made *before* the failure as "nothing moved".
+    write(dir, "tsconfig.json", "{ not json");
+    const failed = await session.update([CHANGED("callee.ts")]);
+    expect(failed.ok).toBe(false);
+
+    write(
+      dir,
+      "tsconfig.json",
+      `${JSON.stringify(
+        {
+          compilerOptions: {
+            target: "ES2023",
+            module: "NodeNext",
+            moduleResolution: "NodeNext",
+            strict: true,
+            skipLibCheck: true,
+            noEmit: true,
+            allowImportingTsExtensions: true,
+            types: ["node"],
+          },
+          include: ["**/*.ts"],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    edit(dir, "callee.ts", "  return 0;", "  return 2;");
+    const recovered = await updateAndProveScoped(session, dir, [CHANGED("callee.ts")]);
+    expect(recovered.full).toBe(true);
+
+    // And the session is usable again, on the partial path.
+    edit(dir, "callee.ts", "  return 2;", "  return 3;");
+    const next = await updateAndProveScoped(session, dir, [CHANGED("callee.ts")]);
+    expect(next.full).toBe(false);
+  });
+
+  it("survives ten sequential partial updates on one session", async () => {
+    const dir = copyFixture("cross-module");
+    const session = await open(dir);
+
+    const steps: readonly (readonly [() => void, readonly FileChange[]])[] = [
+      [() => edit(dir, "callee.ts", "  return 0;", "  return 1;"), [CHANGED("callee.ts")]],
+      [
+        () => edit(dir, "direct-import.ts", "/** @effects pure */", "/** @effects fs_read */"),
+        [CHANGED("direct-import.ts")],
+      ],
+      [
+        () => edit(dir, "callee.ts", '  fetch("https://example.com/rate");\n', ""),
+        [CHANGED("callee.ts")],
+      ],
+      [
+        () =>
+          edit(
+            dir,
+            "callee.ts",
+            "export function fetchRate(): number {",
+            'export function fetchRate(): number {\n  fetch("https://example.com/again");',
+          ),
+        [CHANGED("callee.ts")],
+      ],
+      [
+        () => edit(dir, "direct-import.ts", "  return fetchRate();", "  return fetchRate() + 1;"),
+        [CHANGED("direct-import.ts")],
+      ],
+      [
+        () => edit(dir, "index.ts", 'export { fetchRate } from "./callee.ts";', ""),
+        [CHANGED("index.ts")],
+      ],
+      [
+        () => edit(dir, "index.ts", 'export { readFileSync } from "node:fs";', ""),
+        [CHANGED("index.ts")],
+      ],
+      [
+        () => edit(dir, "callee.ts", "/** @effects network */", "/** @effects network, fs_read */"),
+        [CHANGED("callee.ts")],
+      ],
+      [
+        () => edit(dir, "callee.ts", "/** @effects network, fs_read */", "/** @effects network */"),
+        [CHANGED("callee.ts")],
+      ],
+      [
+        () => edit(dir, "direct-import.ts", "/** @effects fs_read */", "/** @effects pure */"),
+        [CHANGED("direct-import.ts")],
+      ],
+    ];
+
+    let partials = 0;
+    for (const [apply, changes] of steps) {
+      apply();
+      const { full } = await updateAndProveScoped(session, dir, changes);
+      if (!full) partials += 1;
+    }
+    // Every step here is an in-place edit, so every one of them should have
+    // taken the closure. Asserted as a count rather than per step, so a future
+    // widening of a full-rebuild trigger reads as a number moving rather than
+    // as a row failing for a reason nobody looks at.
+    expect(partials).toBe(steps.length);
+    expect(session.committed().store.generation).toBe(steps.length + 1);
+  });
+
+  it("answers §3.5's gate-3 mutations through the closure, never from a stale tree", async () => {
+    const dir = copyFixture("cross-module");
+    write(
+      dir,
+      "recursion.ts",
+      [
+        "/** @effects fs_read */",
+        "export function leafReadsFile(): number {",
+        "  return 1;",
+        "}",
+        "",
+        "export function selfRecursive(n: number): number {",
+        "  if (n <= 0) return leafReadsFile();",
+        "  return selfRecursive(n - 1);",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const session = await open(dir);
+
+    // ADR-0001's headline failure was a contract comment rewritten and a stale
+    // answer returned with no error. Here each mutation goes through the
+    // *closure* rather than a whole re-extraction, which is the path that can
+    // reintroduce it.
+    for (const mutation of MUTATIONS) {
+      mutation.apply(dir);
+      const { resident, full, reextracted } = await updateAndProveScoped(session, dir, [
+        CHANGED(mutation.file),
+      ]);
+      expect(full).toBe(false);
+      expect(reextracted).toContain(mutation.file);
+      if (mutation.id === "contract") {
+        expect(declaredOf(resident, "recursion.ts#leafReadsFile")).toEqual(["network"]);
+        expect(effectsOf(resident, "recursion.ts#selfRecursive")).toEqual(["network"]);
+      }
+      if (mutation.id === "body") {
+        expect(effectsOf(resident, "recursion.ts#selfRecursive")).toContain("network");
+      }
+    }
+  });
+
+  it("takes the closure on a copy of src/, and equals cold", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "ambit-phase4-"));
+    temporaries.push(dir);
+    cpSync(path.join(REPO_ROOT, "src"), path.join(dir, "src"), { recursive: true });
+    writeFileSync(path.join(dir, "package.json"), `${JSON.stringify({ name: "selfhost" })}\n`);
+    writeFileSync(
+      path.join(dir, "tsconfig.json"),
+      `${JSON.stringify(
+        {
+          compilerOptions: {
+            target: "ES2023",
+            module: "NodeNext",
+            moduleResolution: "NodeNext",
+            strict: true,
+            skipLibCheck: true,
+            noEmit: true,
+            allowImportingTsExtensions: true,
+          },
+          include: ["**/*.ts"],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const session = await open(dir);
+    const total = session.committed().store.files.size;
+    expect(total).toBeGreaterThan(30);
+
+    edit(
+      dir,
+      path.join("src", "checker", "impact.ts"),
+      "export function impactClosure(",
+      "/** @effects pure */\nexport function impactClosure(",
+    );
+    const { full, reextracted } = await updateAndProveScoped(session, dir, [
+      CHANGED("src/checker/impact.ts"),
+    ]);
+
+    expect(full).toBe(false);
+    expect(reextracted).toContain("src/checker/impact.ts");
+    // The shape phase 4 exists for: a real codebase, one file edited, a closure
+    // smaller than the tree.
+    expect(reextracted.length).toBeLessThan(total);
   });
 });
