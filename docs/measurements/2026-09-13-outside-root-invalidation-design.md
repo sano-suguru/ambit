@@ -1,4 +1,4 @@
-# Outside-root edits: when a whole rebuild can be proved unnecessary
+# Outside-root edits: a candidate condition for skipping the whole rebuild
 
 Run on 2026-09-13, Node.js v24.20.0, TypeScript 6.0.3 (`typescript-legacy`),
 macOS (darwin arm64), Apple M1 — the machine of
@@ -9,10 +9,11 @@ The probes were throwaway scripts outside the repository and are not committed.
 **Question.** A file F is in the tsconfig project but outside the checked root
 (`test/*.ts` under `check src`). §6.2 rebuilds everything when F changes. Under
 what conditions is every in-root extraction — and so the cold `analyze()`
-bytes — provably the same before and after an edit to F?
+bytes — the same before and after an edit to F, and can that be proved?
 
-**Answer.** A condition exists, it is cheap to check, and the obvious version of
-it is unsound. "No in-root file imports F" (directly or transitively) admitted
+**Answer.** Not proved yet. A candidate sufficient condition survived 36
+adversarial probes, has a proof sketch, and is cheap to check. The obvious
+version of it is unsound. "No in-root file imports F" (directly or transitively) admitted
 three edits that changed in-root output (cases 34–36 below). The version that
 survives also treats every file that contributes to the global scope as a root
 of the reachability walk.
@@ -83,9 +84,13 @@ compiler reports every file as a module, including one with no `import` or
 Additions, deletions and renames of F were not probed: they are §6.2 rows of
 their own and outside the subset below.
 
-## 3. Necessary and sufficient
+## 3. Candidate sufficient conditions
 
-| Condition | Why needed | Excludes | Sufficient alone |
+These are conservative conditions this candidate imposes, not conditions safety
+requires: an edit that fails one — a harmless `.d.ts` edit, say — can still be
+safe; it is outside what the candidate covers.
+
+| Condition | Hazard this excludes | Probe cases it rejects | Enough alone |
 |---|---|---|---|
 | **P1** F is in both programs, is `.ts` / `.mts` / `.cts` / `.tsx`, not a declaration file | an addition, deletion or rename changes channel e; a `.d.ts` can bind `export as namespace`; JavaScript binds globals through expando and CommonJS assignments | 18; §6.2's add/delete rows | no |
 | **P2** F contributes nothing global in either generation: a module, with no `declare global`, no string-named `declare module` and no `export as namespace` at any depth | channel b, and *becoming* or *ceasing to be* a contributor is the same hazard | 09, 26, 29, 30 | no — 05 passes it |
@@ -94,12 +99,12 @@ their own and outside the subset below.
 | P4′ — reachable from in-root files only | — | 05, 33 | **unsound**: 34, 35, 36 pass it and change output |
 
 **P1 ∧ P2 ∧ P3 ∧ P4**, for every outside-root file whose text moved, is the
-proposed condition. Probe result: over the 36 cases it rejected every edit that
+candidate condition. Probe result: over the 36 cases it rejected every edit that
 changed in-root output and admitted 10 edits, none of which did. It also
 rejected 10 edits that changed nothing (06, 07, 10, 11, 19, 20, 25, 27, 28,
 31), which costs a rebuild and nothing else.
 
-**The sufficiency argument.** Under P3, every input except F is identical, so
+**The proof sketch.** Under P3, every input except F is identical, so
 resolution (e), options (d) and structure (c) are identical. Under P1 ∧ P2, F
 adds nothing to the global table in either program, so the global table is
 built from identical files (b). Every symbol an in-root checker query can
@@ -109,7 +114,7 @@ type and resolution the in-root walk reads is built from identical text.
 Pass 1 and pass 2 visit the same in-root files in the same order and issue the
 same checker queries; nothing else in extraction reads the program.
 
-**What that argument rests on and has not proved:** that channels a–e are the
+**What the sketch rests on and has not proved:** that channels a–e are the
 whole list — that nothing in `createProgram` or the checker lets a module
 with no global contribution influence a query about a file that cannot reach
 it. That is a claim about TypeScript 6.0.3's implementation, supported by the
@@ -203,9 +208,11 @@ sequence identical (with and without `oldProgram`) and no other text changed.
 
 ## 7. Decision
 
-**Go, narrowly.** The subset is P1 ∧ P2 ∧ P3 ∧ P4, with P4's roots including
-every global contributor. On Ambit, the proof costs about 5 ms against about
-240 ms saved, and it admits 45 of 46 test files.
+**Go to an implementation goal, contingent on first trying to falsify the
+channel-completeness assumption.** The candidate is P1 ∧ P2 ∧ P3 ∧ P4, with P4's
+roots including every global contributor. On Ambit, the check costs about 5 ms
+against about 240 ms saved, and it admits 45 of 46 test files. This is not a Go
+to implement P1–P4 as they stand.
 
 Scope of the implementation goal, not started here:
 
@@ -222,7 +229,7 @@ Scope of the implementation goal, not started here:
 - Out of it: additions, deletions and renames of F; a composition with in-root
   edits beyond what `planUpdate` already does; JavaScript F.
 
-Before that goal: the claim that channels a–e are complete (§3) is the only thing
-this investigation rests on without having shown it. The goal should start by
-trying to break it — a checker query whose answer depends on a
-non-contributing module that nothing reaches — not by writing the predicate.
+The goal's first phase is a hard gate: no product code until a falsification
+pass over channel completeness (§3) is done — looking for a checker query whose
+answer depends on a non-contributing module that nothing reaches. A new channel
+found there sends P1–P4 back to design; none found lets implementation start.
