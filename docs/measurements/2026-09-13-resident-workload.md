@@ -109,7 +109,7 @@ Samples below 20 are listed for completeness, not as distributions.
 
 **Every share below is of the summed cost of the classified, measured batches** —
 not of the workload. `other-unknown` batches have no cost estimate, and in the
-trace they are 69–74% of batches.
+trace they are 69% (`call`) and 74% (`bash`) of batches.
 
 Trace, estimated on the current tree; p50 total per class and Σ over batches.
 
@@ -155,7 +155,7 @@ Trace, estimated on the current tree; p50 total per class and Σ over batches.
   96.8 s (`call`, 28%), 9.6 s of 51.7 s (`bash`, 19%), 2.5 s of 53.9 s (git,
   5%). It does not reach the full-rebuild rows.
 - **oldProgram withheld** (`--noold`, same shapes): `call` Σ 102,056 ms against
-  96,761 ms with it, `bash` 54,622 against 51,697 — 5–6% slower without it. A
+  96,761 ms with it, `bash` 54,622 against 51,697 — 5% (`call`) and 6% (`bash`) slower without it. A
   first run of the same procedure on the unfrozen logs (which differ by this
   session's own edits) went the other way, 5% *faster* without it. The sign does
   not survive a re-run, so this procedure cannot separate `oldProgram`'s effect
@@ -168,7 +168,7 @@ Trace, estimated on the current tree; p50 total per class and Σ over batches.
   using it.
 - **When a check would actually run.** Both trace grains are assumptions; no
   session ran the resident path.
-- **69–74% of trace batches**, left `other-unknown` rather than guessed. The
+- **Trace batches, 69% (`call`) and 74% (`bash`)**, left `other-unknown` rather than guessed. The
   shares above exclude them; the true workload's shares can differ.
 - **Trace latency on the trees it came from.** The shapes are replayed on the
   current tree; one shape (`core/backend.ts`, contract + code) could not be

@@ -197,16 +197,17 @@ exit: when it fires, the question is decided, the answer goes in the
   compiler-side reuse can be made to pay without a caching host. The workload
   observed on this repository
   ([2026-09-13](measurements/2026-09-13-resident-workload.md)) fires none of
-  these: on 49 files, whole rebuilds are 62–93% of the summed re-check of the
-  batches it could classify and measure.
+  these: on 49 files, whole rebuilds are call 62%, bash 75%, git proxy 93% of
+  the summed re-check of the batches it could classify and measure.
 
 - **Whether a project file outside the checked root must rebuild everything.**
   §6.2 says it must: nothing under the root reaches it through a held edge, and
   it can still change what an in-root name resolves to. On this repository an
   edit to `test/` — in the project, outside `src` — is the largest cost among
-  the batches that could be classified and measured (40–69% of their summed
-  re-check, [2026-09-13](measurements/2026-09-13-resident-workload.md)); 69–74%
-  of trace batches could not be. Open: under what conditions an edit to such a
+  the batches that could be classified and measured — call 41%, bash 49%, git
+  proxy 69% of their summed re-check
+  ([2026-09-13](measurements/2026-09-13-resident-workload.md)); trace batches
+  that could not be: call 69%, bash 74%. Open: under what conditions an edit to such a
   file provably leaves every in-root extraction and checker answer unchanged —
   what its presence among the root names gives the program, `declare global`,
   module augmentation, being a module-resolution candidate, project

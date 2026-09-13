@@ -351,17 +351,21 @@ the verdict is in `docs/open-questions.md`.
 `check src` (49 files): real agent sessions, with the check cadence assumed and
 costs replayed on the current tree, and 105 squash-merged commits whose
 historical source trees were replayed against today's installed dependencies.
-**69–74% of trace batches are unclassified** (logs without pre-edit text, or
-shell commands touching `src/`) and have no cost estimate; every share below is
-of the classified, measured batches, not of the workload. Contract-tag edits are
-rare — 1 contract-only edit in 745 tool calls, mixed batches 0.9–3.9% — and every
-mixed batch observed moves code in the same file as the tag, so narrowing mixed
-change sets measured a saving of 0–33 ms. **Among measured batches, whole
-rebuilds dominate the cost**: 62–93% of the summed re-check time, led by edits
-to `test/` files (in the tsconfig project, outside the checked root; 40–69%),
-then additions and config. createProgram + getTypeChecker on partial updates is
-5–28% of the measured total. The effect of withholding `oldProgram` changed sign
-between two runs (±5%). The agent loop's gap between project-touching batches is
+The three grains — per tool call (editor-like), between Bash calls (agent-loop-
+like), per commit (PR grain) — are different samplings and are reported
+separately, never as one range. **Trace batches unclassified: call 69%, bash
+74%** (logs without pre-edit text, or shell commands touching `src/`); they have
+no cost estimate, and every share below is of the classified, measured batches,
+not of the workload. Contract-tag edits are rare — 1 contract-only edit in 745
+tool calls; mixed batches call 1.0%, bash 0.9%, git proxy 3.9% — and every mixed
+batch observed moves code in the same file as the tag, so narrowing mixed change
+sets measured a saving of 33 ms (call) and 0 ms (bash). **Among measured
+batches, whole rebuilds dominate the cost**: call 62%, bash 75%, git proxy 93% of
+the summed re-check time, led by edits to `test/` files (in the tsconfig
+project, outside the checked root): call 41%, bash 49%, git proxy 69%; then
+additions and config. createProgram + getTypeChecker on partial updates is call
+28%, bash 19%, git proxy 5% of the measured total. The effect of withholding
+`oldProgram` changed sign between two runs (±5%). The agent loop's gap between project-touching batches is
 p50 52 s, against a 0.4–0.7 s re-check. No project over 49 files was observed.
 **Mixed-set narrowing: No-Go. Architecture C and `oldProgram`: evidence
 insufficient** — neither dominates here, and the 500+-file workload ADR-0014's
