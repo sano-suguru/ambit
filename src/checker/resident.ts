@@ -4,13 +4,14 @@
  * what the first check cost.
  *
  * The architecture is `docs/adr/0014-the-resident-check-path.md` and the
- * implementation plan is `docs/resident-check-path.md`. **This file is the
- * plan's phase 2**: the store, the generation lifecycle, the fingerprint, and
- * an `update` that recomputes everything. There is no scoped fixed point here
- * and no incremental extraction; both are phases 3 and 4, and the point of the
- * order is that the differential equivalence suite
- * (`test/resident.differential.test.ts`) goes green *before* any speed change
- * lands, so the first update that breaks §6.2's equivalence law names itself.
+ * implementation plan is `docs/resident-check-path.md`. This file holds the
+ * store, the generation lifecycle and the fingerprint, and decides what a
+ * generation may reuse: the reverse-import closure to re-extract (phase 4),
+ * narrowed to the edited files alone for an edit confined to contract tags
+ * (ADR-0015), and the impact range the fixed point is scoped to (phase 3).
+ * Every reuse is checked against the differential equivalence suite
+ * (`test/resident.differential.test.ts`), which compares each generation with a
+ * cold run, so the first update that breaks §6.2's equivalence law names itself.
  *
  * Two rules this file exists to keep:
  *
@@ -133,11 +134,10 @@ export interface ProjectFingerprint {
    *
    * `tsconfigHash` covers the tsconfig's *text*, and a tsconfig with an
    * `extends` chain, or one whose resolved options this layer cannot see
-   * without a compiler, is exactly the case the text does not cover. The design
-   * note calls the resolved options (without `fileNames`) part of this hash;
-   * supplying them needs the backend, which is phase 4's `openProject`. Until
-   * then the honest answer is that this fingerprint does not know, and the
-   * honest consequence is a rebuild.
+   * without a compiler, is exactly the case the text does not cover. The
+   * resolved options need a program, so the backend's `openProject` compares
+   * them (phase 4); this record still cannot, and where the text does not cover
+   * them it says so here and the consequence is a rebuild.
    */
   readonly undecidable: readonly string[];
   /**
@@ -410,9 +410,9 @@ export interface FileEntry {
    * from a **union over the files**, not from a whole-project run's
    * accumulated state: `ResolvedConfig` records matches as a side effect of
    * every lookup, so a generation that re-summarized only some files would
-   * report every key the others matched as unmatched. Phase 3 still
-   * re-summarizes everything, and the union is computed anyway — a field first
-   * exercised by the phase that needs it is a field nobody has watched fail.
+   * report every key the others matched as unmatched. A partial update
+   * re-summarizes only the files it re-extracted, so the union over these
+   * fields is what `unmatchedExactKeys` is derived from.
    */
   readonly matchedConfigKeys: readonly string[];
 }
@@ -535,14 +535,13 @@ export interface TsProjectSession {
 }
 
 /**
- * The adapter every backend gets for free, and the only one phase 2 uses.
+ * The adapter a backend without `openProject` is driven through.
  *
- * It re-extracts the whole project on every update. That is not a placeholder
- * standing in for the real thing: §6.2's invalidation table falls back to
- * exactly this for a tsconfig change, an added file, a `.d.ts` and an installed
- * dependency, so this path stays in the product after phases 3 and 4 land —
- * which is why it shares no code with them and a bug in one cannot hide in the
- * other.
+ * It re-extracts the whole project on every update — ADR-0014's architecture
+ * A — and shares no code with the partial path, so a bug in one cannot hide in
+ * the other. A backend that does implement `openProject` answers §6.2's
+ * whole-rebuild rows (a tsconfig change, an added file, a `.d.ts`, an installed
+ * dependency) with `full: true` itself, not through this adapter.
  */
 export function fullRebuildSession(backend: TsBackend, rootDir: string): TsProjectSession {
   return {
