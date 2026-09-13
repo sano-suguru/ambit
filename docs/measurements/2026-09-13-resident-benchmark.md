@@ -28,7 +28,11 @@ is that scenario's peak:
 | `cold` | `analyze()` on the mutated tree — the baseline |
 | `full` | `session.update()` with no change set: whole re-extraction on a held program |
 | `partial` | `session.update(changes)`; whether it *was* partial is the session's verdict |
-| `full-noold`, `partial-noold` | the same with `oldProgram` withheld (`openProjectForMeasurement`, a measurement-only seam) |
+| `full-noold`, `partial-noold` | the same with `oldProgram` withheld (`openProjectForMeasurement`, a measurement-only seam in `legacy-ts.ts` whose `project-update` breakdown never reaches `src/core/` or the resident session) |
+
+The run was taken with the breakdown passed through `PhaseTimings`; review moved
+it behind the seam (captured at the backend boundary, never in `src/core/` or the
+resident session) afterwards. The timers and what they bracket did not change.
 
 Two unmeasured warmup iterations, then 7 measured (5 on immich). Every iteration
 applies a new variant of the mutation, so every measured update processes a real
@@ -40,8 +44,8 @@ the script writes carries p25/p75 for every column.
 | mutation | edit | change set passed to `partial` |
 |---|---|---|
 | leaf | append an exported function to the median-sized file with no importers. After the warmup, variants differ only in the returned literal, so the summary does not move and S = I = 0: the row measures re-extraction and the reuse gate, not propagation | `changed` |
-| hub | the same, to the file with the widest reverse-import closure | `changed` |
-| jsdoc | toggle `/** @effects fs_read */` ↔ `fs_write` above an undocumented function that has callers, in the widest-closure file that has one; verified to attach | `changed` |
+| hub | the same, to the file with the widest reverse-import closure — the worst case by construction | `changed` |
+| jsdoc | toggle `/** @effects fs_read */` ↔ `fs_write` above an undocumented function that has callers, ranked by `closure size × 1000 + callers` — **deliberately the widest-closure file that has one**, so a high-fan-out, worst-case-leaning contract edit and not a typical one; verified to attach | `changed` |
 | config | toggle an unused effect alias in a created `ambit.config.ts` (a toggled trailing comment in realistic-api's existing one) | `changed` if the config is a store file, else `[]` |
 | addition | add a new one-function file | `added` — full by §6.2 |
 | tsconfig | toggle `customConditions` (a module-resolution option nothing reads) | `[]` — full by §6.2 |
@@ -171,15 +175,21 @@ process's.
   on immich. Every one of those rows is 82–96% createProgram + getTypeChecker.
 - **Where the reverse-import closure is wide, partial equals full.** The hub and
   JSDoc edits on drizzle-orm and immich re-extracted 419–432 files, and
-  extraction is 77–85% of their total. The JSDoc row is §6.2's headline case —
-  a contract comment rewritten — and it is the slowest kind of re-check on both
-  large subjects.
+  extraction is 77–85% of their total. Both mutations were **chosen at the
+  widest closure on purpose**, so these rows say what a contract edit in a
+  high-fan-out file costs, not what a JSDoc-only edit typically costs. The
+  closure of a typical JSDoc edit was not measured. What the rows do show is
+  that the invalidation is coarse: only a comment moved, and 419–432 importers
+  went through the checker-driven pass 2 again.
 - **Additions and tsconfig edits are full rebuilds by design** and cost what
   `analyze()` costs, extraction-dominated on the large subjects.
 - **`oldProgram` buys nothing measurable** with the default `CompilerHost`, and
   costs about 0.5–0.7 s on immich.
 - External-input hashing is not a cost worth narrowing on any subject measured,
   including 2,679 `node_modules` inputs.
+- It measures no editor workload: how often each kind of edit happens, and the
+  closure size of a typical JSDoc edit (min / median / max over a subject's
+  files), are both unmeasured.
 - `cold` has no phase breakdown of its own; `full-noold` — a whole re-extraction
   on a program built without reuse — is the proxy used for it.
 

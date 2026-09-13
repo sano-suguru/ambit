@@ -739,11 +739,15 @@ changed, so a reader of an earlier draft is not left with a stale picture.
 **What phase 5 answered**
 ([2026-09-13](measurements/2026-09-13-resident-benchmark.md), six subjects):
 
-- `project-update` dominates only the re-checks whose closure is small (82–96%
-  createProgram + getTypeChecker). An edit to a widely imported file, and a
-  JSDoc-only edit, re-extracted 419–432 files on the two large subjects and is
-  77–85% extraction. Architecture C is No-Go for now; `docs/status.md` carries
-  the reasoning.
+- `project-update` dominates the re-checks whose closure is small (82–96%
+  createProgram + getTypeChecker). The hub and JSDoc-only mutations were placed
+  in the widest-closure file on purpose; there they re-extracted 419–432 files
+  and are 77–85% extraction — worst-case-leaning rows, not typical ones.
+  Architecture C is No-Go for now; `docs/status.md` carries the reasoning.
+- **The JSDoc-only closure narrowing now has its benchmark.** "Transitive
+  importers" above was taken conservatively and the narrowing was to be bought
+  with a benchmark; the worst-case row sends 419–432 importers through pass 2
+  for a comment edit. It is the next lever, ahead of C, and its own work.
 - The identity fast path stays inert and untouched: no caching host was built.
   The checklist item stands for whoever builds one.
 - `oldProgram` measured as no saving on five subjects and 280–690 ms slower on

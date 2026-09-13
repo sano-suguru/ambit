@@ -43,7 +43,11 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { legacyTsBackend, openProjectForMeasurement } from "../src/checker/backend/legacy-ts.ts";
+import {
+  legacyTsBackend,
+  openProjectForMeasurement,
+  type ProjectUpdatePhases,
+} from "../src/checker/backend/legacy-ts.ts";
 import {
   type FileChange,
   ResidentSession,
@@ -451,10 +455,14 @@ interface ScenarioResult {
   readonly equalToCold?: boolean;
 }
 
-function recordOf(result: UpdateResult, totalMs: number, changedFiles: number): RunRecord {
+function recordOf(
+  result: UpdateResult,
+  totalMs: number,
+  changedFiles: number,
+  phases: ProjectUpdatePhases | undefined,
+): RunRecord {
   if (!result.ok) throw result.error;
   const t = result.timings;
-  const phases = t.projectUpdatePhases;
   const extractionMs = t.extraction - (t.projectUpdate ?? 0);
   const attributed = t.extraction + t.summarize + t.impact + t.propagate + t.report + t.transfer;
   return {
@@ -485,12 +493,31 @@ function recordOf(result: UpdateResult, totalMs: number, changedFiles: number): 
   };
 }
 
-function backendFor(scenario: Scenario): TsBackend {
-  if (!scenario.endsWith("-noold")) return legacyTsBackend;
+/**
+ * The legacy backend driven through the measurement seam. The breakdown never
+ * reaches the resident session — `ResidentExtractedUpdate` has no field for it —
+ * so it is captured here, on the way past, into `sink`.
+ */
+function backendFor(
+  scenario: Scenario,
+  sink: { phases: ProjectUpdatePhases | undefined },
+): TsBackend {
+  const reuseOldProgram = !scenario.endsWith("-noold");
   return {
     ...legacyTsBackend,
-    openProject: (rootDir: string) =>
-      openProjectForMeasurement(rootDir, { reuseOldProgram: false }),
+    async openProject(rootDir: string) {
+      const session = await openProjectForMeasurement(rootDir, { reuseOldProgram });
+      return {
+        async update(changed, reextract) {
+          const update = await session.update(changed, reextract);
+          sink.phases = update.projectUpdatePhases;
+          return update;
+        },
+        close() {
+          session.close();
+        },
+      };
+    },
   };
 }
 
@@ -528,7 +555,8 @@ async function scenarioChild(
     };
   }
 
-  const session = await ResidentSession.open(root, { backend: backendFor(scenario) });
+  const sink: { phases: ProjectUpdatePhases | undefined } = { phases: undefined };
+  const session = await ResidentSession.open(root, { backend: backendFor(scenario, sink) });
   let last: UpdateResult | undefined;
   try {
     for (let n = 0; n < warmup + iterations; n += 1) {
@@ -539,10 +567,11 @@ async function scenarioChild(
         : await session.update();
       const totalMs = performance.now() - started;
       if (!result.ok) throw result.error;
+      const phases = sink.phases;
       last = result;
       if (n >= warmup) {
         runs.push({
-          ...recordOf(result, totalMs, applied.changes.length),
+          ...recordOf(result, totalMs, applied.changes.length, phases),
           files: session.committed().store.files.size,
         });
       }
