@@ -197,17 +197,23 @@ exit: when it fires, the question is decided, the answer goes in the
   compiler-side reuse can be made to pay without a caching host. The workload
   observed on this repository
   ([2026-09-13](measurements/2026-09-13-resident-workload.md)) fires none of
-  these: on 49 files, whole rebuilds are 65–93% of the summed re-check.
+  these: on 49 files, whole rebuilds are 62–93% of the summed re-check of the
+  batches it could classify and measure.
 
 - **Whether a project file outside the checked root must rebuild everything.**
   §6.2 says it must: nothing under the root reaches it through a held edge, and
   it can still change what an in-root name resolves to. On this repository an
-  edit to `test/` — in the project, outside `src` — is the single largest
-  resident cost (37–69% of the summed re-check,
-  [2026-09-13](measurements/2026-09-13-resident-workload.md)). Open: whether a
-  module file with no global or ambient declaration can be proved invisible to
-  in-root resolution, and whether that proof is cheaper than the rebuild.
-  *Trigger:* measured; needs a design pass before any narrowing.
+  edit to `test/` — in the project, outside `src` — is the largest cost among
+  the batches that could be classified and measured (40–69% of their summed
+  re-check, [2026-09-13](measurements/2026-09-13-resident-workload.md)); 69–74%
+  of trace batches could not be. Open: under what conditions an edit to such a
+  file provably leaves every in-root extraction and checker answer unchanged —
+  what its presence among the root names gives the program, `declare global`,
+  module augmentation, being a module-resolution candidate, project
+  references, `types` / `typeRoots` / JSX settings, the direction of its import
+  edges, and its addition or deletion — and whether checking those conditions is
+  cheaper than the rebuild. *Trigger:* measured; the next step is a design
+  investigation, not an implementation.
 
 ## Runtime
 

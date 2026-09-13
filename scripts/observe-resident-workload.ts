@@ -19,10 +19,15 @@
  *   latency are **estimated on the current tree**: each batch's shape — which
  *   files, code or contract edits — is re-applied as a synthetic edit of the
  *   same kind to the same files and measured through `ResidentSession`.
- * - `git` replays first-parent commits of this repository: the parent's tree is
- *   opened as a session and the commit's own diff is the update. Exact trees,
- *   one sample per commit, and commits here are squash-merged pull requests —
- *   a commit workload proxy, not an editor one.
+ * - `git` replays first-parent commits of this repository: the parent's source
+ *   tree is opened as a session and the commit's own diff is the update. The
+ *   source is historical and `node_modules` is today's (a symlink), so these are
+ *   not the programs the commits were written against. One sample per commit,
+ *   and commits here are squash-merged pull requests — a commit workload proxy,
+ *   not an editor one.
+ *
+ * `--classify-only` skips measurement, so two runs over a frozen copy of the
+ * session logs can be compared for determinism.
  *
  * Nothing about the sessions leaves the machine, and the artifact holds no
  * source text: stream ids are hashed and paths are repository-relative.
@@ -305,8 +310,22 @@ function relOf(file: string): string | undefined {
   return file.slice(repoRoot.length + 1).replace(/^\.claude\/worktrees\/[^/]+\//, "");
 }
 
+/** How each Edit's pre-edit text was obtained, over every stream read. */
+const editSources = { logged: 0, earlierInStream: 0, unavailable: 0 };
+
+/**
+ * A shell command that may rewrite a source file behind the log's back. After
+ * one, no earlier text of any file is trusted as the next edit's pre-edit text.
+ */
+const MAY_WRITE_SOURCES =
+  /\b(rm|mv|cp|sed -i|patch|perl -\w*i|git (checkout|restore|stash|reset|apply|pull|merge|rebase|switch|cherry-pick))\b|--write|--fix|\b(biome|prettier) format\b|>\s*\S*src\//;
+
 function eventsOf(file: string): Event[] {
   const events: Event[] = [];
+  // The last text of each file this stream saw in full: an edit's result or a
+  // whole-file Read. Used only where the log omits `originalFile`, and only
+  // when the edit's `oldString` is found in it.
+  const known = new Map<string, string>();
   for (const line of fs.readFileSync(file, "utf8").split("\n")) {
     if (line.length === 0) continue;
     let record: {
@@ -320,6 +339,13 @@ function eventsOf(file: string): Event[] {
         replaceAll?: boolean;
         content?: string;
         type?: string;
+        file?: {
+          filePath?: string;
+          content?: string;
+          startLine?: number;
+          numLines?: number;
+          totalLines?: number;
+        };
       };
     };
     try {
@@ -341,26 +367,47 @@ function eventsOf(file: string): Event[] {
           /\bsrc\//.test(command) &&
           /\b(rm|mv|git (checkout|restore|stash|reset|apply)|sed -i|patch)\b/.test(command);
         events.push({ kind: "bash", at, touchesSrc });
+        if (touchesSrc || MAY_WRITE_SOURCES.test(command)) known.clear();
       }
     }
     const result = record.toolUseResult;
+    const read = result?.file;
+    if (
+      read !== undefined &&
+      typeof read.filePath === "string" &&
+      typeof read.content === "string" &&
+      read.startLine === 1 &&
+      read.numLines === read.totalLines
+    ) {
+      const readRel = relOf(read.filePath);
+      if (readRel !== undefined) known.set(readRel, read.content);
+      continue;
+    }
     if (result === undefined || typeof result !== "object" || typeof result.filePath !== "string")
       continue;
     const rel = relOf(result.filePath);
     if (rel === undefined) continue;
-    const original = result.originalFile ?? null;
+    const logged = result.originalFile ?? null;
     if (typeof result.oldString === "string" && typeof result.newString === "string") {
+      const earlier = logged === null ? known.get(rel) : undefined;
+      const original = logged ?? earlier ?? null;
       if (original === null || !original.includes(result.oldString)) {
+        editSources.unavailable += 1;
+        known.delete(rel);
         events.push({ kind: "edit", edit: { rel, before: null, after: null, at } });
         continue;
       }
+      if (logged === null) editSources.earlierInStream += 1;
+      else editSources.logged += 1;
       const newString = result.newString;
       const after = result.replaceAll
         ? original.split(result.oldString).join(newString)
         : original.replace(result.oldString, () => newString);
+      known.set(rel, after);
       events.push({ kind: "edit", edit: { rel, before: original, after, at } });
     } else if (typeof result.content === "string") {
-      events.push({ kind: "edit", edit: { rel, before: original, after: result.content, at } });
+      known.set(rel, result.content);
+      events.push({ kind: "edit", edit: { rel, before: logged, after: result.content, at } });
     }
   }
   return events;
@@ -650,14 +697,18 @@ async function traceMode(): Promise<void> {
     }
   }
   const shapes = [...shapeSet.values()];
-  const measured = await measureShapes(shapes, true, iterations);
-  const measuredNoOld = process.argv.includes("--noold")
-    ? await measureShapes(shapes, false, iterations)
-    : undefined;
+  const classifyOnly = process.argv.includes("--classify-only");
+  const measured = classifyOnly ? {} : await measureShapes(shapes, true, iterations);
+  const measuredNoOld =
+    !classifyOnly && process.argv.includes("--noold")
+      ? await measureShapes(shapes, false, iterations)
+      : undefined;
   write({
     source: "trace",
     streams,
     streamsWithEdits,
+    editSources,
+    classifyOnly,
     project,
     iterations,
     batches,
@@ -969,7 +1020,7 @@ function summaryMode(): void {
     );
     if (doc.source === "trace") {
       console.log(
-        `streams ${doc.streams}, with edits ${doc.streamsWithEdits}; current project ${doc.project.files} files / ${doc.project.functions} functions`,
+        `streams ${doc.streams}, with edits ${doc.streamsWithEdits}; edit pre-edit text: ${JSON.stringify(doc.editSources)}; current project ${doc.project.files} files / ${doc.project.functions} functions`,
       );
       for (const [label, measured] of [
         ["", doc.measured],
