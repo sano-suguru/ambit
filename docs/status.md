@@ -36,7 +36,7 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | Third-party backends `ambit diff` is silent on when nothing changed | **3** — Unleash ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)), immich ([2026-09-11](measurements/2026-09-11-second-third-party-validation-immich.md)), outline ([2026-09-11](measurements/2026-09-11-third-third-party-validation-outline.md)) | — |
 | `unknown` rate, second third-party backend (immich `server/src`, 3,191 functions) | 79.9% (2,550/3,191) | no target (see below) |
 | `unknown` rate, third third-party backend (outline `server`, 2,245 functions) | 72.8% (1,635/2,245) | no target (see below) |
-| Tests | 744 passing, 39 files | green |
+| Tests | 798 passing, 39 files | green |
 | `tsc --noEmit` / `biome ci .` | pass / pass | pass |
 | `check src` latency, 42 files | ~1.1 s (last timed at 40 files; not re-timed) | §3.5's 3 s allowance |
 | Incremental / resident analysis | a resident session with a scoped fixed point **and a reverse-import closure re-extraction**, benchmarked against `analyze()` on six subjects ([2026-09-13](measurements/2026-09-13-resident-benchmark.md)); faster for edits with a small importer closure; a contract-only JSDoc edit no longer re-extracts its importers, measured 4.9×–5.8× faster than cold on the two large high-fan-out subjects ([2026-09-13](measurements/2026-09-13-resident-jsdoc-narrowing.md)); no CLI exposure | yes (§6.2), exposed and measured |
@@ -77,7 +77,7 @@ where it is measurable, as a Phase 1 exit metric in `ROADMAP.md`.
 ### Baseline commands
 
 ```sh
-pnpm test                                                    # 744 tests, 39 files — pass
+pnpm test                                                    # 798 tests, 39 files — pass
 pnpm exec tsc --noEmit                                       # pass
 ./node_modules/.bin/biome ci .                               # pass
 node src/cli/main.ts check src --coverage                    # exit 0
@@ -85,7 +85,7 @@ node src/cli/main.ts check test/fixtures/realistic-api --coverage   # exit 0
 node src/cli/main.ts check test/fixtures/next-app --coverage        # exit 0
 node src/cli/main.ts diff HEAD src                           # exit 0, ledger's approvals in place
 node scripts/bench-corpus.ts                                 # median 52.9%
-npm pack --dry-run                                           # 98 files, 192.1 kB packed
+npm pack --dry-run                                           # 104 files, 244.9 kB packed
 ```
 
 `pnpm exec biome ci .` returns 1 in one local shell because of a user-installed
@@ -356,7 +356,7 @@ What is built, and what says so:
 | 3 — scoped fixed point | yes | `src/checker/impact.ts` (`summariesEqual`, `changedSymbols`, `impactClosure`) and `propagateScoped` in `src/checker/propagate.ts`. `test/impact.test.ts` pins the three decisions field by field; sixteen rows in the differential suite assert, for every mutation, that the scoped state equals `propagate` over the same summaries symbol for symbol *and* that the generation ran scoped |
 | 4 — `openProject`, reverse-import re-extraction | yes | `openProject` in `src/checker/backend/legacy-ts.ts` holds the `ts.Program` and compares the compiler-side half of the reuse gate; `planUpdate` / `patchStore` in `src/checker/resident.ts` decide and apply the closure. Twenty-three rows in the differential suite assert the verdict (full or partial) **and** the re-extracted set, alongside byte equivalence with cold and the scoped-state oracle. The hazards each have their own row: a file added, a rename, an unresolved specifier resolved by an addition, a tsconfig `paths` change, a lockfile-invisible `node_modules` rewrite, an in-root `.d.ts`, a `declare global`, a program input outside the checked root, a file entering the program with no root name moving, a path the session never extracted, an unreported change set, and a failed generation followed by a recovery |
 | 5 — benchmark, measured numbers | yes | `scripts/bench-resident.ts`; six subjects, six mutations, five scenarios, run in [2026-09-13](measurements/2026-09-13-resident-benchmark.md). `project-update` is broken down by `openProjectForMeasurement`, a measurement-only seam in `legacy-ts.ts`; `openProject` strips the breakdown and nothing in `src/core/` or `resident.ts` carries it |
-| 5a — contract-only JSDoc narrowing | yes | `classifyJsDocEdit` and `contractOnlyNarrowing` in `src/checker/backend/legacy-ts.ts`, `narrowOffer` / `patchStore` in `src/checker/resident.ts`. 32 classifier rows in `test/backend.legacy-ts.test.ts` (including that the compiler parses all five contract tags as unknown tags) and 20 differential rows asserting bytes, scoped state, the narrowing verdict, the re-extracted set, and every store entry against a whole cold extraction and summarization |
+| 5a — contract-only JSDoc narrowing | yes | `classifyJsDocEdit` and `contractOnlyNarrowing` in `src/checker/backend/legacy-ts.ts`, `narrowOffer` / `patchStore` in `src/checker/resident.ts`. 34 classifier rows in `test/backend.legacy-ts.test.ts` (including that the compiler parses all five contract tags as unknown tags) and 20 differential rows asserting bytes, scoped state, the narrowing verdict, the re-extracted set, and every store entry against a whole cold extraction and summarization |
 
 The differential suite covers §6.2's equivalence law over an ordinary edit, a
 JSDoc-only edit, authority added and removed, a file added, a file deleted, an
