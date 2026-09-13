@@ -513,10 +513,12 @@ function permitsPartialExtraction(
     if (!after.rootNames.has(rootName) && !deleted.has(path.resolve(rootName))) return false;
   }
 
-  // The program's non-implementation inputs: the default lib is excluded from
-  // the baseline, so what is left is `node_modules` typings, in-root `.d.ts`,
-  // and outside-root sources. A new one, a vanished one, or a rewritten one is
-  // a full rebuild — this is the clause that sees a package rewritten in place.
+  // Every program input that is not an in-root implementation file:
+  // `node_modules` typings, in-root `.d.ts`, outside-root sources, and the
+  // compiler's own `lib.*.d.ts`. Nothing is excluded by path — see
+  // `ProjectBaseline.externalFiles` for why the one exclusion that was tried
+  // had to go. A new one, a vanished one, or a rewritten one is a full rebuild;
+  // this is the clause that sees a package rewritten in place.
   if (before.externalFiles.size !== after.externalFiles.size) return false;
   for (const [fileName, next] of after.externalFiles) {
     const previous = before.externalFiles.get(fileName);
@@ -525,6 +527,16 @@ function permitsPartialExtraction(
     // across programs. The default `CompilerHost` re-reads and re-parses on
     // every `getSourceFile`, so this is a cheap check that may never hit rather
     // than a measured optimization; the hash below is what actually decides.
+    //
+    // **A caching `CompilerHost` makes this line load-bearing, and it has to be
+    // re-reviewed before one lands** (ADR-0014's architecture C is where that
+    // would happen). A cache that returned the same `ts.SourceFile` for a file
+    // whose text changed would make this `continue` skip the comparison that
+    // would have caught it. Today nothing can: the object comes from a host
+    // that re-reads. The moment something can, the honest move is to delete
+    // this line rather than to trust the cache — the hash is 4.5 ms over every
+    // input on a 49-file project
+    // (`docs/measurements/2026-09-13-resident-partial-extraction.md`).
     if (previous.file === next.file) continue;
     if (previous.hash !== next.hash) return false;
   }

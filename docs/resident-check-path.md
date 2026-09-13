@@ -710,6 +710,16 @@ changed, so a reader of an earlier draft is not left with a stale picture.
   was for; the phase that did not move is now the one to point phase 5's
   instrument at. This is ADR-0014's named revisit condition for architecture C,
   met on **one** subject — which is a direction to measure, not a decision.
+- **The identity fast path becomes load-bearing under a caching host.**
+  `permitsPartialExtraction` skips an external input's hash comparison when the
+  new program handed back the same `ts.SourceFile` object. Under the default
+  `CompilerHost` that never happens — it re-reads and re-parses on every
+  `getSourceFile` — so the line is free and inert today. A caching host is
+  exactly what architecture C would add, and a cache returning a stale object
+  for a changed file would turn this line into the skip that hides it. Deleting
+  the line is the honest move at that point: the hash it is avoiding costs
+  4.5 ms over every input on a 49-file project. Recorded here so it is a
+  checklist item for phase 5 rather than a discovery afterwards.
 - **`oldProgram`'s contribution is unmeasured.** It is passed on every update
   and no row was ever run without it, so nothing here separates "the program was
   reused" from "the program was rebuilt quickly". The caching `getSourceFile`
