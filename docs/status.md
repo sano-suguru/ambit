@@ -346,6 +346,24 @@ surface, it makes the reuse gate's identity fast path load-bearing, and it would
 add memory to a process already at 3.9 GiB peak on 557 files. What would change
 the verdict is in `docs/open-questions.md`.
 
+**Workload, observed on this repository only**
+([2026-09-13](measurements/2026-09-13-resident-workload.md)). Two sources on
+`check src` (49 files): real agent sessions, with the check cadence assumed and
+costs replayed on the current tree, and 105 squash-merged commits replayed on
+exact trees. Contract-tag edits are rare — 1 contract-only edit in 740 tool
+calls, mixed batches 0.6–3.9% — and every mixed batch observed moves code in the
+same file as the tag, so narrowing mixed change sets measured a saving of 0–6 ms.
+**Whole rebuilds dominate the cost**: 65–93% of the summed re-check time, led by
+edits to `test/` files (in the tsconfig project, outside the checked root), then
+additions and config. createProgram + getTypeChecker on partial updates is 5–27%
+of the total. Withholding `oldProgram` moved the total by under 5%. The agent
+loop's gap between project-touching batches is p50 48 s, against a 0.4–0.7 s
+re-check. 71–75% of trace batches are unclassified (logs without pre-edit text,
+or shell commands touching `src/`), and no project over 49 files was observed.
+**Mixed-set narrowing: No-Go. Architecture C and `oldProgram`: evidence
+insufficient** — neither dominates here, and the 500+-file workload ADR-0014's
+reopen condition names is still unmeasured.
+
 What is built, and what says so:
 
 | Phase | Built | Evidence |

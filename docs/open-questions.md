@@ -194,7 +194,20 @@ exit: when it fires, the question is decided, the answer goes in the
   ([2026-09-13](measurements/2026-09-13-resident-jsdoc-narrowing.md)); the
   architecture C decision itself is not yet retaken; a measured editor session where leaf edits on a 500+-file project are
   the common case; or an explanation of immich's `oldProgram` slowdown showing
-  compiler-side reuse can be made to pay without a caching host.
+  compiler-side reuse can be made to pay without a caching host. The workload
+  observed on this repository
+  ([2026-09-13](measurements/2026-09-13-resident-workload.md)) fires none of
+  these: on 49 files, whole rebuilds are 65–93% of the summed re-check.
+
+- **Whether a project file outside the checked root must rebuild everything.**
+  §6.2 says it must: nothing under the root reaches it through a held edge, and
+  it can still change what an in-root name resolves to. On this repository an
+  edit to `test/` — in the project, outside `src` — is the single largest
+  resident cost (37–69% of the summed re-check,
+  [2026-09-13](measurements/2026-09-13-resident-workload.md)). Open: whether a
+  module file with no global or ambient declaration can be proved invisible to
+  in-root resolution, and whether that proof is cheaper than the rebuild.
+  *Trigger:* measured; needs a design pass before any narrowing.
 
 ## Runtime
 
