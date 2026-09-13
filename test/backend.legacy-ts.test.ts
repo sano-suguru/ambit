@@ -956,6 +956,28 @@ describe("classifyJsDocEdit: only an edit to Ambit's contract tags is contract-o
     expect(result.kind === "unsafe" ? result.reason : "").toMatch(reason);
   });
 
+  it("refuses an ordinary comment that moved to another token's trivia, text and order unchanged", () => {
+    // A triple-slash directive means something only where it stands. Moving it
+    // below a declaration keeps every comment's text and relative order, and
+    // must still not read as a contract edit.
+    const before =
+      '/// <reference types="node" />\n\n/** @effects pure */\nexport function f(): void {}\n';
+    const after =
+      '/** @effects network */\nexport function f(): void {}\n\n/// <reference types="node" />\n';
+    const result = classifyJsDocEdit("f.ts", before, after);
+    expect(result.kind).toBe("unsafe");
+    expect(result.kind === "unsafe" ? result.reason : "").toMatch(
+      /comment other than an attached JSDoc/,
+    );
+  });
+
+  it("still accepts a contract edit that only changes how many lines precede an ordinary comment", () => {
+    const before = "/** @effects pure */\nexport function f(): void {\n  // note\n}\n";
+    const after =
+      "/**\n * @effects network\n * @boundary\n */\nexport function f(): void {\n  // note\n}\n";
+    expect(classifyJsDocEdit("f.ts", before, after)).toEqual({ kind: "contract-only" });
+  });
+
   it("reads a comment's line break into automatic semicolon insertion, not past it", () => {
     // `return /** … */ 1` and `return /**\n */ 1` differ only inside a
     // JSDoc-shaped comment, and the second returns nothing: the line break

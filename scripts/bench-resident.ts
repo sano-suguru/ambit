@@ -512,7 +512,7 @@ function backendFor(
       return {
         // Every argument forwarded: a wrapper that drops `narrowTo` measures
         // the closure while the product narrows, and nothing would say so.
-        async update(changed, reextract, narrowTo) {
+        async update(changed, reextract, narrowTo?: readonly string[]) {
           const { projectUpdatePhases, ...productUpdate } = await session.update(
             changed,
             reextract,

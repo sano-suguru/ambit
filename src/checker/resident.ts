@@ -32,7 +32,6 @@ import type {
   ExtractedFile,
   ExtractedModule,
   FunctionSummary,
-  ResidentNarrowing,
   SkippedFunctionKind,
   SymbolId,
   TsBackend,
@@ -466,6 +465,19 @@ export interface ResidentStore {
 }
 
 // ---- the backend seam ------------------------------------------------------
+
+/**
+ * A backend's answer to a `narrowTo` offer — see {@link TsProjectSession.update}.
+ *
+ * Deliberately **not** in `src/core/`: it is a protocol between this layer and
+ * a backend's resident session, not part of `TsBackend`, which the package
+ * root exports. A backend typed only against `src/core/` ignores the third
+ * argument and returns no answer, and that is read as "declined" — the closure,
+ * which is always correct.
+ */
+export type ResidentNarrowing =
+  | { readonly kind: "contract-only" }
+  | { readonly kind: "declined"; readonly reason: string };
 
 /** What one {@link TsProjectSession.update} produced. */
 export interface ExtractedUpdate {

@@ -13,7 +13,6 @@ import type {
   RawJsDoc,
   ResidentExtractedUpdate,
   ResidentFileChange,
-  ResidentNarrowing,
   RuntimeWrapper,
   SkippedFunctionKind,
   SourceLocation,
@@ -26,6 +25,7 @@ import type {
 import { isOnExceed, symbolId } from "../../core/index.ts";
 import { constructorStubKey } from "../../stubs/constructors.ts";
 import { isFirstArgumentMutator, isMutatingBuiltin } from "../../stubs/mutating-builtins.ts";
+import type { ResidentNarrowing } from "../resident.ts";
 
 /**
  * `TsBackend` implementation on the TypeScript Compiler API (DESIGN.md §3.4).
@@ -341,7 +341,7 @@ async function openProject(rootDir: string): Promise<{
     changed: readonly ResidentFileChange[],
     reextract?: readonly string[],
     narrowTo?: readonly string[],
-  ): Promise<ResidentExtractedUpdate>;
+  ): Promise<NarrowableExtractedUpdate>;
   close(): void;
 }> {
   const session = await openProjectForMeasurement(rootDir, { reuseOldProgram: true });
@@ -350,7 +350,7 @@ async function openProject(rootDir: string): Promise<{
       changed: readonly ResidentFileChange[],
       reextract?: readonly string[],
       narrowTo?: readonly string[],
-    ): Promise<ResidentExtractedUpdate> {
+    ): Promise<NarrowableExtractedUpdate> {
       // The breakdown is the benchmark's, not the product's: it does not cross
       // the `TsBackend` boundary (`ResidentExtractedUpdate` has no field for it).
       const { projectUpdatePhases: _measurementOnly, ...update } = await session.update(
@@ -387,8 +387,17 @@ export interface ProjectUpdatePhases {
 }
 
 /** A {@link ResidentExtractedUpdate} carrying the measurement-only breakdown. */
-export type MeasurementExtractedUpdate = ResidentExtractedUpdate & {
+export type MeasurementExtractedUpdate = NarrowableExtractedUpdate & {
   readonly projectUpdatePhases: ProjectUpdatePhases;
+};
+
+/**
+ * `ResidentExtractedUpdate` with this backend's answer to a `narrowTo` offer.
+ * Kept out of `src/core/` on purpose — see `ResidentNarrowing` in
+ * `src/checker/resident.ts`.
+ */
+export type NarrowableExtractedUpdate = ResidentExtractedUpdate & {
+  readonly narrowing?: ResidentNarrowing;
 };
 
 /**
@@ -582,7 +591,10 @@ export type JsDocEditClass =
  *    token stream alone would read `return /*\n*\/ x` as `return x`.
  * 2. **Every other comment.** Each comment that is not an attached JSDoc block
  *    — `//`, `/* *\/`, a triple-slash directive, a pragma, a `/**` the parser
- *    attached to nothing — has the same text, in the same order.
+ *    attached to nothing — has the same text, in the same order, **in the
+ *    trivia of the same token**. Text and order alone would let a directive
+ *    move below a declaration; its offset is deliberately not compared, so a
+ *    contract edit that adds lines above it still passes.
  * 3. **Every other part of a JSDoc block.** Each attached block's description
  *    and each of its non-contract tags is identical, keyed to the token the
  *    block precedes. A block whose remainder is empty (it holds contract tags
@@ -650,7 +662,8 @@ function editSkeletonOf(
   const remainder: string[] = [];
   const attachedJsDoc = new Set<number>();
   // Keyed by position: a zero-width node's trivia is also the next token's, and
-  // one comment must be counted once. Only the texts are compared.
+  // one comment must be counted once — against the first token that holds it.
+  // What is compared is that token's index and the text, never the offset.
   const comments = new Map<number, string>();
   let tokenIndex = 0;
   let unexpectedTrivia: string | undefined;
@@ -689,7 +702,9 @@ function editSkeletonOf(
           kind === ts.SyntaxKind.ShebangTrivia
         ) {
           const at = scanner.getTokenStart();
-          if (!attachedJsDoc.has(at)) comments.set(at, scanner.getTokenText());
+          if (!attachedJsDoc.has(at) && !comments.has(at)) {
+            comments.set(at, `${tokenIndex}\u0000${scanner.getTokenText()}`);
+          }
         } else if (
           kind !== ts.SyntaxKind.WhitespaceTrivia &&
           kind !== ts.SyntaxKind.NewLineTrivia

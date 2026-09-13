@@ -505,6 +505,12 @@ the verdict entitles, and a narrowed answer to a generation that offered nothing
 throws. `UpdateResult.narrowing` reports `not-offered`, `declined` (with the
 reason) or `contract-only`.
 
+The offer and the answer are not part of `TsBackend`. `src/core/backend.ts` —
+which the package root exports — is unchanged: `ResidentNarrowing` lives in
+`resident.ts` and `NarrowableExtractedUpdate` in `legacy-ts.ts`. A backend typed
+only against `src/core/` ignores the third argument and returns no answer, which
+reads as `declined`, and the closure it extracted is accepted as before.
+
 Nothing downstream changes. The edited file is re-summarized, `S` is computed from
 the summaries as for any edit, and `I` is `S` closed under callers over both
 reverse call graphs — so an importer whose authority depends on the edited
