@@ -371,6 +371,19 @@ p50 52 s, against a 0.4–0.7 s re-check. No project over 49 files was observed.
 insufficient** — neither dominates here, and the 500+-file workload ADR-0014's
 reopen condition names is still unmeasured.
 
+**Outside-root edits: Go to an implementation goal, contingent on first trying
+to falsify the channel-completeness assumption** ([design investigation](measurements/2026-09-13-outside-root-invalidation-design.md),
+nothing built). A candidate sufficient condition survived 36 adversarial probes
+and has a proof sketch; it is not proved. In outline: the edited file exists in
+both generations and is a TypeScript module (not `.d.ts`) contributing nothing
+global, and it is unreachable from the in-root files **and from every global
+contributor**. The candidate additionally requires unchanged compiler options,
+root names and program-input identity — every other file's text, and the
+`getSourceFiles()` sequence with `fileName` spelling; the design investigation
+has the full list. Reachability from in-root files alone admitted three edits
+that changed output. On `check src`: whole rebuild 659 ms, empty-closure partial
+420 ms, the reachability check 5.0 ms; 45 of 46 `test/` files would qualify.
+
 What is built, and what says so:
 
 | Phase | Built | Evidence |
