@@ -409,7 +409,16 @@ async function openProject(rootDir: string): Promise<{
   };
 }
 
-/** @effects fs_read */
+/**
+ * Everything the compiler-side half of the reuse gate compares, read off one
+ * program.
+ *
+ * Declares nothing: every value here comes from the program the caller already
+ * built, so this reads no file of its own. It used to declare `fs_read`, from a
+ * draft that computed the default lib's directory — the declaration outlived
+ * the call, and a contract claiming authority a function does not exercise is
+ * the guarantee surface growing by notation alone (P4).
+ */
 function baselineOf(
   program: ts.Program,
   absoluteRoot: string,
