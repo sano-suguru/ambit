@@ -509,9 +509,12 @@ function backendFor(
       const session = await openProjectForMeasurement(rootDir, { reuseOldProgram });
       return {
         async update(changed, reextract) {
-          const update = await session.update(changed, reextract);
-          sink.phases = update.projectUpdatePhases;
-          return update;
+          const { projectUpdatePhases, ...productUpdate } = await session.update(
+            changed,
+            reextract,
+          );
+          sink.phases = projectUpdatePhases;
+          return productUpdate;
         },
         close() {
           session.close();
