@@ -213,8 +213,15 @@ exit: when it fires, the question is decided, the answer goes in the
   module augmentation, being a module-resolution candidate, project
   references, `types` / `typeRoots` / JSX settings, the direction of its import
   edges, and its addition or deletion — and whether checking those conditions is
-  cheaper than the rebuild. *Trigger:* measured; the next step is a design
-  investigation, not an implementation.
+  cheaper than the rebuild. Investigated
+  ([2026-09-13](measurements/2026-09-13-outside-root-invalidation-design.md)):
+  a subset exists — F a TypeScript module contributing nothing global, every
+  other program input identical in text and order, and F unreachable from the
+  in-root files **and from every global contributor**. Reachability from in-root
+  files alone is unsound. It costs about 5 ms against about 240 ms saved on this
+  repository. Still open: whether the influence channels it enumerates are
+  complete. *Trigger:* an implementation goal that begins by trying to break that
+  list.
 
 ## Runtime
 
