@@ -111,7 +111,9 @@ nothing else.
 ## Revisit when
 
 - A measurement shows `project-update` or `extraction` dominating a cold start in
-  a resident session — the case for C.
+  a resident session — the case for C. Met 2026-09-13 and C declined for now
+  ([measurement](../measurements/2026-09-13-resident-benchmark.md)); the refined
+  condition is in `docs/open-questions.md`.
 - File additions turn out to be frequent enough in a real session to pay for an
   unresolved-specifier index, which is what would make an addition incremental.
 - §3.5's gates 3 and 4 are re-run on the resident path and a second backend
