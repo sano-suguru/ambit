@@ -215,16 +215,16 @@ exit: when it fires, the question is decided, the answer goes in the
   edges, and its addition or deletion — and whether checking those conditions is
   cheaper than the rebuild. Investigated
   ([2026-09-13](measurements/2026-09-13-outside-root-invalidation-design.md)):
-  a candidate sufficient condition, not a proved one, survived 36 adversarial
-  probes — F exists in both generations and is a TypeScript module contributing
-  nothing global, and F is unreachable from the in-root files **and from every
-  global contributor**. It additionally requires unchanged compiler options, root
-  names and program-input identity (every other text, and the source-file
-  sequence with spelling); the investigation has the full list. Reachability
-  from in-root files alone is unsound. The check costs about 5 ms against about
-  240 ms saved on this repository. Still open: whether the influence channels it
-  enumerates are complete. *Trigger:* an implementation goal whose first phase
-  tries to break that list, with no product code before it ends.
+  a candidate sufficient condition survived 36 adversarial probes — F a
+  TypeScript module contributing nothing global, unreachable from in-root files
+  and from every global contributor, every other program input identical — and
+  then failed its falsification pass. A reference directive in F can reclassify a
+  file already in the program (`isSourceFileFromExternalLibrary`,
+  `isSourceFileDefaultLibrary`) without moving the sequence or any text, and
+  Ambit reads both. Still open: whether a revised candidate that also compares
+  those per-file attributes, and redirect status, is complete. *Trigger:* a goal
+  that runs the attacks the pass did not (redirects, `.tsx` implicit imports,
+  symlinks, NodeNext/CJS, checker-internal ordering) against it first.
 
 ## Runtime
 
