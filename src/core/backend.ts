@@ -535,4 +535,27 @@ export interface ResidentExtractedUpdate {
   readonly removed: readonly string[];
   readonly full: boolean;
   readonly projectUpdateMs?: number;
+  /** See `ProjectUpdatePhases`. Absent where the backend cannot separate them. */
+  readonly projectUpdatePhases?: ProjectUpdatePhases;
+}
+
+/**
+ * What `projectUpdateMs` is made of, for the phase 5 benchmark
+ * (`scripts/bench-resident.ts`). Milliseconds, except the two counts, which
+ * say how much the reuse gate's `baseline` hashed. Not a §6.2 phase and not
+ * guaranteed surface: it exists so a measurement can point at the part of
+ * `project-update` that costs, rather than at the sum.
+ */
+export interface ProjectUpdatePhases {
+  /** Reading and resolving `tsconfig.json`. */
+  readonly configLoad: number;
+  readonly createProgram: number;
+  /** `getTypeChecker()` — binding the program. */
+  readonly typeChecker: number;
+  /** The reuse gate's program-side baseline, external-input hashing included. */
+  readonly baseline: number;
+  /** Program inputs that are not in-root implementation files. */
+  readonly externalFiles: number;
+  /** Their total text length, in UTF-16 code units. */
+  readonly externalChars: number;
 }

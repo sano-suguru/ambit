@@ -39,7 +39,7 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | Tests | 744 passing, 39 files | green |
 | `tsc --noEmit` / `biome ci .` | pass / pass | pass |
 | `check src` latency, 42 files | ~1.1 s (last timed at 40 files; not re-timed) | §3.5's 3 s allowance |
-| Incremental / resident analysis | a resident session with a scoped fixed point **and a reverse-import closure re-extraction** ([2026-09-13](measurements/2026-09-13-resident-partial-extraction.md)); no CLI exposure, no benchmark | yes (§6.2), exposed and measured |
+| Incremental / resident analysis | a resident session with a scoped fixed point **and a reverse-import closure re-extraction**, benchmarked against `analyze()` on six subjects ([2026-09-13](measurements/2026-09-13-resident-benchmark.md)); faster only for edits with a small importer closure; no CLI exposure | yes (§6.2), exposed and measured |
 | Bundled stub packages | 6 DB/LLM clients, 9 builtin namespaces | 50 packages |
 | Runtime hooks | 4 (`fetch`, `node:fs`, `node:child_process`, `pg`) | — |
 | Framework adapters | 2 (Hono, Next.js App Router) | — |
@@ -286,29 +286,48 @@ package no bundled table covers has no exit short of `@boundary`
 
 ## The resident check path (§6.2)
 
-Phases 0–4 of [`docs/resident-check-path.md`](resident-check-path.md) are
-implemented. **No speed claim is made against `analyze()`**, because the
-baseline that claim would be made against is phase 5's and
-`scripts/bench-resident.ts` does not exist. What is measured is narrower and
-is recorded in full in
-[2026-09-13](measurements/2026-09-13-resident-partial-extraction.md): on a
-49-file copy of `src/` (412 functions), an edit to one file re-extracts the 6
-files in its reverse-import closure instead of all 49, and **extraction falls
-from 172–198 ms to 50–79 ms**. Three runs per verdict, one subject, one edit.
+Phases 0–5 of [`docs/resident-check-path.md`](resident-check-path.md) are
+built. Phase 5 is `scripts/bench-resident.ts`, run once over six subjects and
+recorded in full in
+[2026-09-13](measurements/2026-09-13-resident-benchmark.md): cold `analyze()`,
+a resident whole re-extraction, and a resident partial update, each with and
+without `oldProgram`, for six mutations per subject. Every resident answer was
+byte-equal to cold (144 of 144). Apple M1, one machine, not re-run on Linux.
 
-**What did not move is `project-update`, and it is now the dominant phase** —
-135–158 ms, about two thirds of a partial re-check's total. That is
-`ts.createProgram` with `oldProgram` passed, the type checker, and the baseline
-the reuse gate compares. `oldProgram`'s own contribution is unmeasured: no row
-was run without it. So the ordering of the remaining work is set by a number
-rather than by a guess — phase 5's instrument points at program construction,
-not at the extraction phase 4 already shrank, and not at the impact comparator,
-whose 1–2 ms was never the cost.
+**A re-check is faster than `analyze()` only where the reverse-import closure is
+small.** A leaf or `ambit.config.ts` edit: 48 → 37 ms (realistic-api), 274 →
+148 ms (got), 321 → 144 ms (trpc-server), 1,947 → 331 ms (drizzle-orm, 448
+files), 10,361 → 2,200 ms (immich `server/src`, 557 files, dependencies
+installed). An edit to a widely imported file, and a **JSDoc-only contract
+edit** — §6.2's headline case — re-extracted 419–432 files on the two large
+subjects and cost what `analyze()` costs (1.9 s, 10.2 s); extraction is 77–85%
+of those. A file addition and a tsconfig edit are full rebuilds by design and
+cost the same.
 
-ADR-0014 named "`project-update` or `extraction` dominating a cold start in a
-resident session" as the revisit condition for architecture C. It is met for
-`project-update` **on one subject**, which is a direction to measure and not a
-decision.
+**Where partial extraction applies, `createProgram` + `getTypeChecker` is 82–96%
+of the re-check.** The reuse gate's external-input hashing is 0.6–22 ms — 20 ms
+over immich's 2,679 inputs (14.65 M chars, `node_modules` included) — and at
+most 2% of `project-update` anywhere. **`oldProgram` buys nothing measurable** on
+the five subjects without installed dependencies, and on immich passing it made
+`project-update` 280–690 ms *slower* in every row where the program's structure
+could be reused; the cause is not isolated. A resident process peaks 0–1,000 MiB
+above a cold one (immich: 2.5–3.9 GiB).
+
+**Architecture C (ADR-0014): No-Go for now.** The revisit condition —
+`project-update` dominating — is met on every subject, but only for the edits
+that are already the cheap ones. What C could remove is bounded by
+`createProgram` + `getTypeChecker` on a partial leaf update: about 27 ms
+(realistic-api), 130–140 ms (got, trpc-server), 420 ms (ambit-src, whose program
+reads 640 external inputs), 280 ms (drizzle-orm), 1.8 s on immich (1.4 s without
+`oldProgram`); the real
+saving is smaller, because the changed file is still parsed and the checker
+still merges globals. It removes nothing from the slow re-checks, which are
+extraction-bound, and the one piece of compiler-side reuse already in place
+(`oldProgram`) measured as no gain or a loss. Against that, C is a cache of
+snapshot-bound `ts.SourceFile`s whose invalidation is a second correctness
+surface, it makes the reuse gate's identity fast path load-bearing, and it would
+add memory to a process already at 3.9 GiB peak on 557 files. What would change
+the verdict is in `docs/open-questions.md`.
 
 What is built, and what says so:
 
@@ -319,7 +338,7 @@ What is built, and what says so:
 | 2 — resident session, full rebuild only | yes | `test/resident.differential.test.ts`: 79 cases, every mutation row comparing a resident generation's rendered bytes against a cold `analyze()` over the same tree. The config rows are compared against a cold run in a **separate process** (`test/support/cold-oracle.ts`) as well, because both in-process paths share one module registry and a stale config would make them agree on the same wrong answer |
 | 3 — scoped fixed point | yes | `src/checker/impact.ts` (`summariesEqual`, `changedSymbols`, `impactClosure`) and `propagateScoped` in `src/checker/propagate.ts`. `test/impact.test.ts` pins the three decisions field by field; sixteen rows in the differential suite assert, for every mutation, that the scoped state equals `propagate` over the same summaries symbol for symbol *and* that the generation ran scoped |
 | 4 — `openProject`, reverse-import re-extraction | yes | `openProject` in `src/checker/backend/legacy-ts.ts` holds the `ts.Program` and compares the compiler-side half of the reuse gate; `planUpdate` / `patchStore` in `src/checker/resident.ts` decide and apply the closure. Twenty-three rows in the differential suite assert the verdict (full or partial) **and** the re-extracted set, alongside byte equivalence with cold and the scoped-state oracle. The hazards each have their own row: a file added, a rename, an unresolved specifier resolved by an addition, a tsconfig `paths` change, a lockfile-invisible `node_modules` rewrite, an in-root `.d.ts`, a `declare global`, a program input outside the checked root, a file entering the program with no root name moving, a path the session never extracted, an unreported change set, and a failed generation followed by a recovery |
-| 5 — benchmark, measured numbers | no | — |
+| 5 — benchmark, measured numbers | yes | `scripts/bench-resident.ts`; six subjects, six mutations, five scenarios, run in [2026-09-13](measurements/2026-09-13-resident-benchmark.md). `project-update` is broken down by `openProjectForMeasurement`'s `projectUpdatePhases`, a measurement-only seam |
 
 The differential suite covers §6.2's equivalence law over an ordinary edit, a
 JSDoc-only edit, authority added and removed, a file added, a file deleted, an
@@ -447,7 +466,7 @@ The snapshot-bound-state rule (§6.2, §3.4) is asserted two ways:
 |---|---|---|
 | M0 — specification, diagnostics, scope | **done** | `rfcs/` and `conformance/` are deferred by §9.1 to 1.0 or the first external adopter ([ADR-0010](adr/0010-when-governance-takes-effect.md)) |
 | M0.5 — backend comparison | **done** | Linux not re-verified. Gates 3 and 4 worth re-running once §6.2 exists. Full record: [`docs/measurements/m0.5-backend-comparison.md`](measurements/m0.5-backend-comparison.md). A TypeScript 7 *shadow* backend now runs the same pipeline for comparison only, measured in [2026-09-12](measurements/2026-09-12-ts7-shadow-analysis.md) and hardened in [2026-09-12](measurements/2026-09-12-ts7-shadow-hardening.md), again in [2026-09-12](measurements/2026-09-12-callable-slot-handle.md), again in [2026-09-12](measurements/2026-09-12-literal-receiver-port.md) and again in [2026-09-12](measurements/2026-09-12-instance-member-port.md) — it changes no default. Divergences on `src` 137 → 4 → **0**, and every one of the gate's 14 roots is now at 0; across the five third-party repositories 260 → 16, with 0 high-risk left, 0 authority increases, 0 decreases, 0 `unknown` lost, and the CI decision agreeing everywhere. Those numbers say the two engines no longer disagree in any way that reaches authority and that nothing accounts for — **not** that the shadow backend is at feature parity: `NOT_PORTED` is now `project:no-tsconfig-fallback` alone, a project-loading difference. Every call-resolution shape `legacy-ts.ts` implements is ported — `resolution:literal-receiver` (the four rows on `src`, one site at `cli/analyze.ts:91`) and `resolution:instance-member` (the seven left on `backend-smoke`, one site at `call-resolution.ts:172`). The corpus figure of 16 predates both ports and has not been re-measured. TypeScript 7 is 0.60x–1.16x of the adopted backend on those repositories, so the performance case is weaker than `src` alone suggested. `node scripts/shadow-check.ts` is the regression gate |
-| M1 — effects, unknown, coverage, diagnostics, init | **partial** | A resident session exists (`src/checker/resident.ts`) and is **incremental in extraction, summarization and propagation**: an update re-extracts the reverse-import closure of what the caller reported, re-summarizes that closure (or every file, when the config's value moved), and scopes the fixed point to the functions whose summaries moved plus their callers — phases 0–4 of [`docs/resident-check-path.md`](resident-check-path.md). Every other row of §6.2's invalidation table falls back to a whole re-extraction. Phases 5–6 (the benchmark, CLI exposure) are not built, and **no re-check is claimed to be faster than a first check**: the only resident timing taken ([2026-09-13](measurements/2026-09-13-resident-partial-extraction.md)) has no `analyze()` baseline in it. No versioned JSON Schema for the diagnostic format (§5.2). `@budget costUsd` parses and is never priced. Config has no `stubs` key |
+| M1 — effects, unknown, coverage, diagnostics, init | **partial** | A resident session exists (`src/checker/resident.ts`) and is **incremental in extraction, summarization and propagation**: an update re-extracts the reverse-import closure of what the caller reported, re-summarizes that closure (or every file, when the config's value moved), and scopes the fixed point to the functions whose summaries moved plus their callers — phases 0–4 of [`docs/resident-check-path.md`](resident-check-path.md). Every other row of §6.2's invalidation table falls back to a whole re-extraction. Phase 5's benchmark ([2026-09-13](measurements/2026-09-13-resident-benchmark.md)) puts a leaf or config edit at 1.3×–5.9× faster than `analyze()` and a JSDoc-only edit on a large subject at the same cost; phase 6 (CLI exposure) is not built. No versioned JSON Schema for the diagnostic format (§5.2). `@budget costUsd` parses and is never priced. Config has no `stubs` key |
 | M2 — capabilities, budget, hooks, adapters, 50 stubs | **partial** | Four hooks, not more: `node:http`/`https`/`net`, `mysql2`, Prisma, Drizzle, MongoDB and every LLM SDK have none, so calling them is neither blocked nor recorded. `costUsd` and `llmCalls` are not enforced. Two adapters (Hono, Next.js App Router); Express, BullMQ, `worker_threads`, Server Actions, `middleware.ts`, the Pages Router and Edge have none. No `@budget` loop-pattern warnings. **Stubs are 5 client packages and 9 builtin namespaces, not 50 packages** |
 | M3 — fix patches, agent protocol | **partial** | `fixes[].edits` exists for `AMB-E001` only. **`ambit agent` does not exist** — no protocol, no iteration limit, no approval gate for loosening fixes |
 | M4 — editor, SBOM, npm | **partial** | Published as [`ambit-ts`](https://www.npmjs.com/package/ambit-ts) 0.1.0 on 2026-09-10, **without provenance**. No editor integration of any kind. **`ambit sbom` does not exist**, nor do stub trust levels in diagnostics (§8). No pilot team. The runtime ships with the CLI, so installing Ambit pulls in `typescript` ([ADR-0009](adr/0009-package-name-and-single-package.md)) |

@@ -6,7 +6,7 @@ architecture is [ADR-0014](adr/0014-the-resident-check-path.md). Nothing here is
 a new guarantee — §9.2 puts the existence of a resident path outside the
 guaranteed surface, and this document adds no claim to it.
 
-Status: **phases 0–4 implemented, phases 5–6 not.** `docs/status.md` carries
+Status: **phases 0–5 implemented, phase 6 not.** `docs/status.md` carries
 what that means in detail; this file stays the design, and where the
 implementation forced a correction the text below says so rather than being
 quietly left behind.
@@ -505,10 +505,15 @@ resident path that reintroduces it has failed whatever else it achieves.
 `scripts/bench-resident.ts`, outside `pnpm test` and outside `tsconfig.json`'s
 `include`, like every other script.
 
-- Subjects: `src` (40 files), `test/fixtures/realistic-api`, and one repository
-  already pinned in `test/corpus/corpus.json`.
-- Measured: every phase of the first check, every phase of a one-file re-check,
-  each of ten consecutive updates, peak RSS.
+- Subjects, as built: this repository's `src/`, `test/fixtures/realistic-api`,
+  three corpus targets (got, trpc-server, drizzle-orm) and immich `server/src`
+  with dependencies installed.
+- Measured, as built: per mutation (leaf, hub, JSDoc-only, config, addition,
+  tsconfig), cold `analyze()` against a resident whole re-extraction and a
+  partial update, each with and without `oldProgram`; `project-update` split
+  into config load, createProgram, getTypeChecker and baseline; peak RSS per
+  scenario process. The "ten consecutive updates" of the plan became warmup plus
+  seven measured iterations per scenario.
 - The baseline is **calling `analyze()` every time** — ADR-0014's architecture A.
   "Faster" is said against that baseline and against nothing else.
 - Results go to `docs/measurements/` with a date, and the two rows they bear on
@@ -525,11 +530,11 @@ resident path that reintroduces it has failed whatever else it achieves.
 | 1 | `ExtractedProject` gains `modules` — see **Components**, not `ExtractedFile`, and the aggregates stay where they are | `check src --coverage` counts unchanged |
 | 2 | `resident.ts` with the store and a full-rebuild-only `update` (architecture A) | The differential suite passes on every mutation — slowly is fine |
 
-Phases 0, 1, 2, 3 and 4 are done. What building them corrected is recorded
+Phases 0 through 5 are done. What building them corrected is recorded
 under **Corrections from the implementation** below.
 | 3 | The scoped fixed point in `propagate.ts`; extraction still whole-project. **Not gated on `fingerprintPermitsReuse`** — see the lifecycle's step 1 | Suite still passes; `impact` appears in the timings |
 | 4 | `openProject` in the legacy backend; reverse-import closure re-extraction | Suite still passes; `extraction` shrinks |
-| 5 | Benchmark, `docs/measurements/`, `docs/status.md` | Measured numbers exist |
+| 5 | Benchmark, `docs/measurements/`, `docs/status.md` | Measured numbers exist — [2026-09-13](measurements/2026-09-13-resident-benchmark.md) |
 | 6 | CLI exposure — separate work, separate `CHANGELOG.md` entry | — |
 
 Phase 2 building a resident session that recomputes everything is the point of
@@ -730,6 +735,23 @@ changed, so a reader of an earlier draft is not left with a stale picture.
 - **The equivalence oracle is still a whole cold run.** Every differential row
   pays for a full `analyze()`, which is what makes the suite slow and what makes
   it worth having.
+
+**What phase 5 answered**
+([2026-09-13](measurements/2026-09-13-resident-benchmark.md), six subjects):
+
+- `project-update` dominates only the re-checks whose closure is small (82–96%
+  createProgram + getTypeChecker). An edit to a widely imported file, and a
+  JSDoc-only edit, re-extracted 419–432 files on the two large subjects and is
+  77–85% extraction. Architecture C is No-Go for now; `docs/status.md` carries
+  the reasoning.
+- The identity fast path stays inert and untouched: no caching host was built.
+  The checklist item stands for whoever builds one.
+- `oldProgram` measured as no saving on five subjects and 280–690 ms slower on
+  immich. Still passed; removing it is a performance change for its own goal.
+- External-input hashing: 20 ms over 2,679 inputs / 14.65 M chars on immich,
+  ≤2% of `project-update` everywhere. Not worth narrowing.
+- How often an addition happens in a real session is **not** measured — the
+  benchmark applies its own edits. Evidence insufficient; still phase 6's.
 
 12. **`ExtractedModule.imports` was missing an `import("…")` type node.** A
     parameter annotated `s: import("./svc.ts").Svc` makes the checker resolve

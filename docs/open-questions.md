@@ -182,6 +182,16 @@ exit: when it fires, the question is decided, the answer goes in the
   *Trigger:* already fired for the subdirectory case, which is closed above.
   For the rest, an adopter running `ambit diff` at a workspace root.
 
+- **What would reopen architecture C for the resident path (ADR-0014).** Phase 5
+  ([2026-09-13](measurements/2026-09-13-resident-benchmark.md)) says No-Go for
+  now: `project-update` dominates only the re-checks that are already cheap, and
+  the slow ones — a JSDoc-only or hub edit on a large subject — are extraction.
+  Reopen on any of: the JSDoc-only closure narrowing (pass 2 never reads a
+  callee's JSDoc) landing and leaving `project-update` dominant on a contract
+  edit; a measured editor session where leaf edits on a 500+-file project are
+  the common case; or an explanation of immich's `oldProgram` slowdown showing
+  compiler-side reuse can be made to pay without a caching host.
+
 ## Runtime
 
 - **Coverage and fragility of runtime hooks.** (1) By what approach to add the

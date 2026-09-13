@@ -32,6 +32,7 @@ import type {
   ExtractedFile,
   ExtractedModule,
   FunctionSummary,
+  ProjectUpdatePhases,
   SkippedFunctionKind,
   SymbolId,
   TsBackend,
@@ -86,6 +87,11 @@ export interface PhaseTimings {
    * extraction begins — the two are reported together under {@link extraction}.
    */
   readonly projectUpdate?: number;
+  /**
+   * What {@link projectUpdate} is made of, where the backend reports it — for
+   * the phase 5 benchmark, not a §6.2 phase. See `ProjectUpdatePhases`.
+   */
+  readonly projectUpdatePhases?: ProjectUpdatePhases;
   readonly extraction: number;
   readonly impact: number;
   readonly summarize: number;
@@ -478,6 +484,8 @@ export interface ExtractedUpdate {
   readonly full: boolean;
   /** `undefined` where the backend cannot separate project construction from extraction. */
   readonly projectUpdateMs?: number;
+  /** What `projectUpdateMs` is made of, where the backend can say. */
+  readonly projectUpdatePhases?: ProjectUpdatePhases;
 }
 
 /**
@@ -999,6 +1007,9 @@ async function runGeneration(input: GenerationInput): Promise<Generation> {
     analysis,
     timings: {
       ...(update.projectUpdateMs === undefined ? {} : { projectUpdate: update.projectUpdateMs }),
+      ...(update.projectUpdatePhases === undefined
+        ? {}
+        : { projectUpdatePhases: update.projectUpdatePhases }),
       extraction: extractionMs,
       impact: impactMs,
       summarize: summarizeMs,

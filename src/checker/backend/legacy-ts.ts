@@ -342,6 +342,28 @@ async function openProject(rootDir: string): Promise<{
   ): Promise<ResidentExtractedUpdate>;
   close(): void;
 }> {
+  return await openProjectForMeasurement(rootDir, { reuseOldProgram: true });
+}
+
+/**
+ * {@link openProject} with `oldProgram` optionally withheld — **a measurement
+ * seam, not a product option.** Phase 5's benchmark (`scripts/bench-resident.ts`)
+ * uses it to find out what passing `oldProgram` actually buys, which nothing had
+ * measured (`docs/resident-check-path.md`). Every product path goes through
+ * `openProject`, which always passes it; no package entry point re-exports this.
+ *
+ * @effects fs_read
+ */
+export async function openProjectForMeasurement(
+  rootDir: string,
+  measurement: { readonly reuseOldProgram: boolean },
+): Promise<{
+  update(
+    changed: readonly ResidentFileChange[],
+    reextract?: readonly string[],
+  ): Promise<ResidentExtractedUpdate>;
+  close(): void;
+}> {
   const absoluteRoot = resolveProjectRoot(rootDir);
   let program: ts.Program | undefined;
   let baseline: ProjectBaseline | undefined;
@@ -353,22 +375,39 @@ async function openProject(rootDir: string): Promise<{
     ): Promise<ResidentExtractedUpdate> {
       const projectUpdateStarted = performance.now();
       const { rootNames, options } = loadProjectConfig(absoluteRoot);
+      const configLoaded = performance.now();
       // `oldProgram` is passed whenever there is one and never assumed to
       // help: `tryReuseStructureFromOldProgram` bails on a root-name delta or
       // a module-resolution option change, and the default `CompilerHost` does
       // not cache source files by version. Equivalence does not depend on it;
       // what shrinks on a partial update is pass 2 (`docs/resident-check-path.md`).
+      const oldProgram = measurement.reuseOldProgram ? program : undefined;
       const next = ts.createProgram({
         rootNames,
         options,
-        ...(program ? { oldProgram: program } : {}),
+        ...(oldProgram ? { oldProgram } : {}),
       });
+      const programCreated = performance.now();
       // Forcing the checker here rather than leaving it to `extractFromProgram`
       // keeps the phase boundary honest: binding the program is part of
       // bringing the engine up to date, not part of walking it.
       next.getTypeChecker();
+      const checkerReady = performance.now();
       const nextBaseline = baselineOf(next, absoluteRoot, options);
-      const projectUpdateMs = performance.now() - projectUpdateStarted;
+      const baselineReady = performance.now();
+      const projectUpdateMs = baselineReady - projectUpdateStarted;
+      let externalChars = 0;
+      for (const external of nextBaseline.externalFiles.values()) {
+        externalChars += external.file.text.length;
+      }
+      const projectUpdatePhases = {
+        configLoad: configLoaded - projectUpdateStarted,
+        createProgram: programCreated - configLoaded,
+        typeChecker: checkerReady - programCreated,
+        baseline: baselineReady - checkerReady,
+        externalFiles: nextBaseline.externalFiles.size,
+        externalChars,
+      };
 
       const partial =
         reextract !== undefined &&
@@ -385,6 +424,7 @@ async function openProject(rootDir: string): Promise<{
           removed: [],
           full: true,
           projectUpdateMs,
+          projectUpdatePhases,
         };
       }
 
@@ -398,6 +438,7 @@ async function openProject(rootDir: string): Promise<{
         removed: changed.filter((c) => c.kind === "deleted").map((c) => c.path),
         full: false,
         projectUpdateMs,
+        projectUpdatePhases,
       };
     },
     close(): void {
