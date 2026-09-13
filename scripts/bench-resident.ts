@@ -437,6 +437,7 @@ interface RunRecord {
   /** Total minus every reported phase: the fingerprint, `loadConfig`, and the plan. */
   readonly unattributedMs?: number;
   readonly full?: boolean;
+  readonly narrowing?: string;
   readonly files?: number;
   readonly functions?: number;
   readonly changedFiles?: number;
@@ -485,6 +486,7 @@ function recordOf(
     reportMs: t.report,
     unattributedMs: totalMs - attributed,
     full: result.full,
+    narrowing: result.narrowing.kind,
     functions: result.impact.totalFunctions,
     changedFiles,
     reextracted: result.reextracted.length,
@@ -508,10 +510,13 @@ function backendFor(
     async openProject(rootDir: string) {
       const session = await openProjectForMeasurement(rootDir, { reuseOldProgram });
       return {
-        async update(changed, reextract) {
+        // Every argument forwarded: a wrapper that drops `narrowTo` measures
+        // the closure while the product narrows, and nothing would say so.
+        async update(changed, reextract, narrowTo?: readonly string[]) {
           const { projectUpdatePhases, ...productUpdate } = await session.update(
             changed,
             reextract,
+            narrowTo,
           );
           sink.phases = projectUpdatePhases;
           return productUpdate;
@@ -729,7 +734,7 @@ async function parent(): Promise<void> {
         `${fmt(median(result.runs, "extractionMs"))} | ${fmt(median(result.runs, "summarizeMs"))} | ` +
         `${fmt(median(result.runs, "impactMs"))} | ${fmt(median(result.runs, "propagateMs"))} | ` +
         `${fmt(median(result.runs, "reportMs"))} | ${fmt(median(result.runs, "unattributedMs"))} | ` +
-        `${first?.full === undefined ? "—" : first.full ? "full" : "partial"} | ` +
+        `${first?.full === undefined ? "—" : first.full ? "full" : `partial${first.narrowing === "contract-only" ? " (contract-only)" : ""}`} | ` +
         `${first?.reextracted === undefined ? "—" : `${first.reextracted}/${first.files}`} | ` +
         `${first?.s ?? "—"} | ${first?.i === undefined ? "—" : `${first.i}/${first.functions}`} | ` +
         `${(result.maxRssKb / 1024).toFixed(0)} | ${result.equalToCold === undefined ? "—" : result.equalToCold} |`,

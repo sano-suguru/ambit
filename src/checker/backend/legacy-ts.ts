@@ -25,6 +25,7 @@ import type {
 import { isOnExceed, symbolId } from "../../core/index.ts";
 import { constructorStubKey } from "../../stubs/constructors.ts";
 import { isFirstArgumentMutator, isMutatingBuiltin } from "../../stubs/mutating-builtins.ts";
+import type { ResidentNarrowing } from "../resident.ts";
 
 /**
  * `TsBackend` implementation on the TypeScript Compiler API (DESIGN.md §3.4).
@@ -339,7 +340,8 @@ async function openProject(rootDir: string): Promise<{
   update(
     changed: readonly ResidentFileChange[],
     reextract?: readonly string[],
-  ): Promise<ResidentExtractedUpdate>;
+    narrowTo?: readonly string[],
+  ): Promise<NarrowableExtractedUpdate>;
   close(): void;
 }> {
   const session = await openProjectForMeasurement(rootDir, { reuseOldProgram: true });
@@ -347,12 +349,14 @@ async function openProject(rootDir: string): Promise<{
     async update(
       changed: readonly ResidentFileChange[],
       reextract?: readonly string[],
-    ): Promise<ResidentExtractedUpdate> {
+      narrowTo?: readonly string[],
+    ): Promise<NarrowableExtractedUpdate> {
       // The breakdown is the benchmark's, not the product's: it does not cross
       // the `TsBackend` boundary (`ResidentExtractedUpdate` has no field for it).
       const { projectUpdatePhases: _measurementOnly, ...update } = await session.update(
         changed,
         reextract,
+        narrowTo,
       );
       return update;
     },
@@ -383,8 +387,17 @@ export interface ProjectUpdatePhases {
 }
 
 /** A {@link ResidentExtractedUpdate} carrying the measurement-only breakdown. */
-export type MeasurementExtractedUpdate = ResidentExtractedUpdate & {
+export type MeasurementExtractedUpdate = NarrowableExtractedUpdate & {
   readonly projectUpdatePhases: ProjectUpdatePhases;
+};
+
+/**
+ * `ResidentExtractedUpdate` with this backend's answer to a `narrowTo` offer.
+ * Kept out of `src/core/` on purpose — see `ResidentNarrowing` in
+ * `src/checker/resident.ts`.
+ */
+export type NarrowableExtractedUpdate = ResidentExtractedUpdate & {
+  readonly narrowing?: ResidentNarrowing;
 };
 
 /**
@@ -405,6 +418,7 @@ export async function openProjectForMeasurement(
   update(
     changed: readonly ResidentFileChange[],
     reextract?: readonly string[],
+    narrowTo?: readonly string[],
   ): Promise<MeasurementExtractedUpdate>;
   close(): void;
 }> {
@@ -416,6 +430,7 @@ export async function openProjectForMeasurement(
     async update(
       changed: readonly ResidentFileChange[],
       reextract?: readonly string[],
+      narrowTo?: readonly string[],
     ): Promise<MeasurementExtractedUpdate> {
       const projectUpdateStarted = performance.now();
       const { rootNames, options } = loadProjectConfig(absoluteRoot);
@@ -472,7 +487,13 @@ export async function openProjectForMeasurement(
         };
       }
 
-      const only = new Set(reextract);
+      // `program` is still the previous generation's here; it is read for the
+      // changed files' previous *text* and nothing else.
+      const narrowing =
+        narrowTo === undefined || program === undefined
+          ? undefined
+          : contractOnlyNarrowing(program, next, absoluteRoot, changed, narrowTo);
+      const only = new Set(narrowing?.kind === "contract-only" ? narrowTo : reextract);
       const slice = extractFromProgram(next, absoluteRoot, only);
       program = next;
       baseline = nextBaseline;
@@ -483,6 +504,7 @@ export async function openProjectForMeasurement(
         full: false,
         projectUpdateMs,
         projectUpdatePhases,
+        ...(narrowing ? { narrowing } : {}),
       };
     },
     close(): void {
@@ -492,6 +514,240 @@ export async function openProjectForMeasurement(
       baseline = undefined;
     },
   };
+}
+
+/**
+ * Whether a partial update may re-extract only the changed files rather than
+ * their reverse-import closure (`docs/resident-check-path.md`, "Contract-only
+ * JSDoc edits").
+ *
+ * The closure exists because a change to what a module exports changes how its
+ * importers' calls resolve. An importer's extraction reads nothing of another
+ * file but what the checker answers about it, and ids built from declaration
+ * paths — no position, no JSDoc (`extractJsDoc` reads only the file being
+ * extracted). So an edit the checker cannot see leaves every importer's
+ * extraction as it was. {@link classifyJsDocEdit} is the proof of that for one
+ * file; this refuses unless it holds for **every** reported change.
+ */
+function contractOnlyNarrowing(
+  previous: ts.Program,
+  next: ts.Program,
+  absoluteRoot: string,
+  changed: readonly ResidentFileChange[],
+  narrowTo: readonly string[],
+): ResidentNarrowing {
+  const reported = new Set<string>();
+  for (const change of changed) {
+    if (change.kind !== "changed") {
+      return { kind: "declined", reason: `${change.path} was ${change.kind}, not edited` };
+    }
+    reported.add(change.path);
+  }
+  const offered = new Set(narrowTo);
+  if (offered.size !== reported.size || [...reported].some((file) => !offered.has(file))) {
+    return { kind: "declined", reason: "the offered set is not the set of reported edits" };
+  }
+  const before = inRootTexts(previous, absoluteRoot);
+  const after = inRootTexts(next, absoluteRoot);
+  for (const file of narrowTo) {
+    const beforeText = before.get(file);
+    const afterText = after.get(file);
+    if (beforeText === undefined || afterText === undefined) {
+      return { kind: "declined", reason: `${file} is not an in-root source file of both programs` };
+    }
+    const verdict = classifyJsDocEdit(file, beforeText, afterText);
+    if (verdict.kind !== "contract-only") {
+      return { kind: "declined", reason: `${file}: ${verdict.reason}` };
+    }
+  }
+  return { kind: "contract-only" };
+}
+
+/** In-root implementation files' text, by root-relative path. Strings only — no node leaves. */
+function inRootTexts(program: ts.Program, absoluteRoot: string): ReadonlyMap<string, string> {
+  return new Map(
+    inRootSourceFiles(program, absoluteRoot).map((file) => [
+      relativePath(absoluteRoot, file),
+      file.text,
+    ]),
+  );
+}
+
+/** What {@link classifyJsDocEdit} proved about one file's edit. */
+export type JsDocEditClass =
+  | { readonly kind: "contract-only" }
+  | { readonly kind: "unsafe"; readonly reason: string };
+
+/**
+ * Whether `before` → `after` changed **nothing but Ambit's own contract tags**
+ * (`@effects`, `@capabilities`, `@budget`, `@entrypoint`, `@boundary`) inside
+ * JSDoc blocks the parser attached to a node.
+ *
+ * Proved from two parses, never from a text diff, as three equalities:
+ *
+ * 1. **Syntax.** Every node kind, in tree order, and every token's text are
+ *    identical. A tree comparison, not a token comparison, because a comment
+ *    can end a line and a line ending moves automatic semicolon insertion — a
+ *    token stream alone would read `return /*\n*\/ x` as `return x`.
+ * 2. **Every other comment.** Each comment that is not an attached JSDoc block
+ *    — `//`, `/* *\/`, a triple-slash directive, a pragma, a `/**` the parser
+ *    attached to nothing — has the same text, in the same order, **in the
+ *    trivia of the same token**. Text and order alone would let a directive
+ *    move below a declaration; its offset is deliberately not compared, so a
+ *    contract edit that adds lines above it still passes.
+ * 3. **Every other part of a JSDoc block.** Each attached block's description
+ *    and each of its non-contract tags is identical, keyed to the token the
+ *    block precedes. A block whose remainder is empty (it holds contract tags
+ *    alone) is not compared at all, so adding or deleting one is permitted.
+ *
+ * What makes the remainder safe to ignore is the compiler, not Ambit: none of
+ * the five tag names is one TypeScript knows, and a tag it does not know has no
+ * meaning to it in any file kind. A `@param`, `@type`, `@template`,
+ * `@overload` or `@deprecated` does have one in some files, and is exactly what
+ * equality 3 refuses to let move.
+ *
+ * Refused outright, whatever the texts: anything but a `.ts`, `.mts` or `.cts`
+ * implementation file — JSDoc is type syntax in a JavaScript file, and a
+ * `.tsx` file reads JSX pragmas out of comments — and a text either parse
+ * reports a syntax error in, because what error recovery builds is not
+ * evidence. The previous and next texts come from the two programs, so the
+ * proof is about what the checker actually saw, not about the disk.
+ *
+ * An unchanged text is `contract-only` too: nothing an importer could observe
+ * moved, which is the only question the verdict answers.
+ */
+export function classifyJsDocEdit(fileName: string, before: string, after: string): JsDocEditClass {
+  if (/\.d\.[cm]?ts$/.test(fileName) || !/\.[cm]?ts$/.test(fileName)) {
+    return { kind: "unsafe", reason: "not a .ts, .mts or .cts implementation file" };
+  }
+  if (before === after) return { kind: "contract-only" };
+  const previous = editSkeletonOf(fileName, before);
+  if (typeof previous === "string") return { kind: "unsafe", reason: `before: ${previous}` };
+  const next = editSkeletonOf(fileName, after);
+  if (typeof next === "string") return { kind: "unsafe", reason: `after: ${next}` };
+  if (previous.syntax !== next.syntax) {
+    return { kind: "unsafe", reason: "code outside JSDoc changed" };
+  }
+  if (previous.comments !== next.comments) {
+    return { kind: "unsafe", reason: "a comment other than an attached JSDoc block changed" };
+  }
+  if (previous.jsDocRemainder !== next.jsDocRemainder) {
+    return { kind: "unsafe", reason: "JSDoc other than a contract tag changed" };
+  }
+  return { kind: "contract-only" };
+}
+
+/** The three strings {@link classifyJsDocEdit} compares, or why one could not be built. */
+function editSkeletonOf(
+  fileName: string,
+  text: string,
+):
+  | { readonly syntax: string; readonly comments: string; readonly jsDocRemainder: string }
+  | string {
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    text,
+    { languageVersion: ts.ScriptTarget.Latest, jsDocParsingMode: ts.JSDocParsingMode.ParseAll },
+    true,
+    ts.ScriptKind.TS,
+  );
+  // Not on the public `SourceFile` type. Absent is read as "cannot tell", which
+  // refuses, rather than as "no errors".
+  const parseDiagnostics = (sourceFile as unknown as { parseDiagnostics?: readonly unknown[] })
+    .parseDiagnostics;
+  if (parseDiagnostics === undefined) return "parse diagnostics are not available";
+  if (parseDiagnostics.length > 0) return "the text does not parse cleanly";
+
+  const syntax: string[] = [];
+  const remainder: string[] = [];
+  const attachedJsDoc = new Set<number>();
+  // Keyed by position: a zero-width node's trivia is also the next token's, and
+  // one comment must be counted once — against the first token that holds it.
+  // What is compared is that token's index and the text, never the offset.
+  const comments = new Map<number, string>();
+  let tokenIndex = 0;
+  let unexpectedTrivia: string | undefined;
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isJSDoc(node)) {
+      // A node's JSDoc comes before its own tokens in `getChildren`, so
+      // `tokenIndex` is the token the block precedes.
+      attachedJsDoc.add(node.pos);
+      const kept = jsDocRemainderOf(node, text);
+      if (kept !== "") remainder.push(`${tokenIndex} ${kept}`);
+      return;
+    }
+    const children = node.getChildren(sourceFile);
+    if (children.length === 0) {
+      const start = node.getStart(sourceFile);
+      const scanner = ts.createScanner(
+        ts.ScriptTarget.Latest,
+        false,
+        ts.LanguageVariant.Standard,
+        text,
+        undefined,
+        node.pos,
+        start - node.pos,
+      );
+      // The span between a token's full start and its start is trivia and
+      // nothing else, so scanning it alone has no lexical context to get wrong.
+      for (
+        let kind = scanner.scan();
+        kind !== ts.SyntaxKind.EndOfFileToken;
+        kind = scanner.scan()
+      ) {
+        if (
+          kind === ts.SyntaxKind.SingleLineCommentTrivia ||
+          kind === ts.SyntaxKind.MultiLineCommentTrivia ||
+          kind === ts.SyntaxKind.ShebangTrivia
+        ) {
+          const at = scanner.getTokenStart();
+          if (!attachedJsDoc.has(at) && !comments.has(at)) {
+            comments.set(at, `${tokenIndex}\u0000${scanner.getTokenText()}`);
+          }
+        } else if (
+          kind !== ts.SyntaxKind.WhitespaceTrivia &&
+          kind !== ts.SyntaxKind.NewLineTrivia
+        ) {
+          unexpectedTrivia = ts.SyntaxKind[kind];
+        }
+      }
+      syntax.push(`${node.kind}:${text.slice(start, node.end)}`);
+      tokenIndex += 1;
+      return;
+    }
+    syntax.push(`(${node.kind}`);
+    for (const child of children) visit(child);
+    syntax.push(")");
+  };
+  visit(sourceFile);
+  if (unexpectedTrivia !== undefined) return `unexpected trivia ${unexpectedTrivia}`;
+
+  return {
+    syntax: syntax.join("\n"),
+    comments: [...comments]
+      .toSorted(([a], [b]) => a - b)
+      .map(([, comment]) => comment)
+      .join(" "),
+    jsDocRemainder: remainder.join(""),
+  };
+}
+
+/**
+ * A JSDoc block with its contract tags taken out: the description, then every
+ * other tag's own source text. Trailing whitespace and `*` margins are trimmed
+ * from each tag, because a tag's span runs up to the next tag and inserting a
+ * contract tag after it moves where that is.
+ */
+function jsDocRemainderOf(block: ts.JSDoc, text: string): string {
+  const parts: string[] = [];
+  const description = ts.getTextOfJSDocComment(block.comment)?.trim();
+  if (description) parts.push(`description ${description}`);
+  for (const tag of block.tags ?? []) {
+    if ((CONTRACT_TAGS as readonly string[]).includes(tag.tagName.text)) continue;
+    parts.push(`tag ${text.slice(tag.pos, tag.end).replace(/[\s*]+$/, "")}`);
+  }
+  return parts.join(" ");
 }
 
 /**

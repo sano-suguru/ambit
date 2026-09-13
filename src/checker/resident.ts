@@ -4,13 +4,14 @@
  * what the first check cost.
  *
  * The architecture is `docs/adr/0014-the-resident-check-path.md` and the
- * implementation plan is `docs/resident-check-path.md`. **This file is the
- * plan's phase 2**: the store, the generation lifecycle, the fingerprint, and
- * an `update` that recomputes everything. There is no scoped fixed point here
- * and no incremental extraction; both are phases 3 and 4, and the point of the
- * order is that the differential equivalence suite
- * (`test/resident.differential.test.ts`) goes green *before* any speed change
- * lands, so the first update that breaks §6.2's equivalence law names itself.
+ * implementation plan is `docs/resident-check-path.md`. This file holds the
+ * store, the generation lifecycle and the fingerprint, and decides what a
+ * generation may reuse: the reverse-import closure to re-extract (phase 4),
+ * narrowed to the edited files alone for an edit confined to contract tags
+ * (ADR-0015), and the impact range the fixed point is scoped to (phase 3).
+ * Every reuse is checked against the differential equivalence suite
+ * (`test/resident.differential.test.ts`), which compares each generation with a
+ * cold run, so the first update that breaks §6.2's equivalence law names itself.
  *
  * Two rules this file exists to keep:
  *
@@ -133,11 +134,10 @@ export interface ProjectFingerprint {
    *
    * `tsconfigHash` covers the tsconfig's *text*, and a tsconfig with an
    * `extends` chain, or one whose resolved options this layer cannot see
-   * without a compiler, is exactly the case the text does not cover. The design
-   * note calls the resolved options (without `fileNames`) part of this hash;
-   * supplying them needs the backend, which is phase 4's `openProject`. Until
-   * then the honest answer is that this fingerprint does not know, and the
-   * honest consequence is a rebuild.
+   * without a compiler, is exactly the case the text does not cover. The
+   * resolved options need a program, so the backend's `openProject` compares
+   * them (phase 4); this record still cannot, and where the text does not cover
+   * them it says so here and the consequence is a rebuild.
    */
   readonly undecidable: readonly string[];
   /**
@@ -410,9 +410,9 @@ export interface FileEntry {
    * from a **union over the files**, not from a whole-project run's
    * accumulated state: `ResolvedConfig` records matches as a side effect of
    * every lookup, so a generation that re-summarized only some files would
-   * report every key the others matched as unmatched. Phase 3 still
-   * re-summarizes everything, and the union is computed anyway — a field first
-   * exercised by the phase that needs it is a field nobody has watched fail.
+   * report every key the others matched as unmatched. A partial update
+   * re-summarizes only the files it re-extracted, so the union over these
+   * fields is what `unmatchedExactKeys` is derived from.
    */
   readonly matchedConfigKeys: readonly string[];
 }
@@ -466,6 +466,19 @@ export interface ResidentStore {
 
 // ---- the backend seam ------------------------------------------------------
 
+/**
+ * A backend's answer to a `narrowTo` offer — see {@link TsProjectSession.update}.
+ *
+ * Deliberately **not** in `src/core/`: it is a protocol between this layer and
+ * a backend's resident session, not part of `TsBackend`, which the package
+ * root exports. A backend typed only against `src/core/` ignores the third
+ * argument and returns no answer, and that is read as "declined" — the closure,
+ * which is always correct.
+ */
+export type ResidentNarrowing =
+  | { readonly kind: "contract-only" }
+  | { readonly kind: "declined"; readonly reason: string };
+
 /** What one {@link TsProjectSession.update} produced. */
 export interface ExtractedUpdate {
   /** Re-extracted files. A file absent here keeps the entry the store holds. */
@@ -478,6 +491,11 @@ export interface ExtractedUpdate {
   readonly full: boolean;
   /** `undefined` where the backend cannot separate project construction from extraction. */
   readonly projectUpdateMs?: number;
+  /**
+   * The backend's answer to a `narrowTo` offer — see {@link TsProjectSession.update}.
+   * Absent when nothing was offered, or when the answer is a whole project.
+   */
+  readonly narrowing?: ResidentNarrowing;
 }
 
 /**
@@ -499,20 +517,31 @@ export interface TsProjectSession {
    * answers `full: false` must have extracted exactly `reextract` — the caller
    * checks, because a backend quietly extracting fewer files is a silent drop
    * (§3.4).
+   *
+   * `narrowTo` is a second, smaller set the resident layer offers alongside
+   * `reextract`: the reported edits alone, without their importers. A backend
+   * may extract it only when it can prove that no importer's extraction can
+   * differ — today, that every edit touched nothing but Ambit's contract tags
+   * (`docs/resident-check-path.md`, "Contract-only JSDoc edits") — and must say
+   * so in {@link ExtractedUpdate.narrowing}. Ignoring the offer is always
+   * correct; the caller checks which of the two sets came back.
    */
-  update(changed: readonly FileChange[], reextract?: readonly string[]): Promise<ExtractedUpdate>;
+  update(
+    changed: readonly FileChange[],
+    reextract?: readonly string[],
+    narrowTo?: readonly string[],
+  ): Promise<ExtractedUpdate>;
   close(): void;
 }
 
 /**
- * The adapter every backend gets for free, and the only one phase 2 uses.
+ * The adapter a backend without `openProject` is driven through.
  *
- * It re-extracts the whole project on every update. That is not a placeholder
- * standing in for the real thing: §6.2's invalidation table falls back to
- * exactly this for a tsconfig change, an added file, a `.d.ts` and an installed
- * dependency, so this path stays in the product after phases 3 and 4 land —
- * which is why it shares no code with them and a bug in one cannot hide in the
- * other.
+ * It re-extracts the whole project on every update — ADR-0014's architecture
+ * A — and shares no code with the partial path, so a bug in one cannot hide in
+ * the other. A backend that does implement `openProject` answers §6.2's
+ * whole-rebuild rows (a tsconfig change, an added file, a `.d.ts`, an installed
+ * dependency) with `full: true` itself, not through this adapter.
  */
 export function fullRebuildSession(backend: TsBackend, rootDir: string): TsProjectSession {
   return {
@@ -569,6 +598,21 @@ export interface ImpactReport {
   readonly scoped: boolean;
 }
 
+/**
+ * Whether a generation re-extracted the reported edits alone rather than their
+ * reverse-import closure (`docs/resident-check-path.md`, "Contract-only JSDoc
+ * edits").
+ *
+ * - `not-offered` — the resident layer did not offer the smaller set: a whole
+ *   rebuild, a deletion, or a config change seeding the closure.
+ * - `declined` — offered, and the backend could not prove it safe.
+ * - `contract-only` — offered and proved: importers kept their extraction.
+ */
+export type NarrowingReport =
+  | { readonly kind: "not-offered"; readonly reason: string }
+  | { readonly kind: "declined"; readonly reason: string }
+  | { readonly kind: "contract-only" };
+
 /** What one {@link ResidentSession.update} produced, or why it produced nothing. */
 export type UpdateResult =
   | {
@@ -590,6 +634,8 @@ export type UpdateResult =
        * timing.
        */
       readonly reextracted: readonly string[];
+      /** Whether this generation skipped re-extracting importers, and why not if it did not. */
+      readonly narrowing: NarrowingReport;
     }
   | {
       readonly ok: false;
@@ -731,6 +777,7 @@ export class ResidentSession {
         impact: generation.impact,
         full: generation.full,
         reextracted: generation.reextracted,
+        narrowing: generation.narrowing,
       };
     } catch (error) {
       const failure = error instanceof Error ? error : new Error(String(error));
@@ -812,6 +859,7 @@ interface Generation {
   readonly impact: ImpactReport;
   readonly full: boolean;
   readonly reextracted: readonly string[];
+  readonly narrowing: NarrowingReport;
 }
 
 interface GenerationInput {
@@ -887,6 +935,7 @@ async function runGeneration(input: GenerationInput): Promise<Generation> {
   const update = await projectSession.update(
     input.changes ?? [],
     plan.kind === "partial" ? plan.reextract : undefined,
+    plan.kind === "partial" && plan.narrowTo.kind === "offered" ? plan.narrowTo.files : undefined,
   );
   const extractionMs = now() - extractionStarted;
 
@@ -1019,7 +1068,15 @@ async function runGeneration(input: GenerationInput): Promise<Generation> {
     },
     full: update.full,
     reextracted: update.modules.map((module) => module.filePath).toSorted(),
+    narrowing: narrowingReportOf(plan, update),
   };
+}
+
+function narrowingReportOf(plan: UpdatePlan, update: ExtractedUpdate): NarrowingReport {
+  if (plan.kind === "full") return { kind: "not-offered", reason: plan.reason };
+  if (plan.narrowTo.kind === "not-offered") return plan.narrowTo;
+  if (update.full) return { kind: "declined", reason: "the backend answered with a whole project" };
+  return update.narrowing ?? { kind: "declined", reason: "the backend did not answer the offer" };
 }
 
 // ---- deciding what this generation may reuse -------------------------------
@@ -1035,6 +1092,13 @@ type UpdatePlan =
       readonly removed: readonly string[];
       /** True when the config's value moved, so every file is re-summarized. */
       readonly resummarizeAll: boolean;
+      /**
+       * The reported edits alone, offered to the backend as a smaller set than
+       * {@link reextract} — or why no such offer is sound to make.
+       */
+      readonly narrowTo:
+        | { readonly kind: "offered"; readonly files: readonly string[] }
+        | { readonly kind: "not-offered"; readonly reason: string };
     };
 
 /**
@@ -1110,7 +1174,36 @@ function planUpdate(input: {
     reextract: [...closure].filter((file) => !deleted.has(file)).toSorted(),
     removed,
     resummarizeAll,
+    narrowTo: narrowOffer(changed, removed, seedConfig),
   };
+}
+
+/**
+ * The smaller set a partial update may offer the backend: the edited files
+ * without their importers.
+ *
+ * Offered only where the one thing that can make it sound — an edit no importer
+ * can observe — is the *only* reason the closure grew. A deletion changes what
+ * its importers resolve to whatever its text was, and a seeded config path is
+ * in the closure for a reason that has nothing to do with any file's text.
+ * Everything else is the backend's to prove, file by file.
+ */
+function narrowOffer(
+  changed: readonly string[],
+  removed: readonly string[],
+  seedConfig: readonly string[],
+):
+  | { readonly kind: "offered"; readonly files: readonly string[] }
+  | {
+      readonly kind: "not-offered";
+      readonly reason: string;
+    } {
+  if (removed.length > 0) return { kind: "not-offered", reason: "the change set deletes a file" };
+  if (seedConfig.length > 0) {
+    return { kind: "not-offered", reason: "the config's value moved and seeds the closure" };
+  }
+  if (changed.length === 0) return { kind: "not-offered", reason: "no file was edited" };
+  return { kind: "offered", files: [...new Set(changed)].toSorted() };
 }
 
 /** `seeds` closed under importers, over the reverse-import graph. A BFS, so a cycle costs nothing. */
@@ -1197,7 +1290,16 @@ function patchStore(
       "the backend reported a partial update for a generation that asked for a whole project",
     );
   }
-  const asked = new Set(plan.reextract);
+  // Which of the two sets the backend was entitled to return depends on what it
+  // said, and it has to have said so: a narrowed answer to a generation that
+  // offered nothing is a backend dropping importers on its own authority.
+  const narrowed = update.narrowing?.kind === "contract-only";
+  if (narrowed && plan.narrowTo.kind !== "offered") {
+    throw new Error("the backend narrowed a partial update that offered no narrowing");
+  }
+  const asked = new Set(
+    narrowed && plan.narrowTo.kind === "offered" ? plan.narrowTo.files : plan.reextract,
+  );
   const got = new Set(update.modules.map((module) => module.filePath));
   if (asked.size !== got.size || [...asked].some((file) => !got.has(file))) {
     throw new Error(

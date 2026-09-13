@@ -36,10 +36,10 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | Third-party backends `ambit diff` is silent on when nothing changed | **3** — Unleash ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)), immich ([2026-09-11](measurements/2026-09-11-second-third-party-validation-immich.md)), outline ([2026-09-11](measurements/2026-09-11-third-third-party-validation-outline.md)) | — |
 | `unknown` rate, second third-party backend (immich `server/src`, 3,191 functions) | 79.9% (2,550/3,191) | no target (see below) |
 | `unknown` rate, third third-party backend (outline `server`, 2,245 functions) | 72.8% (1,635/2,245) | no target (see below) |
-| Tests | 744 passing, 39 files | green |
+| Tests | 798 passing, 39 files | green |
 | `tsc --noEmit` / `biome ci .` | pass / pass | pass |
 | `check src` latency, 42 files | ~1.1 s (last timed at 40 files; not re-timed) | §3.5's 3 s allowance |
-| Incremental / resident analysis | a resident session with a scoped fixed point **and a reverse-import closure re-extraction**, benchmarked against `analyze()` on six subjects ([2026-09-13](measurements/2026-09-13-resident-benchmark.md)); faster only for edits with a small importer closure; no CLI exposure | yes (§6.2), exposed and measured |
+| Incremental / resident analysis | a resident session with a scoped fixed point **and a reverse-import closure re-extraction**, benchmarked against `analyze()` on six subjects ([2026-09-13](measurements/2026-09-13-resident-benchmark.md)); faster for edits with a small importer closure; a contract-only JSDoc edit no longer re-extracts its importers, measured 4.9×–5.8× faster than cold on the two large high-fan-out subjects ([2026-09-13](measurements/2026-09-13-resident-jsdoc-narrowing.md)); no CLI exposure | yes (§6.2), exposed and measured |
 | Bundled stub packages | 6 DB/LLM clients, 9 builtin namespaces | 50 packages |
 | Runtime hooks | 4 (`fetch`, `node:fs`, `node:child_process`, `pg`) | — |
 | Framework adapters | 2 (Hono, Next.js App Router) | — |
@@ -77,7 +77,7 @@ where it is measurable, as a Phase 1 exit metric in `ROADMAP.md`.
 ### Baseline commands
 
 ```sh
-pnpm test                                                    # 744 tests, 39 files — pass
+pnpm test                                                    # 798 tests, 39 files — pass
 pnpm exec tsc --noEmit                                       # pass
 ./node_modules/.bin/biome ci .                               # pass
 node src/cli/main.ts check src --coverage                    # exit 0
@@ -85,7 +85,7 @@ node src/cli/main.ts check test/fixtures/realistic-api --coverage   # exit 0
 node src/cli/main.ts check test/fixtures/next-app --coverage        # exit 0
 node src/cli/main.ts diff HEAD src                           # exit 0, ledger's approvals in place
 node scripts/bench-corpus.ts                                 # median 52.9%
-npm pack --dry-run                                           # 98 files, 192.1 kB packed
+npm pack --dry-run                                           # 104 files, 244.9 kB packed
 ```
 
 `pnpm exec biome ci .` returns 1 in one local shell because of a user-installed
@@ -306,6 +306,15 @@ worst-case-leaning rows, not a typical JSDoc edit, whose closure was not
 measured. A file addition and a tsconfig edit are full rebuilds by design and
 cost the same.
 
+**A contract-only JSDoc edit now re-extracts the edited file alone**
+([ADR-0015](adr/0015-contract-only-jsdoc-edits.md),
+[2026-09-13](measurements/2026-09-13-resident-jsdoc-narrowing.md)). The same
+widest-closure `@effects` mutation: 432/448 → 1/448 files and 2,275 → 345 ms on
+drizzle-orm, 419/557 → 1/557 and 10,215 → 2,185 ms on immich, 39/49 → 1/49 and
+652 → 474 ms on ambit-src, byte-equal to cold throughout, `S` and `I` unchanged.
+`project-update` is 85–95% of what remains. A description, `@param` or other
+non-contract JSDoc edit still pays the closure.
+
 **Where partial extraction applies, `createProgram` + `getTypeChecker` is 82–96%
 of the re-check.** The reuse gate's external-input hashing is 0.6–22 ms — 20 ms
 over immich's 2,679 inputs (14.65 M chars, `node_modules` included) — and at
@@ -347,6 +356,7 @@ What is built, and what says so:
 | 3 — scoped fixed point | yes | `src/checker/impact.ts` (`summariesEqual`, `changedSymbols`, `impactClosure`) and `propagateScoped` in `src/checker/propagate.ts`. `test/impact.test.ts` pins the three decisions field by field; sixteen rows in the differential suite assert, for every mutation, that the scoped state equals `propagate` over the same summaries symbol for symbol *and* that the generation ran scoped |
 | 4 — `openProject`, reverse-import re-extraction | yes | `openProject` in `src/checker/backend/legacy-ts.ts` holds the `ts.Program` and compares the compiler-side half of the reuse gate; `planUpdate` / `patchStore` in `src/checker/resident.ts` decide and apply the closure. Twenty-three rows in the differential suite assert the verdict (full or partial) **and** the re-extracted set, alongside byte equivalence with cold and the scoped-state oracle. The hazards each have their own row: a file added, a rename, an unresolved specifier resolved by an addition, a tsconfig `paths` change, a lockfile-invisible `node_modules` rewrite, an in-root `.d.ts`, a `declare global`, a program input outside the checked root, a file entering the program with no root name moving, a path the session never extracted, an unreported change set, and a failed generation followed by a recovery |
 | 5 — benchmark, measured numbers | yes | `scripts/bench-resident.ts`; six subjects, six mutations, five scenarios, run in [2026-09-13](measurements/2026-09-13-resident-benchmark.md). `project-update` is broken down by `openProjectForMeasurement`, a measurement-only seam in `legacy-ts.ts`; `openProject` strips the breakdown and nothing in `src/core/` or `resident.ts` carries it |
+| 5a — contract-only JSDoc narrowing | yes | `classifyJsDocEdit` and `contractOnlyNarrowing` in `src/checker/backend/legacy-ts.ts`, `narrowOffer` / `patchStore` in `src/checker/resident.ts`. 34 classifier rows in `test/backend.legacy-ts.test.ts` (including that the compiler parses all five contract tags as unknown tags) and 20 differential rows asserting bytes, scoped state, the narrowing verdict, the re-extracted set, and every store entry against a whole cold extraction and summarization |
 
 The differential suite covers §6.2's equivalence law over an ordinary edit, a
 JSDoc-only edit, authority added and removed, a file added, a file deleted, an
@@ -474,7 +484,7 @@ The snapshot-bound-state rule (§6.2, §3.4) is asserted two ways:
 |---|---|---|
 | M0 — specification, diagnostics, scope | **done** | `rfcs/` and `conformance/` are deferred by §9.1 to 1.0 or the first external adopter ([ADR-0010](adr/0010-when-governance-takes-effect.md)) |
 | M0.5 — backend comparison | **done** | Linux not re-verified. Gates 3 and 4 worth re-running once §6.2 exists. Full record: [`docs/measurements/m0.5-backend-comparison.md`](measurements/m0.5-backend-comparison.md). A TypeScript 7 *shadow* backend now runs the same pipeline for comparison only, measured in [2026-09-12](measurements/2026-09-12-ts7-shadow-analysis.md) and hardened in [2026-09-12](measurements/2026-09-12-ts7-shadow-hardening.md), again in [2026-09-12](measurements/2026-09-12-callable-slot-handle.md), again in [2026-09-12](measurements/2026-09-12-literal-receiver-port.md) and again in [2026-09-12](measurements/2026-09-12-instance-member-port.md) — it changes no default. Divergences on `src` 137 → 4 → **0**, and every one of the gate's 14 roots is now at 0; across the five third-party repositories 260 → 16, with 0 high-risk left, 0 authority increases, 0 decreases, 0 `unknown` lost, and the CI decision agreeing everywhere. Those numbers say the two engines no longer disagree in any way that reaches authority and that nothing accounts for — **not** that the shadow backend is at feature parity: `NOT_PORTED` is now `project:no-tsconfig-fallback` alone, a project-loading difference. Every call-resolution shape `legacy-ts.ts` implements is ported — `resolution:literal-receiver` (the four rows on `src`, one site at `cli/analyze.ts:91`) and `resolution:instance-member` (the seven left on `backend-smoke`, one site at `call-resolution.ts:172`). The corpus figure of 16 predates both ports and has not been re-measured. TypeScript 7 is 0.60x–1.16x of the adopted backend on those repositories, so the performance case is weaker than `src` alone suggested. `node scripts/shadow-check.ts` is the regression gate |
-| M1 — effects, unknown, coverage, diagnostics, init | **partial** | A resident session exists (`src/checker/resident.ts`) and is **incremental in extraction, summarization and propagation**: an update re-extracts the reverse-import closure of what the caller reported, re-summarizes that closure (or every file, when the config's value moved), and scopes the fixed point to the functions whose summaries moved plus their callers — phases 0–4 of [`docs/resident-check-path.md`](resident-check-path.md). Every other row of §6.2's invalidation table falls back to a whole re-extraction. Phase 5's benchmark ([2026-09-13](measurements/2026-09-13-resident-benchmark.md)) puts a leaf or config edit at 1.3×–5.9× faster than `analyze()` and a JSDoc-only edit in a deliberately high-fan-out file on a large subject at the same cost; phase 6 (CLI exposure) is not built. No versioned JSON Schema for the diagnostic format (§5.2). `@budget costUsd` parses and is never priced. Config has no `stubs` key |
+| M1 — effects, unknown, coverage, diagnostics, init | **partial** | A resident session exists (`src/checker/resident.ts`) and is **incremental in extraction, summarization and propagation**: an update re-extracts the reverse-import closure of what the caller reported, re-summarizes that closure (or every file, when the config's value moved), and scopes the fixed point to the functions whose summaries moved plus their callers — phases 0–4 of [`docs/resident-check-path.md`](resident-check-path.md). Every other row of §6.2's invalidation table falls back to a whole re-extraction. Phase 5's benchmark ([2026-09-13](measurements/2026-09-13-resident-benchmark.md)) puts a leaf or config edit at 1.3×–5.9× faster than `analyze()` and a JSDoc-only edit in a deliberately high-fan-out file on a large subject at the same cost — since narrowed to the edited file for contract tags, measured 5.8× and 4.9× faster than `analyze()` on drizzle-orm and immich (high-fan-out targets only) ([2026-09-13](measurements/2026-09-13-resident-jsdoc-narrowing.md)); phase 6 (CLI exposure) is not built. No versioned JSON Schema for the diagnostic format (§5.2). `@budget costUsd` parses and is never priced. Config has no `stubs` key |
 | M2 — capabilities, budget, hooks, adapters, 50 stubs | **partial** | Four hooks, not more: `node:http`/`https`/`net`, `mysql2`, Prisma, Drizzle, MongoDB and every LLM SDK have none, so calling them is neither blocked nor recorded. `costUsd` and `llmCalls` are not enforced. Two adapters (Hono, Next.js App Router); Express, BullMQ, `worker_threads`, Server Actions, `middleware.ts`, the Pages Router and Edge have none. No `@budget` loop-pattern warnings. **Stubs are 5 client packages and 9 builtin namespaces, not 50 packages** |
 | M3 — fix patches, agent protocol | **partial** | `fixes[].edits` exists for `AMB-E001` only. **`ambit agent` does not exist** — no protocol, no iteration limit, no approval gate for loosening fixes |
 | M4 — editor, SBOM, npm | **partial** | Published as [`ambit-ts`](https://www.npmjs.com/package/ambit-ts) 0.1.0 on 2026-09-10, **without provenance**. No editor integration of any kind. **`ambit sbom` does not exist**, nor do stub trust levels in diagnostics (§8). No pilot team. The runtime ships with the CLI, so installing Ambit pulls in `typescript` ([ADR-0009](adr/0009-package-name-and-single-package.md)) |

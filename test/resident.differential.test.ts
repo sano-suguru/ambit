@@ -15,11 +15,15 @@ import {
   fingerprintPermitsReuse,
   type ImpactReport,
   legacyTsBackend,
+  loadConfig,
+  type NarrowingReport,
   openResidentSession,
   type PropagatedFunction,
   propagate,
   type ResidentSession,
   type ResidentStore,
+  resolveConfig,
+  summarizeFiles,
 } from "../src/checker/index.ts";
 import { analyze } from "../src/cli/analyze.ts";
 import type { SymbolId } from "../src/core/index.ts";
@@ -1179,6 +1183,7 @@ async function updateAndProveScoped(
   readonly impact: ImpactReport;
   readonly full: boolean;
   readonly reextracted: readonly string[];
+  readonly narrowing: NarrowingReport;
 }> {
   const result = await session.update(changes);
   if (!result.ok) throw result.error;
@@ -1212,6 +1217,7 @@ async function updateAndProveScoped(
     impact: result.impact,
     full: result.full,
     reextracted: result.reextracted,
+    narrowing: result.narrowing,
   };
 }
 
@@ -2492,4 +2498,457 @@ describe("resident session: the reverse-import closure (phase 4)", () => {
     // smaller than the tree.
     expect(reextracted.length).toBeLessThan(total);
   });
+});
+
+describe("resident session: contract-only JSDoc edits skip importer re-extraction", () => {
+  const CHANGED = (file: string): FileChange => ({ kind: "changed", path: file });
+  const IMPORTERS = 12;
+
+  /**
+   * A hub with a wide importer closure: a barrel, a dozen importers through it,
+   * a transitive caller, an `import type` edge, a cycle back into the hub, an
+   * overload set, a function with an inline callback — and, beside them, a
+   * script, a `.d.ts` and a config, for the rows that must not narrow.
+   */
+  function hubTree(): string {
+    const dir = copyFixture("cross-module");
+    write(
+      dir,
+      "hub.ts",
+      [
+        'import { pong } from "./cycle.ts";',
+        "",
+        "/**",
+        " * The hub.",
+        " * @effects network",
+        " */",
+        "export function fetchRate(): number {",
+        '  fetch("https://example.com/rate");',
+        "  return 0;",
+        "}",
+        "",
+        "export function plain(): number {",
+        "  return 1;",
+        "}",
+        "",
+        "export function pick(value: string): string;",
+        "export function pick(value: number): number;",
+        "/** @effects pure */",
+        "export function pick(value: string | number): string | number {",
+        "  return value;",
+        "}",
+        "",
+        "/** @effects network */",
+        "export function registers(): void {",
+        "  [1, 2].forEach((n) => {",
+        '    void fetch("https://example.com/" + String(n));',
+        "  });",
+        "}",
+        "",
+        "/** @effects network */",
+        "export function ping(depth: number): number {",
+        "  // recursion through another module",
+        "  return depth <= 0 ? fetchRate() : pong(depth - 1);",
+        "}",
+        "",
+        "export interface Rate {",
+        "  readonly value: number;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    write(dir, "hub-barrel.ts", 'export * from "./hub.ts";\n');
+    write(
+      dir,
+      "cycle.ts",
+      'import { ping } from "./hub-barrel.ts";\n\nexport function pong(depth: number): number {\n  return ping(depth);\n}\n',
+    );
+    for (let i = 0; i < IMPORTERS; i += 1) {
+      write(
+        dir,
+        `importer-${i}.ts`,
+        `import { fetchRate, pick, plain } from "./hub-barrel.ts";\n\n/** @effects network */\nexport function use${i}(): number {\n  return fetchRate() + plain() + pick(1);\n}\n`,
+      );
+    }
+    write(
+      dir,
+      "transitive.ts",
+      'import { use0 } from "./importer-0.ts";\n\n/** @effects network */\nexport function outer(): number {\n  return use0();\n}\n',
+    );
+    write(
+      dir,
+      "type-importer.ts",
+      'import type { Rate } from "./hub.ts";\n\nexport function rateOf(rate: Rate): number {\n  return rate.value;\n}\n',
+    );
+    write(
+      dir,
+      "global-augmentation.ts",
+      "declare global {\n  var AMBIENT_FLAG: boolean;\n}\n\n/** @effects pure */\nexport function flag(): boolean {\n  return true;\n}\n",
+    );
+    write(dir, "ambient.d.ts", "declare const AMBIENT_RATE: number;\n");
+    write(dir, "ambit.config.ts", "export default {\n  contracts: {},\n};\n");
+    return dir;
+  }
+
+  /** Plain data as bytes, `Map` and `Set` included, so an entry that moved is seen. */
+  function bytes(value: unknown): string {
+    return (
+      JSON.stringify(value, (_key, v: unknown) => {
+        if (v instanceof Map) return { map: [...v] };
+        if (v instanceof Set) return { set: [...v] };
+        return v;
+      }) ?? "undefined"
+    );
+  }
+
+  /**
+   * The claim itself, asserted directly: every entry the store holds — the ones
+   * this generation kept as well as the ones it re-extracted — is what a whole
+   * cold extraction and summarization of the same tree produces.
+   *
+   * Rendered bytes cannot carry this. A stale importer `module` changes nothing
+   * the current generation reports; it only breaks the *next* plan.
+   */
+  async function expectStoreEqualsCold(session: ResidentSession, dir: string): Promise<void> {
+    const store = session.committed().store;
+    const cold = await legacyTsBackend.extractProject(dir);
+    const coldExtracted = new Map(cold.files.map((file) => [file.filePath, file] as const));
+    expect([...store.files.keys()]).toEqual(cold.modules.map((module) => module.filePath));
+    for (const module of cold.modules) {
+      const entry = store.files.get(module.filePath);
+      expect(bytes(entry?.module)).toBe(bytes(module));
+      expect(bytes(entry?.extracted)).toBe(bytes(coldExtracted.get(module.filePath)));
+    }
+    const loaded = await loadConfig(dir);
+    const config = loaded ? resolveConfig(loaded, dir) : undefined;
+    expect(bytes([...store.files.values()].flatMap((entry) => entry.summaries))).toBe(
+      bytes(summarizeFiles(cold.files, config).summaries),
+    );
+  }
+
+  interface Row {
+    readonly name: string;
+    readonly apply: (dir: string) => void;
+    readonly changes: readonly FileChange[];
+    readonly narrowing: NarrowingReport["kind"];
+    readonly reason?: RegExp;
+    /** Whether the rendered analysis must differ from the generation before — the edit took effect. */
+    readonly moves: boolean;
+  }
+
+  const hubEdit =
+    (from: string, to: string) =>
+    (dir: string): void =>
+      edit(dir, "hub.ts", from, to);
+
+  const ROWS: readonly Row[] = [
+    {
+      name: "@effects replaced — authority declared wider",
+      apply: hubEdit(" * @effects network\n", " * @effects network, fs_read\n"),
+      changes: [CHANGED("hub.ts")],
+      narrowing: "contract-only",
+      moves: true,
+    },
+    {
+      name: "@effects replaced with a narrower declaration — authority decrease",
+      apply: hubEdit(
+        "/** @effects network */\nexport function registers",
+        "/** @effects pure */\nexport function registers",
+      ),
+      changes: [CHANGED("hub.ts")],
+      narrowing: "contract-only",
+      moves: true,
+    },
+    {
+      name: "@effects removed with its block",
+      apply: hubEdit("/** @effects network */\nexport function ping", "export function ping"),
+      changes: [CHANGED("hub.ts")],
+      narrowing: "contract-only",
+      moves: true,
+    },
+    {
+      name: "@effects added where there was no JSDoc",
+      apply: hubEdit("export function plain", "/** @effects pure */\nexport function plain"),
+      changes: [CHANGED("hub.ts")],
+      narrowing: "contract-only",
+      moves: true,
+    },
+    {
+      name: "@boundary added",
+      apply: hubEdit(" * @effects network\n", " * @effects network\n * @boundary\n"),
+      changes: [CHANGED("hub.ts")],
+      narrowing: "contract-only",
+      moves: true,
+    },
+    {
+      name: "@capabilities and @budget added",
+      apply: hubEdit(
+        " * @effects network\n",
+        " * @effects network\n * @capabilities http:get:example.com\n * @budget calls=2\n",
+      ),
+      changes: [CHANGED("hub.ts")],
+      narrowing: "contract-only",
+      moves: true,
+    },
+    {
+      name: "a contract moved to another declaration",
+      apply: (dir) => {
+        edit(dir, "hub.ts", " * @effects network\n", "");
+        edit(
+          dir,
+          "hub.ts",
+          "export function plain",
+          "/** @effects network */\nexport function plain",
+        );
+      },
+      changes: [CHANGED("hub.ts")],
+      narrowing: "contract-only",
+      moves: true,
+    },
+    {
+      name: "the overload implementation's contract",
+      apply: hubEdit(
+        "/** @effects pure */\nexport function pick",
+        "/** @effects network */\nexport function pick",
+      ),
+      changes: [CHANGED("hub.ts")],
+      narrowing: "contract-only",
+      moves: true,
+    },
+    {
+      name: "a malformed contract tag",
+      apply: hubEdit(
+        "/** @effects pure */\nexport function pick",
+        "/** @effects ??? */\nexport function pick",
+      ),
+      changes: [CHANGED("hub.ts")],
+      narrowing: "contract-only",
+      moves: true,
+    },
+    {
+      name: "the description only — not an Ambit contract",
+      apply: hubEdit(" * The hub.", " * The hub, described."),
+      changes: [CHANGED("hub.ts")],
+      narrowing: "declined",
+      reason: /JSDoc other than a contract tag/,
+      moves: false,
+    },
+    {
+      name: "a line comment only",
+      apply: hubEdit("// recursion through another module", "// recursion, through another module"),
+      changes: [CHANGED("hub.ts")],
+      narrowing: "declined",
+      reason: /comment other than an attached JSDoc/,
+      moves: false,
+    },
+    {
+      name: "a code edit beside a contract edit",
+      apply: (dir) => {
+        edit(dir, "hub.ts", " * @effects network\n", " * @effects fs_read\n");
+        edit(dir, "hub.ts", "  return 1;\n", "  return 2;\n");
+      },
+      changes: [CHANGED("hub.ts")],
+      narrowing: "declined",
+      reason: /code outside JSDoc/,
+      moves: true,
+    },
+    {
+      name: "an export added beside a contract edit",
+      apply: (dir) => {
+        edit(dir, "hub.ts", " * @effects network\n", " * @effects fs_read\n");
+        edit(
+          dir,
+          "hub.ts",
+          "export interface Rate",
+          "export const EXTRA = 1;\n\nexport interface Rate",
+        );
+      },
+      changes: [CHANGED("hub.ts")],
+      narrowing: "declined",
+      reason: /code outside JSDoc/,
+      moves: true,
+    },
+    {
+      name: "a syntax error",
+      apply: hubEdit("export interface Rate {", "export interface Rate"),
+      changes: [CHANGED("hub.ts")],
+      narrowing: "declined",
+      reason: /does not parse cleanly/,
+      moves: false,
+    },
+    {
+      name: "a contract edit in a file with a global augmentation",
+      apply: (dir) =>
+        edit(dir, "global-augmentation.ts", "/** @effects pure */", "/** @effects network */"),
+      changes: [CHANGED("global-augmentation.ts")],
+      narrowing: "declined",
+      reason: /whole project/,
+      moves: true,
+    },
+    {
+      name: "a contract edit reported with a .d.ts edit",
+      apply: (dir) => {
+        edit(dir, "hub.ts", " * @effects network\n", " * @effects fs_read\n");
+        edit(dir, "ambient.d.ts", "number", "string");
+      },
+      changes: [CHANGED("hub.ts"), CHANGED("ambient.d.ts")],
+      narrowing: "not-offered",
+      reason: /not a file this session extracted/,
+      moves: true,
+    },
+    {
+      name: "a contract edit with a config change",
+      apply: (dir) => {
+        edit(dir, "hub.ts", " * @effects network\n", " * @effects fs_read\n");
+        write(
+          dir,
+          "ambit.config.ts",
+          'export default {\n  contracts: {\n    "hub.ts#plain": { effects: ["fs_read"] },\n  },\n};\n',
+        );
+      },
+      changes: [CHANGED("hub.ts"), CHANGED("ambit.config.ts")],
+      narrowing: "not-offered",
+      reason: /config/,
+      moves: true,
+    },
+    {
+      name: "a contract edit with a deletion",
+      apply: (dir) => {
+        edit(dir, "hub.ts", " * @effects network\n", " * @effects fs_read\n");
+        remove(dir, "transitive.ts");
+      },
+      changes: [CHANGED("hub.ts"), { kind: "deleted", path: "transitive.ts" }],
+      narrowing: "not-offered",
+      reason: /deletes a file/,
+      moves: true,
+    },
+  ];
+
+  it.each(ROWS)(
+    "$name",
+    async (row) => {
+      const dir = hubTree();
+      const session = await open(dir);
+      const before = render(session.current());
+      const hubClosure = [...session.committed().store.files.keys()].filter(
+        (file) =>
+          file === "hub.ts" ||
+          file === "hub-barrel.ts" ||
+          file === "cycle.ts" ||
+          file === "type-importer.ts" ||
+          file === "transitive.ts" ||
+          file.startsWith("importer-"),
+      );
+
+      row.apply(dir);
+      const { full, reextracted, narrowing, resident, impact } = await updateAndProveScoped(
+        session,
+        dir,
+        row.changes,
+      );
+      await expectStoreEqualsCold(session, dir);
+
+      expect(narrowing.kind).toBe(row.narrowing);
+      if (row.reason) expect("reason" in narrowing ? narrowing.reason : "").toMatch(row.reason);
+      if (row.moves) expect(render(resident)).not.toBe(before);
+      else expect(render(resident)).toBe(before);
+
+      if (narrowing.kind === "contract-only") {
+        expect(full).toBe(false);
+        expect(reextracted).toEqual(["hub.ts"]);
+        // Importers kept their extraction; the callers' authority was still
+        // re-propagated wherever the hub's summaries moved.
+        if (impact.changed.some((id) => id.startsWith("hub.ts#fetchRate"))) {
+          expect(impact.impacted).toContain("importer-0.ts#use0");
+          expect(impact.impacted).toContain("transitive.ts#outer");
+        }
+      } else if (!full && row.changes.every((change) => change.path === "hub.ts")) {
+        // The ordinary closure, whole.
+        for (const file of hubClosure) expect(reextracted).toContain(file);
+      }
+    },
+    60_000,
+  );
+
+  it("the high-fan-out closure shrinks to the edited file", async () => {
+    const dir = hubTree();
+    const session = await open(dir);
+    edit(dir, "hub.ts", "  return 1;\n", "  return 2;\n");
+    const ordinary = await updateAndProveScoped(session, dir, [CHANGED("hub.ts")]);
+    expect(ordinary.narrowing.kind).toBe("declined");
+    expect(ordinary.reextracted.length).toBeGreaterThan(IMPORTERS + 3);
+
+    edit(dir, "hub.ts", " * @effects network\n", " * @effects network, fs_read\n");
+    const narrowed = await updateAndProveScoped(session, dir, [CHANGED("hub.ts")]);
+    expect(narrowed.narrowing.kind).toBe("contract-only");
+    expect(narrowed.reextracted).toEqual(["hub.ts"]);
+    expect(declaredOf(narrowed.resident, "hub.ts#fetchRate")).toEqual(["fs_read", "network"]);
+    await expectStoreEqualsCold(session, dir);
+  }, 60_000);
+
+  it("ten sequential edits, narrowed and not, then a revert", async () => {
+    const dir = hubTree();
+    const session = await open(dir);
+    const original = readText(path.join(dir, "hub.ts"));
+    const steps: readonly (readonly [string, (from: string) => string, NarrowingReport["kind"]])[] =
+      [
+        [
+          "hub.ts",
+          (t) => t.replace(" * @effects network\n", " * @effects fs_read\n"),
+          "contract-only",
+        ],
+        [
+          "hub.ts",
+          (t) => t.replace(" * @effects fs_read\n", " * @effects network, fs_read\n"),
+          "contract-only",
+        ],
+        [
+          "hub.ts",
+          (t) => t.replace("export function plain", "/** @effects pure */\nexport function plain"),
+          "contract-only",
+        ],
+        // A code edit to the callee right after narrowed ones: the closure and
+        // the importers' extraction must both still be right.
+        ["hub.ts", (t) => t.replace("  return 1;\n", "  return 2;\n"), "declined"],
+        [
+          "hub.ts",
+          (t) => t.replace(" * @effects network, fs_read\n", " * @effects pure\n"),
+          "contract-only",
+        ],
+        [
+          "importer-3.ts",
+          (t) => t.replace("/** @effects network */", "/** @effects pure */"),
+          "contract-only",
+        ],
+        ["hub.ts", (t) => t.replace(" * The hub.", " * The hub, again."), "declined"],
+        [
+          "hub.ts",
+          (t) => t.replace(" * @effects pure\n", " * @effects network\n * @boundary\n"),
+          "contract-only",
+        ],
+        [
+          "cycle.ts",
+          (t) => t.replace("export function pong", "/** @effects network */\nexport function pong"),
+          "contract-only",
+        ],
+        [
+          "hub.ts",
+          (t) => t.replace("/** @effects pure */\nexport function plain", "export function plain"),
+          "contract-only",
+        ],
+        ["hub.ts", () => original, "declined"],
+      ];
+    for (const [file, rewrite, expected] of steps) {
+      const full = path.join(dir, file);
+      const before = readText(full);
+      const after = rewrite(before);
+      expect(after).not.toBe(before);
+      writeFileSync(full, after);
+      const result = await updateAndProveScoped(session, dir, [CHANGED(file)]);
+      expect(result.narrowing.kind).toBe(expected);
+      if (expected === "contract-only") expect(result.reextracted).toEqual([file]);
+      await expectStoreEqualsCold(session, dir);
+    }
+    expect(readText(path.join(dir, "hub.ts"))).toBe(original);
+  }, 120_000);
 });
