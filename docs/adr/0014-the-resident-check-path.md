@@ -69,7 +69,12 @@ falls back to. The implementation shape is
 - **A** — above: retained as the full-rebuild path, rejected as the design.
 - **C** — deferred, not refused. It is what to build if `project-update` and
   `extraction` turn out to dominate a cold start in a real editor session, and
-  that is a measurement nobody has taken.
+  that is a measurement nobody has taken. One thing it would have to re-review
+  rather than inherit: the resident path's reuse gate skips an external input's
+  hash comparison when the new program hands back the same `ts.SourceFile`
+  object, which is safe only because the default `CompilerHost` never does. A
+  caching host is what C adds
+  ([`docs/resident-check-path.md`](../resident-check-path.md)).
 - **Incremental diagnostics.** Recomputing diagnostics, authority records, and
   coverage for the whole tree each generation is kept deliberately: they are pure
   functions of the propagated state with no compiler in them, and scoping them

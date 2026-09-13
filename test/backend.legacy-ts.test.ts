@@ -400,7 +400,7 @@ describe("legacyTsBackend.extractProject (self-hosting)", () => {
     const { files } = await extractFixture(SRC_ROOT);
     const extract = files
       .find((f) => f.filePath === "checker/backend/legacy-ts.ts")
-      ?.functions.find((fn) => fn.id === "checker/backend/legacy-ts.ts#extractProject");
+      ?.functions.find((fn) => fn.id === "checker/backend/legacy-ts.ts#resolveProjectRoot");
     // Asserted against the call that is there, so a rename cannot make the
     // negative vacuously true.
     expect(extract?.calls.map((c) => c.calleeQualifiedName)).toContain("node:fs.statSync");
