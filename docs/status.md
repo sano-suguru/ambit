@@ -371,18 +371,19 @@ p50 52 s, against a 0.4–0.7 s re-check. No project over 49 files was observed.
 insufficient** — neither dominates here, and the 500+-file workload ADR-0014's
 reopen condition names is still unmeasured.
 
-**Outside-root edits: Go to an implementation goal, contingent on first trying
-to falsify the channel-completeness assumption** ([design investigation](measurements/2026-09-13-outside-root-invalidation-design.md),
-nothing built). A candidate sufficient condition survived 36 adversarial probes
-and has a proof sketch; it is not proved. In outline: the edited file exists in
-both generations and is a TypeScript module (not `.d.ts`) contributing nothing
-global, and it is unreachable from the in-root files **and from every global
-contributor**. The candidate additionally requires unchanged compiler options,
-root names and program-input identity — every other file's text, and the
-`getSourceFiles()` sequence with `fileName` spelling; the design investigation
-has the full list. Reachability from in-root files alone admitted three edits
-that changed output. On `check src`: whole rebuild 659 ms, empty-closure partial
-420 ms, the reachability check 5.0 ms; 45 of 46 `test/` files would qualify.
+**Outside-root edits: No-Go on the candidate condition**
+([design investigation](measurements/2026-09-13-outside-root-invalidation-design.md),
+nothing built). The candidate survived 36 adversarial probes and had a proof
+sketch; the falsification pass that was the implementation goal's gate refuted
+it. An outside-root file that nothing imports can still change in-root output
+through a `/// <reference path>` or `/// <reference lib>` to a file already in
+the program: that flips the file's `isSourceFileFromExternalLibrary` or
+`isSourceFileDefaultLibrary`, which Ambit reads to name a stub key and an
+unresolved reason, with no change to the source-file sequence or to any other
+text. Probed: `db_read` observed ↔ unknown in both directions. An outside-root
+edit stays a whole rebuild (659 ms against a 420 ms empty-closure partial on
+`check src`, measured before the pass). A revised candidate comparing those
+per-file attributes exists and is unprobed.
 
 What is built, and what says so:
 

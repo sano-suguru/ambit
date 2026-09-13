@@ -11,8 +11,10 @@ The probes were throwaway scripts outside the repository and are not committed.
 what conditions is every in-root extraction — and so the cold `analyze()`
 bytes — the same before and after an edit to F, and can that be proved?
 
-**Answer.** Not proved yet. A candidate sufficient condition survived 36
-adversarial probes, has a proof sketch, and is cheap to check. The obvious
+**Answer.** No, not with the condition proposed here. A candidate sufficient
+condition survived 36 adversarial probes, had a proof sketch, and was cheap to
+check. A falsification pass the same day broke it (§8): an edit P1–P4 admit
+moves in-root output, in both directions of authority. The obvious
 version of it is unsound. "No in-root file imports F" (directly or transitively) admitted
 three edits that changed in-root output (cases 34–36 below). The version that
 survives also treats every file that contributes to the global scope as a root
@@ -31,8 +33,10 @@ another file through five channels:
 | c | **Program structure** | which files are in the program, and `getSourceFiles()` order. F's own imports and references can add files (`/// <reference lib>`, an import of a global module); F can be processed before an in-root file that is not yet loaded and fix that file's `fileName` spelling or position |
 | d | **Compiler options** | already a §6.2 whole-rebuild row |
 | e | **Module resolution** | file *existence*, `package.json` / `exports` / `typesVersions`, symlinks. Resolution depends on the file system and options, not on the target file's text — except through a symlink, where "F's text" is also an in-root file's text |
+| f | **How a file was reached** (found by §8, missing from the original list) | per-file program attributes that depend on *every* path that reached a file, not on its text or its place in the sequence: `isSourceFileFromExternalLibrary`, `isSourceFileDefaultLibrary`. F's own outgoing references can flip them for a file already in the program |
 
-Ambit-side, nothing widens this. Pass 1 mints ids over in-root files only; a
+Ambit-side, nothing widens this — **wrong, see §8**: `ambientUnresolvedReason`
+and `installedTypeNameOf` read channel f. Pass 1 mints ids over in-root files only; a
 symbol id is derived from the in-root relative path and the declaration path;
 `collectImportTargets` drops edges that leave the root; no compiler diagnostic
 reaches `analyze()`'s output (no `get*Diagnostics` call in `src/`); stubs and
@@ -206,7 +210,7 @@ sequence identical (with and without `oldProgram`) and no other text changed.
 - **Not measured:** any project but this one, where the ratio of project-update
   to extraction is what decides how much a skipped extraction is worth.
 
-## 7. Decision
+## 7. Decision (superseded by §8)
 
 **Go to an implementation goal, contingent on first trying to falsify the
 channel-completeness assumption.** The candidate is P1 ∧ P2 ∧ P3 ∧ P4, with P4's
@@ -233,3 +237,59 @@ The goal's first phase is a hard gate: no product code until a falsification
 pass over channel completeness (§3) is done — looking for a checker query whose
 answer depends on a non-contributing module that nothing reaches. A new channel
 found there sends P1–P4 back to design; none found lets implementation start.
+
+## 8. Falsification pass — the candidate is refuted
+
+Same machine and engine, same probe method (old/new trees differing only in F,
+cold `analyze()` bytes and `extractProject` JSON compared), with P1–P4 checked
+by a throwaway harness: identical `getSourceFiles()` `fileName` sequence and
+options, every non-F program input's text identical, F a `.ts` module with no
+`declare global` / string-named `declare module` / `export as namespace` at any
+depth in either generation, F unreachable from in-root files ∪ global
+contributors ∪ default libs over imports, re-exports, `import =`, `import()`,
+import type nodes, module-declaration names, `referencedFiles` and
+`typeReferenceDirectives`. Not committed.
+
+| # | Edit to F (`test/f.ts`, imported by nothing) | P1–P4 | `analyze()` bytes | extraction |
+|---|---|---|---|---|
+| 37 | adds `/// <reference path="../node_modules/pkg/index.d.ts" />`; `src/a.ts` calls `pkg`'s `send` and `Client.query` | admit | **changed**: `external-module` → `ambient-declaration`, operation `pkg.Client.query` lost | **changed** |
+| 38 | the same reference to `node_modules/pg/index.d.ts`; `src/db.ts` calls `Client.query` from `pg` | admit | **changed**: `observed: ["db_read"]` → `unknown: true` (authority decrease) | **changed** |
+| 39 | 38 reversed — F drops the reference | admit | **changed**: `unknown` → `db_read` (authority increase) | **changed** |
+| 40 | `src/a.ts` has `/// <reference path>` to `lib.dom.d.ts` and calls `fetch`; F adds `/// <reference lib="dom" />` | admit | equal | **changed**: `unresolvedReason` `ambient-declaration` → `builtin-method` |
+| 41 | 38's shape reached by `import type {} from "../node_modules/pg/index.d.ts"`, by a `paths` alias, and by an `import("#alias")` type | admit | equal | equal |
+
+**Mechanism** (TypeScript 6.0.3, `lib/typescript.js`). `findSourceFile` records
+`currentNodeModulesDepth > 0` for a file the first time it is found, and sets it
+to `false` when a file already in the program is reached again at depth 0 —
+which a `/// <reference path>` from F does. A specifier whose path has a
+`node_modules` segment, or that goes through `paths`, still counts as a
+`node_modules` lookup, which is why 41 does not flip. `processLibReferenceDirectives`
+adds a lib file to `libFiles` even when it is already in the program. Neither
+moves the sequence or any text, so P3 cannot see them, and P4 is about edges
+*into* F, not out of it.
+
+**Who reads it.** Ambit: `ambientUnresolvedReason` (`builtin-method` /
+`external-module`) and `installedTypeNameOf`, which turns the flag into a stub
+key — case 38's `pg.Client.query` stub match is what disappears. Inside
+`createTypeChecker`, `isSourceFileFromExternalLibrary` is not read;
+`isSourceFileDefaultLibrary` is, in `isLibType` and in two branches that
+attach related information to a relation error. Whether that checker read changes an answer Ambit
+takes was not probed.
+
+**Not run**, because the gate had already decided: the rest of the attack
+list — redirects between two copies of one `name@version` (also decided on
+first discovery, not by the sequence), contextual typing, overloads, symbol
+ordering, `.tsx` implicit imports, `importHelpers`, symlinks, NodeNext/CJS.
+
+**Revised candidate, not probed.** P3 also compares, per program file, in both
+generations: `isSourceFileFromExternalLibrary`, `isSourceFileDefaultLibrary`,
+and whether the file is a redirect (a `ts.SourceFile` whose statements'
+`parent` is another file). That closes 37–40 by construction. It does not
+answer the question that broke the original: channel f was missing from a list
+that was claimed to be complete, in a place Ambit itself reads, so a longer list
+is a candidate on the same footing, not a proof.
+
+**Decision: No-Go on P1–P4.** Outside-root edits stay a whole rebuild (§6.2 as
+written). No product code, no ADR. Reopening needs the revised candidate put
+through a full falsification pass, starting from the attacks listed under
+"Not run".
