@@ -517,6 +517,7 @@ export interface TsBackend {
     update(
       changed: readonly ResidentFileChange[],
       reextract?: readonly string[],
+      narrowTo?: readonly string[],
     ): Promise<ResidentExtractedUpdate>;
     close(): void;
   }>;
@@ -535,4 +536,11 @@ export interface ResidentExtractedUpdate {
   readonly removed: readonly string[];
   readonly full: boolean;
   readonly projectUpdateMs?: number;
+  /** See `ExtractedUpdate.narrowing` in `src/checker/resident.ts`. */
+  readonly narrowing?: ResidentNarrowing;
 }
+
+/** See `ExtractedUpdate.narrowing` in `src/checker/resident.ts`. */
+export type ResidentNarrowing =
+  | { readonly kind: "contract-only" }
+  | { readonly kind: "declined"; readonly reason: string };

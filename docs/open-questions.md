@@ -187,9 +187,12 @@ exit: when it fires, the question is decided, the answer goes in the
   now: a JSDoc-only edit still re-extracts its whole importer closure, a cheaper
   and lower-risk lever than a caching host, and the editor workload — edit
   frequencies, and a typical JSDoc edit's closure size — is unmeasured.
-  Reopen on any of: the JSDoc-only closure narrowing (pass 2 never reads a
-  callee's JSDoc) landing and leaving `project-update` dominant on a contract
-  edit; a measured editor session where leaf edits on a 500+-file project are
+  Reopen on any of: the JSDoc-only closure narrowing landing and leaving
+  `project-update` dominant on a contract edit — **fired 2026-09-13**: contract-only
+  narrowing (ADR-0015) leaves `project-update` at 85–95% of the re-check on
+  drizzle-orm and immich
+  ([2026-09-13](measurements/2026-09-13-resident-jsdoc-narrowing.md)); the
+  architecture C decision itself is not yet retaken; a measured editor session where leaf edits on a 500+-file project are
   the common case; or an explanation of immich's `oldProgram` slowdown showing
   compiler-side reuse can be made to pay without a caching host.
 

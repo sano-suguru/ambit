@@ -436,6 +436,7 @@ differential suite below is for.
 | §6.2 row | Implementation |
 |---|---|
 | A file's text, JSDoc included | Re-extract its reverse-import closure |
+| An edit confined to contract tags | Re-extract the edited file alone; importers keep their extraction; `S`/`I` unchanged. See "Contract-only JSDoc edits" below |
 | Deleted | Same closure; the file's ids go into `S` and leave `state`. Safe for the reason above |
 | Added | **Full re-extraction.** No closure over the edges already held can find the importers a new file changes |
 | Renamed | A delete and an add, so a full re-extraction. **The resident path makes no rename guess** — `ambit diff` reconciles identity across a rename, from git, and only there |
@@ -452,6 +453,88 @@ Stubs force a full rebuild because `legacy-ts.ts` imports `constructorStubKey`,
 *extraction*, not only in summarization. A future `stubs` key in
 `ambit.config.ts` inherits that, and belongs in `docs/open-questions.md` when it
 is proposed.
+
+## Contract-only JSDoc edits
+
+Built. A partial update whose reported edits touch nothing but Ambit's contract
+tags re-extracts those files alone instead of their reverse-import closure.
+Why the line is drawn at contract tags is
+[ADR-0015](adr/0015-contract-only-jsdoc-edits.md); this section is what the code
+proves and where it stops.
+
+### What a JSDoc edit can reach
+
+| Class | JSDoc | Where it can act | Narrowed |
+|---|---|---|---|
+| A — contract only | `@effects`, `@capabilities`, `@budget`, `@entrypoint`, `@boundary` | Ambit's extraction of the file that carries them (`extractJsDoc`, `collectSkippedFunctions`), then summarization and propagation. No TypeScript tag has these names | yes |
+| B — declaration shape | a tag's host moving to another declaration; a block becoming a plain comment; an edit that also moves a token | a block's host is the edited file's own extraction; anything that moves a token or a non-JSDoc comment is a code edit | a contract tag moving between hosts, yes; everything else, no |
+| C — compiler semantics | `@param`, `@type`, `@template`, `@overload`, `@this`, `@satisfies`, `@deprecated`, a description, JSX pragmas, triple-slash directives | the checker's own answers, in a JavaScript file always and in a `.tsx` file for pragmas | no |
+
+What an importer's extraction reads of another file is only what the checker
+answers about it and symbol ids built from declaration paths — no position and no
+JSDoc: every `extractJsDoc` call site passes a node of the file being extracted,
+and `sameFileHandlerOf` refuses a handler declared elsewhere. That is necessary
+and not sufficient, which is why class C is refused rather than argued away:
+this path does not rely on the checker ignoring JSDoc in a `.ts` file.
+
+### The proof, per file
+
+`classifyJsDocEdit` in `legacy-ts.ts` reparses the file's previous and next text
+— both read from the two programs, so the proof is about what the checker saw —
+and returns `contract-only` only when all of these hold:
+
+- the file is `.ts`, `.mts` or `.cts`, not a declaration file;
+- neither parse reports a syntax error;
+- every node kind in tree order, and every token's text, is identical — a tree,
+  not a token stream, because a line break inside a comment moves automatic
+  semicolon insertion;
+- every comment that is not an attached JSDoc block has the same text in the
+  same order;
+- every attached block's description and non-contract tags are identical,
+  keyed to the token the block precedes. A block holding contract tags alone is
+  not compared, so adding or deleting one narrows.
+
+### The contract between the two layers
+
+`planUpdate` offers `narrowTo` — the edited files — beside the closure, and only
+when nothing else put a file into the closure: no deletion, and no config value
+change seeding its own path. The backend narrows only if every reported change is
+an edit and every one classifies `contract-only`, and says so in
+`ExtractedUpdate.narrowing`. `patchStore` checks the returned set against the one
+the verdict entitles, and a narrowed answer to a generation that offered nothing
+throws. `UpdateResult.narrowing` reports `not-offered`, `declined` (with the
+reason) or `contract-only`.
+
+Nothing downstream changes. The edited file is re-summarized, `S` is computed from
+the summaries as for any edit, and `I` is `S` closed under callers over both
+reverse call graphs — so an importer whose authority depends on the edited
+contract is still re-propagated. Skipping an importer's extraction is not
+skipping its check.
+
+### Falls back to the closure, or to a whole rebuild
+
+Every row below has a differential test in `test/resident.differential.test.ts`
+("contract-only JSDoc edits skip importer re-extraction"):
+
+- a description or any non-contract tag changed; a line comment changed;
+- code, an import or an export changed beside a contract edit;
+- a syntax error;
+- a deletion in the same change set, or a config value change (not offered);
+- a path the store does not hold, such as a `.d.ts` (whole rebuild, as before);
+- a file with global scope — `declare global`, ambient modules — whose
+  compiler-side gate already refuses any partial update.
+
+`.js`, `.tsx` and declaration files are refused by the classifier's own tests in
+`test/backend.legacy-ts.test.ts`; `allowJs` puts JavaScript into the store, which
+is why the refusal is by extension and not by assumption.
+
+### What this does not narrow yet
+
+- A description, `@param` or `@deprecated` edit in a `.ts` file. The checker very
+  likely ignores them there; this path does not rely on it.
+- A mixed change set in which one file is contract-only and another is not: the
+  whole offer is declined, rather than the closure taken over the other files.
+- Contract tags in a `.tsx` file.
 
 ## Adversarial cases
 

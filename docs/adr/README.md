@@ -109,3 +109,4 @@ is left out rather than padded.
 | [0012](0012-reporting-an-unresolvable-gain.md) | An unresolvable gain is reported, and gated only on request | Accepted (2026-09-11) — extends 0008 |
 | [0013](0013-the-inline-callback-owner.md) | A file's inline callbacks are one entry, compared as a multiset over its bodies | Accepted (2026-09-11) — extends 0008 |
 | [0014](0014-the-resident-check-path.md) | The resident path caches extraction per file and re-propagates over the impact range | Accepted (2026-09-12) |
+| [0015](0015-contract-only-jsdoc-edits.md) | An edit confined to contract tags does not re-extract importers | Accepted (2026-09-13) — extends 0014 |

@@ -1,6 +1,11 @@
 import path from "node:path";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
-import { installedPackageNameOf, type legacyTsBackend } from "../src/checker/backend/legacy-ts.ts";
+import {
+  classifyJsDocEdit,
+  installedPackageNameOf,
+  type legacyTsBackend,
+} from "../src/checker/backend/legacy-ts.ts";
 import { extractFixture } from "./support/extract.ts";
 
 const FIXTURE_ROOT = path.join(import.meta.dirname, "fixtures", "backend-smoke");
@@ -829,5 +834,173 @@ describe("installedPackageNameOf", () => {
   it("names nothing for a truncated path", () => {
     expect(installedPackageNameOf("/p/node_modules")).toBeUndefined();
     expect(installedPackageNameOf("/p/node_modules/@scope")).toBeUndefined();
+  });
+});
+
+describe("classifyJsDocEdit: only an edit to Ambit's contract tags is contract-only", () => {
+  const BASE = [
+    'import { helper } from "./helper.ts";',
+    "",
+    "/**",
+    " * Fetches the rate.",
+    " * @param n how many",
+    " * @effects network",
+    " */",
+    "export function fetchRate(n: number): number {",
+    "  // keep in sync with the API",
+    "  return helper(n);",
+    "}",
+    "",
+    "export function plain(): number {",
+    "  return 1;",
+    "}",
+    "",
+  ].join("\n");
+  const verdict = (after: string, fileName = "callee.ts") =>
+    classifyJsDocEdit(fileName, BASE, after);
+  const swap = (from: string, to: string): string => {
+    if (!BASE.includes(from)) throw new Error(`not in BASE: ${from}`);
+    return BASE.replace(from, to);
+  };
+
+  it.each([
+    ["the identical text", BASE],
+    ["a contract tag's text replaced", swap(" * @effects network", " * @effects network, fs_read")],
+    ["a contract tag removed", swap(" * @effects network\n", "")],
+    [
+      "a block holding only a contract tag added",
+      swap("export function plain", "/** @effects pure */\nexport function plain"),
+    ],
+    ["@boundary added", swap(" * @effects network", " * @effects network\n * @boundary")],
+    [
+      "@capabilities and @budget added",
+      swap(
+        " * @effects network",
+        " * @effects network\n * @capabilities http:get:*\n * @budget calls=3",
+      ),
+    ],
+    [
+      "a contract tag inserted between the description and @param",
+      swap(" * Fetches the rate.\n", " * Fetches the rate.\n * @entrypoint\n"),
+    ],
+    [
+      "a contract tag moved to another declaration",
+      swap(" * @effects network\n", "").replace(
+        "export function plain",
+        "/** @effects network */\nexport function plain",
+      ),
+    ],
+    ["a malformed contract tag", swap(" * @effects network", " * @effects ???")],
+  ])("contract-only: %s", (_name, after) => {
+    expect(verdict(after)).toEqual({ kind: "contract-only" });
+  });
+
+  it.each([
+    [
+      "the description changed",
+      swap("Fetches the rate.", "Fetches the current rate."),
+      /JSDoc other than a contract tag/,
+    ],
+    [
+      "@param text changed",
+      swap("@param n how many", "@param n how many times"),
+      /JSDoc other than a contract tag/,
+    ],
+    [
+      "a @type tag added",
+      swap(" * @effects network", " * @effects network\n * @type {string}"),
+      /JSDoc other than a contract tag/,
+    ],
+    [
+      "a @deprecated tag added",
+      swap(" * @effects network", " * @effects network\n * @deprecated"),
+      /JSDoc other than a contract tag/,
+    ],
+    [
+      "a line comment changed",
+      swap("keep in sync", "kept in sync"),
+      /comment other than an attached JSDoc/,
+    ],
+    [
+      "a triple-slash directive added",
+      `/// <reference types="node" />\n${BASE}`,
+      /comment other than an attached JSDoc/,
+    ],
+    ["a JSDoc block demoted to a plain comment", swap("/**\n * Fetches", "/*\n * Fetches"), /./],
+    [
+      "code beside the JSDoc changed",
+      swap(" * @effects network", " * @effects fs_read").replace(
+        "return helper(n);",
+        "return helper(n + 1);",
+      ),
+      /code outside JSDoc/,
+    ],
+    [
+      "an export added with a contract edit",
+      swap(" * @effects network", " * @effects pure").replace(
+        "export function plain",
+        "export const extra = 1;\nexport function plain",
+      ),
+      /code outside JSDoc/,
+    ],
+    ["an import re-pointed", swap('"./helper.ts"', '"./other.ts"'), /code outside JSDoc/],
+    ["a syntax error", swap("return 1;\n}", "return 1;\n"), /does not parse cleanly/],
+    [
+      "an unterminated JSDoc block",
+      swap(" */\nexport function fetchRate", "\nexport function fetchRate"),
+      /does not parse cleanly|code outside JSDoc/,
+    ],
+  ])("unsafe: %s", (_name, after, reason) => {
+    const result = verdict(after);
+    expect(result.kind).toBe("unsafe");
+    expect(result.kind === "unsafe" ? result.reason : "").toMatch(reason);
+  });
+
+  it("reads a comment's line break into automatic semicolon insertion, not past it", () => {
+    // `return /** … */ 1` and `return /**\n */ 1` differ only inside a
+    // JSDoc-shaped comment, and the second returns nothing: the line break
+    // inside the comment ends the statement. A token stream would call them equal.
+    const before = "export function f(): number | void {\n  return /** @effects pure */ 1;\n}\n";
+    const after = "export function f(): number | void {\n  return /** @effects pure\n */ 1;\n}\n";
+    expect(classifyJsDocEdit("f.ts", before, after).kind).toBe("unsafe");
+  });
+
+  it.each([["callee.js"], ["callee.tsx"], ["callee.d.ts"], ["callee.d.mts"]])(
+    "refuses %s outright, even for a contract-only edit",
+    (fileName) => {
+      const after = swap(" * @effects network", " * @effects fs_read");
+      expect(verdict(after, fileName)).toEqual({
+        kind: "unsafe",
+        reason: "not a .ts, .mts or .cts implementation file",
+      });
+    },
+  );
+
+  it.each(["effects", "capabilities", "budget", "entrypoint", "boundary"])(
+    "@%s is a tag the compiler does not know — the fact the narrowing rests on",
+    (tag) => {
+      // `JSDocTag` is the unknown-tag kind; `@param` parses as `JSDocParameterTag`,
+      // `@deprecated` as `JSDocDeprecatedTag`. A compiler that started to recognize
+      // one of Ambit's names would give it a kind of its own, and this fails.
+      const sourceFile = ts.createSourceFile(
+        "f.ts",
+        `/** @${tag} x */\nexport function f(): void {}\n`,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TS,
+      );
+      const declaration = sourceFile.statements[0];
+      if (declaration === undefined) throw new Error("no declaration parsed");
+      const tags = ts.getJSDocTags(declaration);
+      // Compared as numbers: `SyntaxKind[kind]` names `JSDocTag` by its alias.
+      expect(tags.map((t) => [t.tagName.text, t.kind])).toEqual([[tag, ts.SyntaxKind.JSDocTag]]);
+      expect(ts.SyntaxKind.JSDocTag).not.toBe(ts.SyntaxKind.JSDocParameterTag);
+    },
+  );
+
+  it("accepts .mts and .cts", () => {
+    const after = swap(" * @effects network", " * @effects fs_read");
+    expect(verdict(after, "callee.mts")).toEqual({ kind: "contract-only" });
+    expect(verdict(after, "callee.cts")).toEqual({ kind: "contract-only" });
   });
 });
