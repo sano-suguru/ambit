@@ -14,6 +14,16 @@ report.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ambit diff` accepted an `ambit.approvals.md` line with no reason.** The
+  separator before the reason is optional, so in `` - `a.ts#f` `effect:network` — ``
+  the `—` itself was read as the reason, and the increase passed at exit 0.
+  A line whose reason is nothing but separators (`—`, `-`, `:`), whitespace or
+  invisible format characters is now reported as a line that did not parse,
+  grants nothing, and the increase it named stays unapproved (exit 1). A line
+  with a reason reads as before.
+
 ## [0.2.0] — 2026-09-14
 
 ### Added
