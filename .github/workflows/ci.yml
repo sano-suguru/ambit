@@ -38,7 +38,7 @@ jobs:
         run: pnpm exec tsc --noEmit
 
       - name: Type check the resident benchmark
-        run: pnpm exec tsc -p tsconfig.bench-resident.json
+        run: pnpm typecheck:bench-resident
 
       - name: Test
         run: pnpm test
