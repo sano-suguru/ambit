@@ -47,8 +47,8 @@ jobs:
       # `--format github` annotates the offending line with the whole call path
       # (DESIGN.md §5.1 / §6), and `--coverage` keeps recording the numbers
       # docs/status.md tracks. Not `--strict`: measured, `check src --strict`
-      # exits 1 on four unresolved-call warnings in the connection layer — see
-      # docs/status.md, "Ambit's own source".
+      # exits 1 on the unresolved-call warnings it promotes — the count is in
+      # docs/status.md, Key metrics.
       - name: Contract check on Ambit's own source
         run: node src/cli/main.ts check src --coverage --format github
 

@@ -191,8 +191,8 @@ built-ins (36 methods), and in-place mutators (19 methods). Everything else is
 
 **No incremental analysis is exposed.** Every `check` and `diff` run is a full
 analysis: a re-check after a one-line edit costs what the first check cost.
-Measured on this repository, five runs each: `check src` 1.07–1.11 s,
-`diff HEAD src` 1.86–1.98 s. Nothing has been measured at the scale of a large
+Measured on this repository (43 files) on 2026-09-14, five runs each: `check
+src` 1.31–1.75 s, `diff HEAD src` 2.18–2.95 s. Nothing has been measured at the scale of a large
 application.
 
 ## Runtime hooks
@@ -209,6 +209,14 @@ returns the function that restores what it replaced.
 | `installFsHook` | `node:fs`, `node:fs/promises` | same |
 | `installChildProcessHook` | `node:child_process` | same |
 | `installPgHook` | `pg`'s `Pool.prototype.query`, `Client.prototype.query` | `pg` 8.x — verified against `pg@8` in `test/e2e.runtime.test.ts` |
+
+`installFsHook` checks named operations, not the whole module: `readFile`,
+`readdir`, `access`, `stat`, `lstat`, `realpath`, `readlink`, `writeFile`,
+`appendFile`, `mkdir`, `rmdir`, `rm`, `unlink`, `truncate`, `chmod`, `symlink`,
+`rename`, `copyFile`, `link` and `open` (by its flags), in their callback, `Sync`
+and `fs/promises` forms, plus `existsSync`. Streams are covered through `open`.
+Any other `node:fs` function — `cp`, `opendir`, `watch`, `utimes`, `chown`,
+`mkdtemp`, and the rest — is neither checked nor recorded.
 
 Not hooked, and therefore neither blocked nor recorded: `mysql2`,
 `@prisma/client`, `drizzle-orm`, `mongodb`, `openai`, `@anthropic-ai/sdk`, the

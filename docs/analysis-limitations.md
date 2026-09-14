@@ -253,7 +253,7 @@ method resolution on class instances, and no wider.
 
   Nothing tells the two apart from a package whose client was never covered: both
   read as an unresolved call with a name.
-- Only these five packages are covered. Drizzle, MongoDB, Redis, an S3 client,
+- Only these six packages are covered. Drizzle, MongoDB, Redis, an S3 client,
   a queue client — all `unknown`.
 
 #### Statement direction
@@ -764,7 +764,7 @@ No `bodyless-declaration` appears because `src/` contains no overload signature,
 | `unknown-rate` | the share of extracted functions whose effects could not be fully determined |
 | `mutation` | in-place mutation sites, counted apart from `pure`: a local one carries no effect but is not the same evidence as a call proven pure, and an escaping one is a `state_write` no stub table produced |
 | `skipped` | function-like nodes that cannot carry a contract, by kind (see above) |
-| `unresolved-by-reason`, `top-unresolved-names` | the signal for what to stub next. `Array.push` and `Map.set` dominating the list here reflects the mutating-method exclusion described above |
+| `unresolved-by-reason`, `top-unresolved-names` | the signal for what to stub next. `Array.push` and `Map.set` do not appear in it: the mutating-method table answers them, and they are counted under `mutation` |
 
 `top-unresolved-names` lists only calls a textual name could be built for, and
 only the ten most frequent. An unresolved call with no name raises the

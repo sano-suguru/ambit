@@ -508,9 +508,9 @@ semver's 0.x rule is in force: **a minor release may make a breaking change** �
 diagnostic ids, the NDJSON field shape, and everything else on the guaranteed
 surface can still move. What that surface is, and what is explicitly not on it,
 is [DESIGN.md §9.2](docs/DESIGN.md#92-the-guaranteed-surface); every change to
-it is announced in [CHANGELOG.md](CHANGELOG.md). `check src` over Ambit's own source — 40 files,
-340 functions — takes 1.17–1.38 s across five runs; `diff HEAD src`, which
-analyzes two trees, takes 2.01–2.55 s across five runs. Nothing is cached, so a
+it is announced in [CHANGELOG.md](CHANGELOG.md). `check src` over Ambit's own source — 43 files,
+422 functions — takes 1.31–1.75 s across five runs; `diff HEAD src`, which
+analyzes two trees, takes 2.18–2.95 s across five runs. Nothing is cached, so a
 re-check costs the same. The analysis backend has been measured on a
 300-file project (458 ms, 348 MiB peak) as part of choosing it; the CLI on top
 of it has not. What is implemented and what is not, milestone by milestone with

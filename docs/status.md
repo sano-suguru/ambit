@@ -1,12 +1,12 @@
 # Current status
 
 Node.js v24.20.0, macOS (darwin arm64), Apple M1, 8 cores, 16 GiB. Every number
-here was run, not estimated — but not all on the same day. Re-run **2026-09-13**:
-`pnpm test`, `tsc --noEmit`, `biome ci`, `check src --coverage`,
-`scripts/bench-corpus.ts`. Re-run **2026-09-11**: `check
-test/fixtures/realistic-api --coverage`. Quoted from the runs archived in
-[`docs/measurements/`](measurements/), not re-taken: the corpus median, the
-latency figures, and the npm install evidence.
+here was run, not estimated — but not all on the same day. Re-run **2026-09-14**:
+`pnpm test`, `tsc --noEmit`, `biome ci`, `check src --coverage`, `check src
+--strict`, `check test/fixtures/realistic-api --coverage`, `npm pack --dry-run`,
+and the `check src` / `diff HEAD src` latency. Quoted from the runs archived in
+[`docs/measurements/`](measurements/), not re-taken: the corpus median and the
+npm install evidence.
 
 This file records *implementation status*, not design. The specification is
 [`docs/DESIGN.md`](DESIGN.md). How the third-party and resident numbers were
@@ -17,7 +17,7 @@ reached — the runs, the misses found on the way and the re-measurements — is
 
 **0.2.0 is published and not production-proven.** All five M0.5 backend gates
 ran and the default backend is decided ([ADR-0001](adr/0001-analysis-backend.md)).
-M1's incremental path exists and is not exposed: there is no CLI flag and no benchmark. M2–M4 are partial. M5 — the Phase 1 exit criterion —
+M1's incremental path exists, is benchmarked, and is not exposed: there is no CLI flag. M2–M4 are partial. M5 — the Phase 1 exit criterion —
 is untouched, and cannot be moved by technical work.
 
 What 0.2.0 asserts is `docs/DESIGN.md` §9.2's guaranteed surface under semver's
@@ -31,15 +31,16 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | **External pilot evidence** | **not yet collected** | the Phase 1 evidence in `ROADMAP.md` |
 | Reviewer actions an Ambit report caused on an external team's pull requests | not yet collected | > 0 |
 | `unknown` rate, real third-party code (corpus median, 4,200 functions) | 52.9% | lower — no target (see below) |
-| `unknown` rate, adopting-team-equivalent fixture (`realistic-api`) | 1.9% (1/53) | no target (see below) |
-| `unknown` rate, Ambit's own source (`check src`) | 39.5% (163/413) | — |
+| `unknown` rate, adopting-team-equivalent fixture (`realistic-api`) | 7.1% (4/56) | no target (see below) |
+| `unknown` rate, Ambit's own source (`check src`) | 40.0% (169/422) | — |
+| `check src --strict` on Ambit's own source | exit 1: 23 unresolved-call warnings promoted to errors | — |
 | Authority Ambit sees in a third-party backend's data layer ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)) | 940 stubbed call sites, up from 120 | — |
 | Third-party backends `ambit diff` is silent on when nothing changed | **3** — Unleash ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)), immich ([2026-09-11](measurements/2026-09-11-second-third-party-validation-immich.md)), outline ([2026-09-11](measurements/2026-09-11-third-third-party-validation-outline.md)) | — |
 | `unknown` rate, second third-party backend (immich `server/src`, 3,191 functions) | 79.9% (2,550/3,191) | no target (see below) |
 | `unknown` rate, third third-party backend (outline `server`, 2,245 functions) | 72.8% (1,635/2,245) | no target (see below) |
-| Tests | 798 passing, 39 files | green |
+| Tests | 829 passing, 40 files | green |
 | `tsc --noEmit` / `biome ci .` | pass / pass | pass |
-| `check src` latency, 42 files | ~1.1 s (last timed at 40 files; not re-timed) | §3.5's 3 s allowance |
+| `check src` latency, 43 files | 1.31–1.75 s, five runs (`diff HEAD src`: 2.18–2.95 s) | §3.5's 3 s allowance |
 | Incremental / resident analysis | a resident session, benchmarked against `analyze()` on six subjects ([2026-09-13](measurements/2026-09-13-resident-benchmark.md)); faster for edits with a small importer closure; a contract-only JSDoc edit measured 4.9×–5.8× faster than cold on the two large high-fan-out subjects ([2026-09-13](measurements/2026-09-13-resident-jsdoc-narrowing.md)); no CLI exposure | yes (§6.2), exposed and measured |
 | Bundled stub packages | 6 DB/LLM clients, 9 builtin namespaces | 50 packages |
 | Runtime hooks | 4 (`fetch`, `node:fs`, `node:child_process`, `pg`) | — |
@@ -64,7 +65,7 @@ about adopters.
 ### Baseline commands
 
 ```sh
-pnpm test                                                    # 798 tests, 39 files — pass
+pnpm test                                                    # 829 tests, 40 files — pass
 pnpm exec tsc --noEmit                                       # pass
 ./node_modules/.bin/biome ci .                               # pass
 node src/cli/main.ts check src --coverage                    # exit 0
@@ -72,7 +73,7 @@ node src/cli/main.ts check test/fixtures/realistic-api --coverage   # exit 0
 node src/cli/main.ts check test/fixtures/next-app --coverage        # exit 0
 node src/cli/main.ts diff HEAD src                           # exit 0, ledger's approvals in place
 node scripts/bench-corpus.ts                                 # median 52.9%
-npm pack --dry-run                                           # 104 files, 244.9 kB packed
+npm pack --dry-run                                           # 104 files, 243.4 kB packed
 ```
 
 `pnpm exec biome ci .` returns 1 in one local shell because of a user-installed
@@ -88,7 +89,8 @@ Each of these was measured, and the run is archived.
   `trpc-server`, `elysia`, `got`, `drizzle-orm`), pinned by commit SHA and by
   the git tree object of each measured subtree — went from a 76.7% median
   `unknown` rate to 52.9%. The steps are in
-  [2026-09-11](measurements/2026-09-11-coverage-and-latency.md).
+  [2026-09-11](measurements/2026-09-11-coverage-and-latency.md); the current
+  median is [2026-09-12](measurements/2026-09-12-optional-callback-opacity.md)'s.
 - **`ambit diff` gives reviewable signal on a backend nobody here wrote.** On
   Unleash (`Unleash/unleash@044461b`, `src/lib`, dependencies installed) the
   untouched tree reports **no** increase. An added `fetch`, `node:fs` or
@@ -194,8 +196,8 @@ installed. On Ambit's own source the figure is dominated by calls into the
 be replaceable.
 
 Which unresolved names *matter* is a question only a pilot can answer; on real
-code with dependencies installed, the histogram at least names them. On Unleash the histogram names `knex.QueryBuilder.*` (458 sites at
-the top), `express.Response.*` and `supertest.Test.*`. There, `unknown` and the
+code with dependencies installed, the histogram at least names them. On Unleash the histogram names `knex.QueryBuilder.where` (448 sites, the
+top name), `express.Response.*` and `supertest.Test.*`. There, `unknown` and the
 gate were less coupled than the rate suggests: a *known* effect added inside an
 `unknown` symbol already fails the comparison. A gain the analysis cannot
 resolve is reported under §6.4 ([ADR-0012](adr/0012-reporting-an-unresolvable-gain.md))
@@ -226,7 +228,7 @@ was byte-equal to it. Apple M1, one machine, not re-run on Linux.
   [2026-09-13](measurements/2026-09-13-resident-jsdoc-narrowing.md).
 - **What is left is the compiler.** `createProgram` + `getTypeChecker` is
   79–95% of a small update on the large subjects. Resident peak RSS reaches
-  3.4 GiB (immich) and 3.8 GiB (outline).
+  3,409 MiB (immich) and 3,786 MiB (outline).
   [2026-09-14](measurements/2026-09-14-resident-large-workload.md).
 - **Architecture C (ADR-0014): No-Go on the six-subject benchmark (2026-09-13),
   and evidence insufficient on the large subjects (2026-09-14). `oldProgram`:
@@ -238,7 +240,7 @@ was byte-equal to it. Apple M1, one machine, not re-run on Linux.
   a loss. Against that, C is a cache of snapshot-bound `ts.SourceFile`s whose
   invalidation is a second correctness surface, it makes the reuse gate's
   identity fast path load-bearing, and it would add memory to a process already
-  at 3.9 GiB peak on 557 files. `oldProgram`'s effect is consistent within an
+  at a 3,920 MiB peak on 557 files. `oldProgram`'s effect is consistent within an
   update shape and not across shapes, and TypeScript reports no structure reuse
   on immich and outline. **Next investment: none** until a measured session on a
   500+-file project exists. The workload observed on this repository alone
@@ -285,7 +287,7 @@ with imports is reloaded is recorded in
 | M0 — specification, diagnostics, scope | **done** | `rfcs/` and `conformance/` are deferred by §9.1 to 1.0 or the first external adopter ([ADR-0010](adr/0010-when-governance-takes-effect.md)) |
 | M0.5 — backend comparison | **done** | Linux not re-verified. Gates 3 and 4 worth re-running once §6.2 exists. Full record: [`docs/measurements/m0.5-backend-comparison.md`](measurements/m0.5-backend-comparison.md). A TypeScript 7 *shadow* backend runs the same pipeline for comparison only and changes no default ([2026-09-12](measurements/2026-09-12-ts7-shadow-analysis.md), hardening in [2026-09-12](measurements/2026-09-12-ts7-shadow-hardening.md), [2026-09-12](measurements/2026-09-12-callable-slot-handle.md), [2026-09-12](measurements/2026-09-12-literal-receiver-port.md), [2026-09-12](measurements/2026-09-12-instance-member-port.md)). Divergences: **0** on `src` and on every one of the gate's 14 roots; 16 across the five third-party repositories, with 0 high-risk, 0 authority increases or decreases, 0 `unknown` lost, and the CI decision agreeing everywhere — a figure that predates the last two ports and has not been re-measured. That is **not** feature parity: `NOT_PORTED` is `project:no-tsconfig-fallback` alone, a project-loading difference; every call-resolution shape `legacy-ts.ts` implements is ported. TypeScript 7 is 0.60x–1.16x of the adopted backend on those repositories. `node scripts/shadow-check.ts` is the regression gate |
 | M1 — effects, unknown, coverage, diagnostics, init | **partial** | The resident session is incremental in extraction, summarization and propagation (phases 0–4 above); every other row of §6.2's invalidation table falls back to a whole re-extraction. Phase 6, CLI exposure, is not built. No versioned JSON Schema for the diagnostic format (§5.2). `@budget costUsd` parses and is never priced. Config has no `stubs` key |
-| M2 — capabilities, budget, hooks, adapters, 50 stubs | **partial** | Four hooks, not more: `node:http`/`https`/`net`, `mysql2`, Prisma, Drizzle, MongoDB and every LLM SDK have none, so calling them is neither blocked nor recorded. `costUsd` and `llmCalls` are not enforced. Two adapters (Hono, Next.js App Router); Express, BullMQ, `worker_threads`, Server Actions, `middleware.ts`, the Pages Router and Edge have none. No `@budget` loop-pattern warnings. **Stubs are 5 client packages and 9 builtin namespaces, not 50 packages** |
+| M2 — capabilities, budget, hooks, adapters, 50 stubs | **partial** | Four hooks, not more: `node:http`/`https`/`net`, `mysql2`, Prisma, Drizzle, MongoDB and every LLM SDK have none, so calling them is neither blocked nor recorded. `costUsd` and `llmCalls` are not enforced. Two adapters (Hono, Next.js App Router); Express, BullMQ, `worker_threads`, Server Actions, `middleware.ts`, the Pages Router and Edge have none. No `@budget` loop-pattern warnings. **Stubs are 6 client packages and 9 builtin namespaces, not 50 packages** |
 | M3 — fix patches, agent protocol | **partial** | `fixes[].edits` exists for `AMB-E001` only. **`ambit agent` does not exist** — no protocol, no iteration limit, no approval gate for loosening fixes |
 | M4 — editor, SBOM, npm | **partial** | Published as [`ambit-ts`](https://www.npmjs.com/package/ambit-ts): 0.1.0 on 2026-09-10 by hand, **without provenance**; 0.2.0 (`latest`) on 2026-09-14 through `release.yml`, with provenance. No editor integration of any kind. **`ambit sbom` does not exist**, nor do stub trust levels in diagnostics (§8). The runtime ships with the CLI, so installing Ambit pulls in `typescript` ([ADR-0009](adr/0009-package-name-and-single-package.md)) |
 | M5 — Phase 1 exit criteria | **untouched** | An external pilot producing the evidence `ROADMAP.md` lists: sustained use on production-bound pull requests, and reviewer actions its reports caused. No sample, self-test, or synthetic benchmark substitutes for it |
