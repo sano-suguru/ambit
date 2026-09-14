@@ -1,6 +1,6 @@
 // A class that declares an instance member and a static member of the same
 // name. Both have bodies, both run, and they are two different functions — so
-// two declaration paths, per DESIGN.md §4.1 (a). One shared path is not a
+// two declaration paths (one marked `static`). One shared path is not a
 // wrong answer but no answer: `propagate` would hold two summaries under one
 // id and never reach a fixed point.
 //

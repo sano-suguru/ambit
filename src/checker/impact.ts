@@ -12,7 +12,7 @@
  *
  * **The comparator is where phase 3 can go wrong**, and the direction matters:
  * an over-wide comparison costs a recomputation, a narrow one reuses a
- * propagated value whose inputs moved and commits stale authority (§3.4 — an
+ * propagated value whose inputs moved and commits stale authority (an
  * `unknown` must never become "no violation" by omission). So every field of
  * `FunctionSummary` is compared, including the ones propagation does not read,
  * and the exhaustiveness is enforced by the compiler rather than by this
@@ -141,8 +141,8 @@ void CALL_FIELDS;
  *
  * - `calls` and `bodies`: **ordered**. Propagation reads them in order to pick
  *   the first witness for an effect or a capability, and `via` chains are part
- *   of the bytes §6.2 compares. Two identical call lists in a different order
- *   are a different summary here.
+ *   of the bytes a resident result must share with a cold run. Two identical
+ *   call lists in a different order are a different summary here.
  * - `tagLocations`: **ordered** over its entries. A `Map`'s entry order is
  *   observable wherever it is iterated, and ordered is the conservative
  *   direction — it can only cost a recomputation.

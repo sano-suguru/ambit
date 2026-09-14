@@ -1,4 +1,4 @@
-// Fixture for `ambit init` (DESIGN.md §4.1): infer effects for undeclared
+// Fixture for `ambit init`: infer effects for undeclared
 // functions and propose the JSDoc as an applicable patch. The point of the
 // round-trip test is that applying every proposal leaves `ambit check` clean —
 // an inferred contract Ambit would then reject is worse than no proposal.

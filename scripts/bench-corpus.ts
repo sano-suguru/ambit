@@ -6,14 +6,14 @@
  *
  * One command checks out the fixed corpus (`test/corpus/corpus.json`, pinned by
  * commit and by subtree tree object) and reports, per target and across
- * targets, `docs/DESIGN.md` §4.3's primary KPI — the proportion of extracted
+ * targets, the primary KPI `docs/DESIGN.md` names — the proportion of extracted
  * functions whose propagated effect set carries `unknown`.
  *
  * It runs the analysis through the library API rather than through `ambit
  * check` for one reason: `--coverage`'s `top-unresolved-names` is capped at ten
  * entries, and the cap is there for a human reading a terminal. Deciding *what
  * to work on next* needs the whole histogram, and widening the CLI's output
- * would be a change to §9.2's guaranteed surface for the sake of a measurement
+ * would be a change to the CLI's guaranteed surface for the sake of a measurement
  * procedure. Everything else it reports comes from `computeCoverage`, the same
  * function `--coverage` prints.
  *

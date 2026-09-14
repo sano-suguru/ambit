@@ -1,4 +1,4 @@
-// §3.5 gate 1: generic, overload, union, `any`, recursion, callback, and the
+// M0.5 gate 1: generic, overload, union, `any`, recursion, callback, and the
 // position of a call site that follows non-ASCII text. Each shape is here
 // because a backend can have the type information and still fail to fix the
 // *call target*, which is what Ambit propagates from.
@@ -23,8 +23,8 @@ export function genericHigherOrder<T, U>(xs: readonly T[], f: (t: T) => U): U[] 
   return xs.map(f);
 }
 
-// A generic function passed a callback *by reference*: §4.2 rule 4 still
-// applies, generic or not.
+// A generic function passed a callback *by reference*: its effects still come
+// from the actual argument, generic or not.
 function toLength(s: string): number {
   return s.length;
 }

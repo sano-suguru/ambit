@@ -36,12 +36,12 @@ import {
 
 /**
  * Compare declared vs. observed effects for every declared function and
- * produce diagnostics (DESIGN.md §5.1). Undeclared functions
- * (`declared.kind === "none"`) are not diagnosed here — see §4.2/§4.3:
- * undeclared is a coverage concern, not a propagation input.
+ * produce diagnostics. Undeclared functions (`declared.kind === "none"`) are
+ * not diagnosed here: undeclared is not `unknown`, and is a coverage concern,
+ * not a propagation input.
  *
- * `engine` identifies the backend that produced `state` (DESIGN.md §3.4) and
- * is attached to every diagnostic emitted.
+ * `engine` identifies the backend that produced `state` and is attached to
+ * every diagnostic emitted.
  */
 export function diagnose(
   state: ReadonlyMap<SymbolId, PropagatedFunction>,
@@ -67,9 +67,8 @@ export function diagnose(
  * There is deliberately no second, contract-preserving candidate. Restoring a
  * declaration means restructuring the code — moving the effectful call to a
  * caller that is allowed to make it — and Ambit cannot generate that patch
- * safely. DESIGN.md §5.3 forbids inventing one for the sake of ranking:
- * "Candidates that cannot be generated are not fabricated for the sake of
- * ranking". So this fix is always
+ * safely, and a candidate that cannot be generated is not fabricated for the
+ * sake of ranking. So this fix is always
  * `consistentWithContract: false`, and `impact` says what widening costs.
  */
 function buildWidenFix(
@@ -80,7 +79,7 @@ function buildWidenFix(
 ): readonly DiagnosticFix[] {
   const { summary } = propagated;
   const tagLocation = summary.tagLocations.get("effects");
-  // No recorded tag position means no applicable patch. §5.3: never emit a
+  // No recorded tag position means no applicable patch. Never emit a
   // summary-only candidate as if it were one.
   if (!tagLocation) return [];
 
@@ -120,7 +119,7 @@ function buildWidenFix(
 }
 
 /**
- * DESIGN.md §5.3: `location` is 1-based, an edit range 0-based and
+ * `location` is 1-based, an edit range 0-based and
  * end-exclusive. `SourceLocation.endLine`/`endCol` are already exclusive, so
  * only the origin shifts.
  */
@@ -137,8 +136,8 @@ function callersOf(
   state: ReadonlyMap<SymbolId, PropagatedFunction>,
 ): readonly PropagatedFunction[] {
   // Sorted by symbol id, not left in `state`'s insertion order: the result
-  // reaches the output as `fixes[].impact.callersAffected`, and DESIGN.md
-  // §6.2's equivalence law is over bytes — an order that follows how files
+  // reaches the output as `fixes[].impact.callersAffected`, and a resident
+  // run must equal a cold run byte for byte — an order that follows how files
   // were discovered is not a function of the tree.
   // `toSorted`, not `sort`: an in-place sort on a chained temporary reads to
   // Ambit's own mutation analysis as an escaping `state_write` (the receiver is
@@ -180,8 +179,7 @@ function diagnoseEffects(
 }
 
 /**
- * DESIGN.md §4.4's narrowing rule: a callee may not require a capability its
- * caller
+ * The narrowing rule: a callee may not require a capability its caller
  * does not grant. A function's own declaration is the grant; what its body
  * reaches is the requirement.
  */
@@ -211,11 +209,12 @@ function diagnoseCapabilities(
   const excess = excessCapabilities(granted, propagated.required.capabilities);
   const diagnostics: Diagnostic[] = [];
 
-  // DESIGN.md §4.4's static half: a target this function's own body fixes in
-  // the source — a literal URL's host — is checked against the grant here, at
-  // the call site, rather than folded into the declaration-to-declaration
-  // escalation below. The two are different findings: one names a line to
-  // change, the other names a callee whose contract is too wide.
+  // The static half of capability enforcement: a target this function's own
+  // body fixes in the source — a literal URL's host — is checked against the
+  // grant here, at the call site, rather than folded into the
+  // declaration-to-declaration escalation below. The two are different
+  // findings: one names a line to change, the other names a callee whose
+  // contract is too wide.
   const literalViolations = summary.calls.filter(
     (call) =>
       call.kind === "stub" &&
@@ -299,24 +298,25 @@ function capabilityUnknownCause(
   if (!calls.some(callLeavesUnknown)) {
     const dynamic = calls.find((call) => call.kind === "stub" && call.capabilityTargetUnknown);
     if (dynamic?.kind === "stub") {
-      return `calls ${dynamic.qualifiedName} with a target that is not a literal in the source, which only the runtime can match (DESIGN.md §4.4)`;
+      return `calls ${dynamic.qualifiedName} with a target that is not a literal in the source, which only the runtime can match`;
     }
   }
   return "reaches a call that could not be resolved";
 }
 
 /**
- * DESIGN.md §4.4's static half: an operation whose target the source fixes —
- * a literal URL — reaching outside what the function was granted.
+ * The static half of capability enforcement: an operation whose target the
+ * source fixes — a literal URL — reaching outside what the function was
+ * granted.
  *
  * Reported at the call site rather than at the declaration, because that is
  * the line to change, and separately from `AMB-E005`, because the finding is
  * different: nothing declared this requirement, the code performs it directly.
  *
  * No fix candidate. The two possible patches are widening the grant and
- * changing the URL, and Ambit cannot tell which the author meant; §5.3 forbids
- * inventing one for the sake of ranking, and widening a capability silently is
- * exactly the expansion of authority the tag exists to catch.
+ * changing the URL, and Ambit cannot tell which the author meant; a candidate
+ * is never invented for the sake of ranking, and widening a capability
+ * silently is exactly the expansion of authority the tag exists to catch.
  */
 function buildLiteralTargetViolation(
   propagated: PropagatedFunction,
@@ -389,7 +389,7 @@ function buildCapabilityEscalation(
 }
 
 /**
- * `@boundary` is an explicit trust declaration (DESIGN.md §4.6). Two ways to
+ * `@boundary` is an explicit trust declaration. Two ways to
  * write one that does nothing, both reported rather than accepted:
  * a missing `reason`, and no contract to trust in its place.
  */
@@ -404,7 +404,7 @@ function diagnoseBoundary(
         id: "AMB-E006",
         severity: "error",
         category: "boundary",
-        message: `${displayName(summary.id)} declares @boundary "${summary.boundary.raw}", which does not give the required reason= (DESIGN.md §4.6)`,
+        message: `${displayName(summary.id)} declares @boundary "${summary.boundary.raw}", which does not give reason=: a boundary must say why its body is excluded from analysis`,
         location: summary.location,
         fixes: [],
         docs: "docs/diagnostics/README.md#amb-e006",
@@ -452,9 +452,9 @@ function diagnoseBudget(
 }
 
 /**
- * DESIGN.md §4.4: "An entry point states `@entrypoint` and `@capabilities`
- * explicitly … Leaving them unspecified is warned about as equivalent to
- * `unknown`". An entrypoint is where the
+ * An entry point states `@entrypoint` and `@capabilities` explicitly, and
+ * leaving them unspecified is warned about as equivalent to `unknown`. An
+ * entrypoint is where the
  * runtime establishes a capability context; one with no capability set
  * establishes nothing to check against.
  */
@@ -601,7 +601,7 @@ const UNCARRIED_REASON: Record<SkippedFunctionKind, string> = {
 
 /**
  * A contract tag written on a function-like node the backend does not extract
- * (DESIGN.md §4.1 permits `@effects` on any function or method, but only an
+ * (`@effects` is permitted on any function or method, but only an
  * extracted node has a `SymbolId` to hang one on). Reported rather than
  * dropped, on the same principle as AMB-E002: a declaration that silently does
  * nothing looks like a guarantee and is not one.
@@ -628,8 +628,7 @@ export function diagnoseUncarriedContracts(
 
 /**
  * JSDoc and `ambit.config.ts` declare the same tag for one symbol and the two
- * do not agree (DESIGN.md §4.1: "If a symbol has both JSDoc and config,
- * JSDoc wins and the difference is warned about").
+ * do not agree. JSDoc wins, and the difference is warned about.
  *
  * A warning, not an error: JSDoc winning is the specified behaviour, so the
  * run is doing the right thing — but a config entry that is being ignored is
@@ -638,8 +637,8 @@ export function diagnoseUncarriedContracts(
  * disagreement is between two declarations, not an unverified path.
  *
  * No fix is offered. Which side is wrong is the author's decision — deleting
- * the config entry and rewriting the JSDoc are opposite intentions, and §5.3
- * forbids inventing a candidate to fill the slot.
+ * the config entry and rewriting the JSDoc are opposite intentions, and a
+ * candidate is never invented to fill the slot.
  */
 export function diagnoseContractDivergence(
   state: ReadonlyMap<SymbolId, PropagatedFunction>,
@@ -665,7 +664,7 @@ export function diagnoseContractDivergence(
 }
 
 /**
- * An exact `contracts` key that named no extracted symbol (DESIGN.md §4.1).
+ * An exact `contracts` key that named no extracted symbol.
  *
  * Same principle as AMB-E003: a declaration that silently applies to nothing
  * reads as a guarantee and is not one. Only *exact* keys are reported — a
@@ -725,7 +724,7 @@ const HANDLER_NOT_IN_THIS_FILE =
   "its handler is not a declaration in this file, so there is no JSDoc contract beside it to compare";
 
 /**
- * DESIGN.md §4.4: a literal spec on a `withAmbit(spec, handler)` or
+ * A literal spec on a `withAmbit(spec, handler)` or
  * `ambitHandler(spec, handler, decode)` naming a handler in the same file *is*
  * that handler's `@capabilities` / `@budget` (`summarize.ts`'s
  * `specContracts`). Writing the tag too stays legal, and this is what stops it
@@ -740,12 +739,10 @@ const HANDLER_NOT_IN_THIS_FILE =
  *
  * This compares the two **as source**, half by half: the capability set
  * (`AMB-E010`) and the budget (`AMB-E011`) are fixed by the source
- * independently, so one may be comparable when the other is not. §12's
- * "Mapping contracts to handlers" — matching a contract to a handler after a
- * build
- * strips the comments, or after a bundler moves it — stays open, and a half
- * this comparison cannot reach is reported (`AMB-W004`) rather than passed
- * over.
+ * independently, so one may be comparable when the other is not. Matching a
+ * contract to a handler after a build strips the comments, or after a bundler
+ * moves it, stays open (`docs/open-questions.md`), and a half this comparison
+ * cannot reach is reported (`AMB-W004`) rather than passed over.
  */
 export function diagnoseRuntimeWrappers(
   wrappers: readonly RuntimeWrapper[],
@@ -775,7 +772,7 @@ export function diagnoseRuntimeWrappers(
   return diagnostics;
 }
 
-/** The capability half of §4.4's agreement check. */
+/** The capability half of the spec/JSDoc agreement check. */
 function diagnoseWrapperCapabilities(
   wrapper: RuntimeWrapper,
   handler: FunctionSummary,
@@ -831,7 +828,7 @@ function diagnoseWrapperCapabilities(
 }
 
 /**
- * The budget half of §4.4's agreement check.
+ * The budget half of the spec/JSDoc agreement check.
  *
  * Its own id rather than AMB-E010's: that diagnostic's `contract` field is
  * capability text (`declared` / `required` / `excess`), and a budget
@@ -897,7 +894,7 @@ function uncomparedWrapper(
     id: "AMB-W004",
     severity: "warning",
     category: "capabilities",
-    message: `${wrapper.wrapper} here was not compared with a declared contract: ${reason}. A spec Ambit cannot read declares nothing, so the handler's own @capabilities / @budget is the only declaration here. The check is on the source only (DESIGN.md §4.4)`,
+    message: `${wrapper.wrapper} here was not compared with a declared contract: ${reason}. A spec Ambit cannot read declares nothing, so the handler's own @capabilities / @budget is the only declaration here. The check is on the source only`,
     location: wrapper.location,
     fixes: [],
     docs: "docs/diagnostics/README.md#amb-w004",
@@ -921,7 +918,8 @@ function sameCapabilityText(a: readonly string[], b: readonly string[]): boolean
  * its effects. A `state_write` that came from an assignment or a mutating
  * method has no operation to name, and an effect that reached `ownerId`
  * through its own `@effects` declaration alone has no site inside it — both
- * return `undefined` rather than a guess (DESIGN.md §5.2).
+ * return `undefined` rather than a guess: the field is omitted, and the
+ * declaration position is not used as a substitute.
  *
  * The first matching site in source order is reported when a function performs
  * the same effect more than once: one site is enough to send the reader to the
@@ -945,7 +943,7 @@ export function operationSite(
   };
 }
 
-/** `["pure"]` for the declared empty set, matching DESIGN.md §5.1's example; the known effects otherwise. */
+/** `["pure"]` for the declared empty set, as diagnostics spell it; the known effects otherwise. */
 function declaredContractList(
   declared: ReadonlySet<KnownEffect>,
 ): readonly (KnownEffect | "pure")[] {
@@ -960,9 +958,9 @@ function declaredContractList(
  * the order the backend discovered files in. That is not a property of the
  * tree being checked: a backend that walked the same directory differently,
  * or a resident path that patched one file's entry into a store rather than
- * rebuilding it, would report the same findings in a different order. DESIGN.md
- * §6.2's equivalence law is stated in bytes ("the same diagnostics ... in the
- * same order"), so the order has to be a function of the findings alone.
+ * rebuilding it, would report the same findings in a different order. A
+ * resident run must equal a cold run byte for byte — the same diagnostics in
+ * the same order — so the order has to be a function of the findings alone.
  *
  * Compared by code point (`<` / `>`), never `localeCompare`: the output is a
  * wire format read by `ambit diff` and by agents, and a locale-dependent order

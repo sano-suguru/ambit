@@ -1,5 +1,5 @@
 /**
- * DESIGN.md §3.5 gate 4 — the backend performance and memory comparison.
+ * M0.5 gate 4 (ADR-0001) — the backend performance and memory comparison.
  *
  * Not part of `pnpm test`. It spawns a Go engine and takes wall-clock
  * measurements, both of which belong to a deliberate, quiet-machine run rather
@@ -11,7 +11,7 @@
  *
  * What is compared
  * ----------------
- * The same *semantic* work on both backends, which §3.5 gate 4 requires
+ * The same *semantic* work on both backends, which gate 4 requires
  * ("Do not compare parse-only speed against a check that includes type
  * analysis"). Both probes walk every
  * project-local source file and, for each one:
@@ -132,7 +132,7 @@ function report(corpus: string, results: ReadonlyMap<string, readonly Measuremen
   console.log(`corpus: ${path.relative(REPO_ROOT, corpus) || corpus}`);
   console.log(`node: ${process.version}  platform: ${process.platform}/${process.arch}`);
 
-  // §3.5 gate 4 compares the same work. Two backends that resolved different
+  // Gate 4 compares the same work. Two backends that resolved different
   // numbers of calls did not do the same work, and the faster one may simply
   // have done less of it — so this is said before any timing is printed, not
   // in a footnote after it.

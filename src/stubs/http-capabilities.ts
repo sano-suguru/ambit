@@ -2,7 +2,8 @@ import type { Capability, LiteralArgument } from "../core/index.ts";
 import { withNodePrefix } from "./node-builtins.ts";
 
 /**
- * The static half of DESIGN.md §4.4's dual enforcement: which bundled
+ * The static half of capability enforcement (runtime hooks are the other):
+ * which bundled
  * operations carry
  * an `http:<method>:<host>` capability requirement, and how to read it off the
  * call site.
@@ -17,7 +18,7 @@ import { withNodePrefix } from "./node-builtins.ts";
  * quietly report "no requirement": that would turn a dynamic URL into a
  * guarantee it was allowed.
  *
- * Trust level: bundled with Ambit (DESIGN.md §8).
+ * Trust level: bundled with Ambit, the highest stub trust level.
  */
 interface HttpCapabilityRule {
   /** Which argument holds the URL. */
@@ -63,7 +64,7 @@ export interface HttpCapabilityRequirement {
  * The capability requirement of one call, or `undefined` when this table knows
  * of no target for it — which is not the same as "requires nothing": every
  * other operation simply has no rule here yet (`node:fs`, DB clients, LLM
- * SDKs), and §4.4's caveat forbids inferring one for a DB client from a SQL
+ * SDKs), and Ambit never infers one for a DB client from a SQL
  * string.
  */
 export function lookupHttpCapability(
@@ -100,8 +101,8 @@ export function lookupHttpCapability(
  * nothing and must not be read as `api.` — a prefix match would be a target
  * the author never granted.
  *
- * The host is taken as written (minus userinfo), port included: §4.4's own
- * example spells a target `http:get:localhost:8080`, and inventing or dropping
+ * The host is taken as written (minus userinfo), port included — a target
+ * is spelled `http:get:localhost:8080` — and inventing or dropping
  * a default port would make a grant and a requirement disagree over text
  * neither one wrote.
  */

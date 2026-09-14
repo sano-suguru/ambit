@@ -151,9 +151,9 @@ describe("a shadow backend that reports less is high-risk", () => {
 
   it("flags a lost `unknown` as shadow-less-unknown", () => {
     // `generics.ts#genericHigherOrder` on the conformance fixtures: a callback
-    // passed by reference must leave the call `unknown` (DESIGN.md §4.2 rule
-    // 4). A port that decided callability from the callee's declaration
-    // instead of the argument's type reported the call as fully analyzed.
+    // passed by reference must leave the call `unknown`. A port that decided
+    // callability from the callee's declaration instead of the argument's type
+    // reported the call as fully analyzed.
     const report = compare(
       { authority: [record("a.ts#f", [], true)] },
       { authority: [record("a.ts#f", [], false)] },

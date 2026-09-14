@@ -39,10 +39,12 @@ section explains them.
    deliverable: if the write-up would be longer than the patch, write the
    patch. A defect *outside* that scope is recorded in one line and left —
    abandoning the current goal to chase it is its own failure.
-7. **Do not renumber a `docs/DESIGN.md` chapter without migrating every
-   reference in the same change.** `src/` and `test/` cite them by number in
-   the hundreds, so the numbers are effectively an API; leaving a heading
-   behind as a pointer is the cheaper move, but it is a choice, not a law.
+7. **Code does not cite `docs/DESIGN.md` by section number or title.** A
+   comment in `src/`, `test/` or `scripts/` states the rule it relies on in its
+   own words, and CLI output never points at a document the package does not
+   ship. ADRs may be cited by number. Documents under `docs/` do cite chapters
+   by number, so renumbering one still means migrating every reference there in
+   the same change.
 8. **Keep the compiler out of `src/core/` and `src/stubs/`.** Only
    `src/checker/backend/legacy-ts.ts` may import `typescript`.
 9. **Do not add speculative architecture.** "May be useful later" is not a
@@ -314,8 +316,7 @@ as the specification/status one: a sentence that would still be true if all the
 code were discarded **and** that a reader has to know to use Ambit correctly
 belongs in `docs/DESIGN.md`; a sentence that only explains how the project
 arrived there belongs in the ADR. Do not renumber a `docs/DESIGN.md` chapter
-without migrating every reference in the same change — `src/` and `test/` cite
-them by number in the hundreds.
+without migrating every reference in the documents in the same change.
 
 RFC procedure (`docs/DESIGN.md` §9) applies from 1.0, or from the first
 external adopter, whichever comes first (§9.1) — **not** from the first npm

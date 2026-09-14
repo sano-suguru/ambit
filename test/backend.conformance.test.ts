@@ -6,9 +6,9 @@ import { summarizeExtractedFiles } from "../src/checker/summarize.ts";
 import type { ExtractedProject } from "../src/core/index.ts";
 
 /**
- * DESIGN.md §3.5 gate 1 — the backend adoption gate's API-conformance suite.
+ * The API-conformance suite of backend adoption (ADR-0001 gate 1).
  *
- * §3.5 names the shapes: "aliased imports / re-exports, generics, overloads,
+ * The gate names the shapes: "aliased imports / re-exports, generics, overloads,
  * callbacks, unions, `any`, recursion, JSDoc, and Unicode positions". The
  * first two and `callback` are
  * covered against `backend-smoke` / `cross-module` in
@@ -18,7 +18,7 @@ import type { ExtractedProject } from "../src/core/index.ts";
  * Two things separate this file from that one. It asserts against the
  * `TsBackend` *interface* — nothing here reaches for a `ts.Node`, so a second
  * implementation is judged by the same assertions. And it states the
- * requirement §3.2 makes explicit: "That a value has a type, or that
+ * requirement the spec makes explicit: "That a value has a type, or that
  * `getResolvedSignature` succeeds, does not mean the implementation reached at
  * runtime is uniquely determined."
  * Every case below is a shape where the compiler has the type and the *call
@@ -49,7 +49,7 @@ async function callsOf(fileName: string, id: string) {
   return (await fn(fileName, id))?.calls ?? [];
 }
 
-describe("backend conformance: SymbolId uniqueness (§3.5 gate 1)", () => {
+describe("backend conformance: SymbolId uniqueness", () => {
   /**
    * `propagate` reaches a fixed point by iterating until no function's effect
    * set changes, and argues termination from the union being monotonic. That
@@ -84,10 +84,10 @@ describe("backend conformance: SymbolId uniqueness (§3.5 gate 1)", () => {
   });
 });
 
-describe("backend conformance: static and instance members (§4.1 (a))", () => {
+describe("backend conformance: static and instance members", () => {
   /**
    * `Cache.load` and `Cache.static load` are two functions with two bodies, so
-   * they must be two declaration paths. Sharing one is the shape §4.1 calls "a
+   * they must be two declaration paths. Sharing one is what the spec calls "a
    * termination requirement as well as a notation": the two summaries disagree
    * (one is `network`, one is `pure`), so `propagate` would overwrite one with
    * the other on every pass and never converge. The uniqueness and fixed-point
@@ -134,7 +134,7 @@ describe("backend conformance: static and instance members (§4.1 (a))", () => {
   });
 });
 
-describe("backend conformance: overloads (§3.5 gate 1)", () => {
+describe("backend conformance: overloads", () => {
   /**
    * An overload set is one runtime function. The signatures are types; the
    * implementation is the code. Indexing the signatures as functions of their
@@ -172,8 +172,8 @@ describe("backend conformance: overloads (§3.5 gate 1)", () => {
    * An overload set with no implementation in the project — `declare function`
    * — has nothing to propagate from. Resolving the call to the bodyless
    * declaration would infer an empty effect set and report a `network` call as
-   * `pure`; DESIGN.md §3.4 forbids turning "could not be analyzed" into "no
-   * violation", so it is `unknown` with a reason instead.
+   * `pure`; Ambit never turns "could not be analyzed" into "no violation",
+   * so it is `unknown` with a reason instead.
    */
   it("leaves a call to a declaration with no implementation unresolved", async () => {
     const calls = await callsOf("overloads.ts", "overloads.ts#callsAmbientOverload");
@@ -235,7 +235,7 @@ describe("backend conformance: overloads (§3.5 gate 1)", () => {
   });
 });
 
-describe("backend conformance: generics (§3.5 gate 1)", () => {
+describe("backend conformance: generics", () => {
   it("resolves a call to a generic function with an explicit type argument", async () => {
     const calls = await callsOf("generics.ts", "generics.ts#callsGeneric");
     expect(calls.map((c) => c.resolvedCallee)).toEqual(["generics.ts#identity"]);
@@ -247,9 +247,10 @@ describe("backend conformance: generics (§3.5 gate 1)", () => {
   });
 
   /**
-   * §4.2 rule 4 does not soften because the callee is generic: a callback
-   * passed by reference is never walked, so the allowlisted method it is
-   * handed to cannot be trusted as pure.
+   * Callback effects come from the actual argument, and that does not soften
+   * because the callee is generic: a callback passed by reference is never
+   * walked, so the allowlisted method it is handed to cannot be trusted as
+   * pure.
    */
   it("still refuses a pure verdict for a callback passed by reference to a generic", async () => {
     const calls = await callsOf("generics.ts", "generics.ts#genericHigherOrder");
@@ -260,8 +261,9 @@ describe("backend conformance: generics (§3.5 gate 1)", () => {
 });
 
 /**
- * §4.2 rule 4 at the shape callback APIs actually declare. `cb?: (v: T) => R`
- * types both the parameter and the argument as
+ * Callback effects inferred from the actual argument, at the shape callback
+ * APIs actually declare. `cb?: (v: T) => R` types both the parameter and
+ * the argument as
  * `((v: T) => R) | null | undefined`, and a union reports no call signatures of
  * its own however callable its constituents are. A backend that asks the union
  * directly answers "not callable", skips the reference, and lets the opaque
@@ -269,7 +271,7 @@ describe("backend conformance: generics (§3.5 gate 1)", () => {
  * `promise.then(onFulfilled, onRejected)` summarized as `known-pure`
  * (`docs/measurements/2026-09-12-optional-callback-opacity.md`).
  */
-describe("backend conformance: optional callback slots (§3.5 gate 1)", () => {
+describe("backend conformance: optional callback slots", () => {
   it("marks an optional callback passed by reference as opaque", async () => {
     const calls = await callsOf(
       "optional-callbacks.ts",
@@ -281,8 +283,9 @@ describe("backend conformance: optional callback slots (§3.5 gate 1)", () => {
   });
 
   /**
-   * The direction §3.4 forbids, asserted where it would be lost: a site whose
-   * callbacks cannot be walked must not summarize as a proven-pure builtin.
+   * The direction Ambit never allows (unanalyzed read as clean), asserted
+   * where it would be lost: a site whose callbacks cannot be walked must not
+   * summarize as a proven-pure builtin.
    */
   it("refuses a known-pure verdict for that site", async () => {
     const { files } = await extract();
@@ -371,7 +374,7 @@ describe("backend conformance: optional callback slots (§3.5 gate 1)", () => {
   });
 });
 
-describe("backend conformance: unions (§3.5 gate 1)", () => {
+describe("backend conformance: unions", () => {
   /**
    * Both union members declare `run`, so the call type-checks and
    * `getResolvedSignature` succeeds — and the implementation that runs is
@@ -396,11 +399,11 @@ describe("backend conformance: unions (§3.5 gate 1)", () => {
   });
 });
 
-describe("backend conformance: any and the non-null assertion (§3.5 gate 1, §4.7)", () => {
+describe("backend conformance: any and the non-null assertion", () => {
   /**
-   * §12 requires that `as any` and `!` are not treated alike. They differ in
-   * what they do to the *declaration*: a cast to `any` destroys it, a non-null
-   * assertion keeps it. The two cases below are the discriminator, and they
+   * `as any` and `!` must not be treated alike: a non-null assertion is not a
+   * call through `any`. They differ in what they do to the *declaration*: a
+   * cast to `any` destroys it, a non-null assertion keeps it. The two cases below are the discriminator, and they
    * must not report the same reason.
    */
   it("reports a call through an `as any` cast as any-typed", async () => {
@@ -420,12 +423,13 @@ describe("backend conformance: any and the non-null assertion (§3.5 gate 1, §4
   });
 });
 
-describe("backend conformance: the object-literal receiver (§4.2 rule 7)", () => {
+describe("backend conformance: the object-literal receiver", () => {
   /**
-   * `X.p()` where `X` is a `const` bound to one object literal. §4.2 rule 7
-   * lets the *value* decide the target, which is the only way this resolves:
-   * the checker answers with the annotation's member signature, so a backend
-   * that asks it the question gets `Dispatcher.run` and no declaration in this
+   * `X.p()` where `X` is a `const` bound to one object literal. Property calls
+   * resolve from the receiver's *value*, not its annotation, which is the only
+   * way this resolves: the checker answers with the annotation's member
+   * signature, so a backend that asks it the question gets `Dispatcher.run`
+   * and no declaration in this
    * project. Ambit's own `legacyTsBackend: TsBackend = { extractProject }` is
    * this shape, so a backend that cannot do it loses a resolved edge on
    * Ambit's own source.
@@ -463,9 +467,9 @@ describe("backend conformance: the object-literal receiver (§4.2 rule 7)", () =
 
   /**
    * `const anyReceiver: any = { run: pureTarget }` — the `any` is on the
-   * annotation, and rule 7 does not read the annotation. The value is still
-   * exactly one literal, so the call is resolved rather than `any-typed`:
-   * §4.7's "an `any` cast destroys the declaration" is about the *callee*
+   * annotation, and receiver resolution does not read the annotation. The
+   * value is still exactly one literal, so the call is resolved rather than
+   * `any-typed`: "an `any` cast destroys the declaration" is about the *callee*
    * expression (`callsThroughAnyCast` above), not about a receiver whose
    * initializer is right there.
    */
@@ -475,11 +479,11 @@ describe("backend conformance: the object-literal receiver (§4.2 rule 7)", () =
   });
 });
 
-describe("backend conformance: the constructed-instance receiver (§4.2 rule 7)", () => {
+describe("backend conformance: the constructed-instance receiver", () => {
   /**
-   * `X.p()` where `X` is a `const` bound to one `new`. §4.2 rule 7 names this
-   * and the object-literal receiver in the same breath, and the premise is the
-   * same one: `const` fixes the binding, not the object.
+   * `X.p()` where `X` is a `const` bound to one `new`. The receiver rule names
+   * this and the object-literal receiver in the same breath, and the premise
+   * is the same one: `const` fixes the binding, not the object.
    *
    * Every receiver below carries a type annotation, and that is what makes
    * these tests of the rule rather than of the checker. Without one the
@@ -542,9 +546,9 @@ describe("backend conformance: the constructed-instance receiver (§4.2 rule 7)"
   });
 });
 
-describe("backend conformance: recursion (§3.5 gate 1)", () => {
+describe("backend conformance: recursion", () => {
   /**
-   * §4.2 rule 7 iterates the propagation to a fixed point; that needs the
+   * Propagation iterates call-graph cycles to a fixed point; that needs the
    * cycle's edges to be present as resolved call targets in the first place.
    */
   it("reports a self-call as a resolved edge back to the same function", async () => {
@@ -565,9 +569,9 @@ describe("backend conformance: recursion (§3.5 gate 1)", () => {
   });
 });
 
-describe("backend conformance: JSDoc tag locations (§3.5 gate 1)", () => {
+describe("backend conformance: JSDoc tag locations", () => {
   /**
-   * §5.3 requires `fixes[].edits` to be a concrete, applicable patch, and a
+   * `fixes[].edits` must be a concrete, applicable patch, and a
    * patch that replaces a contract tag needs the tag's own range — not the
    * declaration's, and not a line guessed from the comment block.
    */
@@ -586,7 +590,7 @@ describe("backend conformance: JSDoc tag locations (§3.5 gate 1)", () => {
   });
 });
 
-describe("backend conformance: Unicode positions (§3.5 gate 1)", () => {
+describe("backend conformance: Unicode positions", () => {
   /**
    * `SourceLocation` is 1-based UTF-16 code units. Three widths disagree on
    * the fixture's lines, so a backend that handed back byte offsets or code
@@ -631,12 +635,12 @@ describe("backend conformance: Unicode positions (§3.5 gate 1)", () => {
 });
 
 /**
- * DESIGN.md §4.1 (a), "The inline-callback owner". A backend has to produce
+ * The inline-callback owner (`<inline callbacks>`). A backend has to produce
  * this entry, and has to produce the per-body split beside it: without the
- * split, one id standing for several bodies is a merge into silence, and §6.3
- * has nothing to count.
+ * split, one id standing for several bodies is a merge into silence, and the
+ * multiset comparison over owned bodies has nothing to count.
  */
-describe("backend conformance: the inline-callback owner (§4.1 (a))", () => {
+describe("backend conformance: the inline-callback owner", () => {
   const FILE = "inline-callbacks.ts";
   const OWNER = "inline-callbacks.ts#<inline callbacks>";
 

@@ -1,4 +1,4 @@
-/** Declared by this project, not by a package: §4.2 rule 7 still decides it. */
+/** Declared by this project, not by a package: its type still resolves nothing. */
 export interface Store {
   read(key: string): string | undefined;
 }

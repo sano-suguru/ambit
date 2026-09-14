@@ -1,5 +1,5 @@
 // Calling through a receiver bound by `const` to one object literal
-// (DESIGN.md §4.2 rule 7). The member is found in the literal itself, so a
+// (and nothing else). The member is found in the literal itself, so a
 // type annotation on the receiver — which makes the checker return the
 // annotation's member signature instead of the literal's own member — does not
 // hide the target. This is the shape of Ambit's own

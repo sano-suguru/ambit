@@ -142,7 +142,7 @@ describe("diffAuthority", () => {
   });
 
   it("a deletion alone is not an increase, and neither is a decrease alone", () => {
-    // The two cases DESIGN.md §6 reports and passes: exit 0, not silence.
+    // Two cases `ambit diff` reports and passes: exit 0, not silence.
     const deletionOnly = diffAuthority([record("src/a.ts#f", { declared: ["network"] })], []);
     expect(hasAuthorityIncrease(deletionOnly)).toBe(false);
     expect(deletedSymbols(deletionOnly)).toHaveLength(1);
@@ -274,7 +274,7 @@ describe("diffAuthority", () => {
 });
 
 /**
- * Carrying a symbol across a file git reported as renamed (DESIGN.md §6.3).
+ * Carrying a symbol across a file git reported as renamed.
  *
  * The rename map is an input, not something derived here: this module runs no
  * git, and matching two symbols on anything weaker than git's own report
@@ -363,7 +363,7 @@ describe("diffAuthority with renamed files", () => {
 });
 
 /**
- * DESIGN.md §6.3: authority is compared as a multiset over the bodies a
+ * Authority is compared as a multiset over the bodies a
  * symbol owns. A record carrying no `bodies` owns one, whose authority is the
  * record's own — which is why every case above, written without the field,
  * means what it used to.
@@ -415,12 +415,12 @@ describe("a symbol that owns more than one body", () => {
   });
 
   it("refuses to call a body swap unchanged, because it cannot tell it from a reorder", () => {
-    // The whole of §6.4's third shape. `[network, pure]` becoming
+    // The whole of the attribution shape. `[network, pure]` becoming
     // `[pure, network]` is one of two stories: the handlers were reordered, or
     // the authority moved from the first to the second. The bodies have no
     // names, so the two are the same pair of sequences — and one of them is a
     // public route that can now reach the network. Calling it unchanged would
-    // be the guess §3.4 forbids.
+    // be a guess reported as a clean result.
     const diff = diffAuthority(
       [
         record("r.ts#<inline callbacks>", {
@@ -566,7 +566,7 @@ describe("a symbol that owns more than one body", () => {
     // narrowed, so `removed` names `http:get:*` and nothing increased — but a
     // public route can now reach a host only an admin route could, and that is
     // what the third shape is for. Read as raw tokens this looks like one
-    // capability disappearing and another appearing; read as §4.4's
+    // capability disappearing and another appearing; read as capability
     // containment, `http:get:api.example.com` is held by one body on each side
     // and by a different one.
     const diff = diffAuthority(
@@ -663,7 +663,7 @@ describe("a symbol that owns more than one body", () => {
 });
 
 /**
- * DESIGN.md §6.4's third shape is about *attribution*, not only about
+ * The unmatched-attribution shape is about *attribution*, not only about
  * authority: an operation the analysis could not read moving from one
  * anonymous handler to another is the same sentence about a different place,
  * and the counts do not move.
@@ -703,7 +703,7 @@ describe("an unresolvable operation moving between anonymous bodies", () => {
       bodies: [plainBody, unknownBody(opaque("client.delete"))],
     });
     const diff = diffAuthority([base], [head]);
-    // The owner's own multiset is identical, so §6.4's second shape says
+    // The owner's own multiset is identical, so the widened-unresolved shape says
     // nothing — which is correct, and is why the third shape has to exist.
     expect(unresolvedGains(diff)).toHaveLength(0);
     expect(attributionUnmatched(diff)).toHaveLength(1);
@@ -742,7 +742,7 @@ describe("an unresolvable operation moving between anonymous bodies", () => {
   });
 
   it("says nothing twice when the operation was added rather than moved", () => {
-    // §6.4's second shape already names it, so the third does not repeat it.
+    // The widened-unresolved report names it; attribution does not repeat it.
     const diff = diffAuthority(
       [record("r.ts#<inline callbacks>", { unknown: true, bodies: [unknownBody(), plainBody] })],
       [

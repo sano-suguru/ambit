@@ -16,8 +16,8 @@ import { githubAnnotation, workspacePath } from "./github.ts";
 
 /**
  * Exit codes (plan step 9): distinguish "checked, no error-level violation"
- * from "the check itself could not run" (DESIGN.md §3.4 — never turn an
- * analysis failure into "no violations").
+ * from "the check itself could not run" — never turn an analysis failure
+ * into "no violations".
  */
 const USAGE = `Usage: ambit check <dir> [--format json|github] [--coverage] [--strict]
        ambit init  <dir> [--format json] [--config]   propose @effects for undeclared functions
@@ -31,7 +31,7 @@ const EXIT_ANALYSIS_FAILED = 2;
 
 /**
  * `diff` shells out to git and writes a worktree, so the entry point's own
- * contract is wider than `check`'s alone (DESIGN.md §6).
+ * contract is wider than `check`'s alone.
  *
  * @effects fs_read, fs_write, process
  */
@@ -64,7 +64,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     process.stdout.write(formatDiagnostic(diagnostic, args));
   }
 
-  // The per-function authority records (DESIGN.md §5.1). Emitted after the
+  // The per-function authority records. Emitted after the
   // diagnostics and before the trailing `summary` line, so a consumer that
   // reads the last record as the summary keeps working, and only for `check`:
   // `init` reports proposals about contracts that do not exist yet.
@@ -75,7 +75,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 
   // Always report what was analyzed — a silent, empty result must never
-  // read the same as "checked and found nothing" (DESIGN.md §3.4). The
+  // read the same as "checked and found nothing". The
   // detailed unresolved-reason/name breakdown is opt-in via --coverage.
   process.stdout.write(
     args.format === "json" ? formatSummaryJson(coverage) : formatSummaryText(coverage),
@@ -95,8 +95,7 @@ export async function main(argv: readonly string[]): Promise<number> {
 }
 
 /**
- * `ambit diff <ref>`: what authority the working tree gained over `ref`
- * (DESIGN.md §6).
+ * `ambit diff <ref>`: what authority the working tree gained over `ref`.
  *
  * @effects process, fs_read, fs_write
  */
@@ -106,7 +105,7 @@ async function diffCommand(args: Args): Promise<number> {
     result = await runDiff(args.ref, args.dir);
   } catch (error) {
     // Either side failing to analyze is exit 2, never 0: a comparison that
-    // could not be made must not read as "nothing increased" (DESIGN.md §3.4).
+    // could not be made must not read as "nothing increased".
     process.stderr.write(`ambit: diff failed: ${errorMessage(error)}\n`);
     return EXIT_ANALYSIS_FAILED;
   }
@@ -114,14 +113,14 @@ async function diffCommand(args: Args): Promise<number> {
   process.stdout.write(
     args.format === "github" ? formatDiffGithub(result, options) : formatDiffText(result, options),
   );
-  // An increase with no approval in force fails (DESIGN.md §6.3). An increase
+  // An increase with no approval in force fails. An increase
   // carrying an approval added in this same comparison is reported and passes;
   // so are a decrease and a deletion, because taking authority away is not the
   // thing this command watches for, and failing on it would give an author a
   // reason to leave a contract alone.
   //
   // `--strict` adds the one other failure: the analysis reaching less of the
-  // tree than it did (§6.4). It is not an increase, holds no approval, and is
+  // tree than it did. It is not an increase, holds no approval, and is
   // reported at exit 0 without the flag.
   return hasUnapprovedIncrease(result) || failsStrict(result, options) ? EXIT_VIOLATIONS : EXIT_OK;
 }
@@ -133,11 +132,11 @@ interface Args {
   readonly ref: string;
   readonly format: OutputFormat;
   readonly coverage: boolean;
-  /** `--strict`: promote the `unknown` warnings to errors (DESIGN.md §4.2 rule 3). */
+  /** `--strict`: promote the `unknown` warnings to errors. */
   readonly strict: boolean;
-  /** `init --config`: also propose `ambit.config.ts` entries for declarations JSDoc cannot carry (§4.1 (a)). */
+  /** `init --config`: also propose `ambit.config.ts` entries for declarations JSDoc cannot carry. */
   readonly config: boolean;
-  /** Set when argv could not be parsed; `main` reports it and exits 2 rather than running with a silently-ignored option (DESIGN.md §3.4). */
+  /** Set when argv could not be parsed; `main` reports it and exits 2 rather than running with a silently-ignored option. */
   readonly error?: string;
 }
 
@@ -206,9 +205,9 @@ function parseArgs(argv: readonly string[]): Args {
     if (second !== undefined) dir = second;
     // A flag `diff` does not act on is an error, not something to drop
     // quietly: an author who wrote it and got a green diff would read it as
-    // "that option found nothing" (DESIGN.md §3.4, the same reason an unknown
-    // option exits 2 rather than running). `--strict` is acted on — it is
-    // §6.4's gate — and is therefore not in this list.
+    // "that option found nothing" (the same reason an unknown option exits 2
+    // rather than running). `--strict` is acted on — it gates on the analysis
+    // reaching less than it did — and is therefore not in this list.
     const inert = [
       ...(coverage ? ["--coverage"] : []),
       ...(config ? ["--config"] : []),
@@ -236,10 +235,10 @@ function parseArgs(argv: readonly string[]): Args {
 
 /**
  * `--format` values. `text` is for a human at a terminal, `json` is the NDJSON
- * of DESIGN.md §5.1 for agents and tools, and `github` renders the same
- * structured diagnostic as GitHub Actions workflow commands so a CI run
- * annotates the offending lines — §6: "CI integrates via the exit code and
- * the structured output. A dedicated CI plugin is not required".
+ * for agents and tools, and `github` renders the same structured diagnostic
+ * as GitHub Actions workflow commands so a CI run annotates the offending
+ * lines — CI integrates via the exit code and the structured output, with no
+ * dedicated CI plugin.
  */
 const OUTPUT_FORMATS = ["text", "json", "github"] as const;
 
@@ -265,7 +264,7 @@ const GITHUB_COMMAND: Readonly<Record<Diagnostic["severity"], string>> = {
  * One GitHub Actions workflow command per diagnostic
  * (`::error file=...,line=...::message`), which is what makes a failing check
  * annotate the offending line in a pull request without installing anything —
- * DESIGN.md §6's "A dedicated CI plugin is not required".
+ * no dedicated CI plugin is required.
  *
  * The call path and the operation site are folded into the message with `%0A`
  * so the annotation is self-sufficient: a reader on the diff sees every hop
@@ -292,9 +291,9 @@ function formatJson(diagnostic: Diagnostic): string {
 }
 
 /**
- * Human-readable form, rendered from the structured diagnostic (DESIGN.md §5:
- * "Human-facing display is implemented as a rendering of the structured
- * diagnostics").
+ * Human-readable form, rendered from the structured diagnostic: human-facing
+ * display is a rendering of the structured diagnostics, never a separate
+ * report.
  *
  * The header line reports the function that declared the contract, at its own
  * `file:line`. `contract.via` — the call path from there to the function that
@@ -320,8 +319,8 @@ function formatText(diagnostic: Diagnostic): string {
  *
  * Empty when the diagnostic has no hops: the effect is performed in the
  * reported function's own body, so there is no call path, and a path that does
- * not exist is not synthesized (DESIGN.md §5.3 — the same rule that forbids
- * fabricating a fix candidate).
+ * not exist is not synthesized — the same rule that forbids fabricating a fix
+ * candidate.
  */
 function viaPath(diagnostic: Diagnostic): readonly string[] {
   const contract = diagnostic.contract;
@@ -415,7 +414,7 @@ function errorMessage(error: unknown): string {
  * ../ambit-ts/dist/cli/main.js`), and `process.argv[1]` is then the *symlink*
  * path while `import.meta.url` is the resolved target — so comparing the two
  * directly makes the installed CLI silently do nothing and exit 0, which reads
- * exactly like "checked, no violations" (DESIGN.md §3.4 forbids that). The
+ * exactly like "checked, no violations", which Ambit never allows. The
  * symlink is resolved before comparing. `pathToFileURL` (rather than a plain
  * `file://` template) also handles a path containing spaces.
  */

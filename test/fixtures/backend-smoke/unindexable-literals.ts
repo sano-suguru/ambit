@@ -4,7 +4,7 @@
 //
 // Computed, string and numeric keys have no stable declaration-path spelling
 // (the path is "."-joined, so `{ "a.b": … }` would be indistinguishable from
-// nesting — DESIGN.md §5.3). Literals that are not a module-scope `const`'s
+// nesting). Literals that are not a module-scope `const`'s
 // own initializer have no declaration path to hang a member off at all.
 
 export const computedKey = {

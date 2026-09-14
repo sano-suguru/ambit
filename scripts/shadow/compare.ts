@@ -13,7 +13,7 @@
  * - **Direction is recorded, not just difference.** A shadow backend that
  *   reports *less* authority, or *less* `unknown`, than the authoritative one
  *   is the dangerous direction: it is the shape in which a real effect
- *   disappears and a check passes that should not (DESIGN.md §3.4). Those are
+ *   disappears and a check passes that should not. Those are
  *   `risk: "high"`, listed first, and their count is printed even when it is
  *   zero — an absent number reads as "not measured".
  * - **"Not yet ported" is not "disagrees".** The shadow backend implements a
@@ -80,7 +80,7 @@ export type DivergenceClassification =
  *
  * - `authority` — every token whose presence means authority was *reported*:
  *   an effect, a capability, a stub match, a wrapper budget, an error
- *   diagnostic. Losing one is DESIGN.md §3.4's forbidden direction.
+ *   diagnostic. Losing one is the direction that must never pass silently.
  * - `unknown` — every token whose presence means the analysis *admitted it did
  *   not know*: an `unknown` flag, an unresolved reason, an opaque callback.
  *   Losing one is the same failure wearing a different hat — a site that
@@ -441,7 +441,7 @@ function callSignal(call: CallFacts): Signal {
   if (call.callbackByReference) unknown.push("callbackByReference");
   // A mutation's parts belong on opposite sides. What was mutated and whether
   // it escapes is reported authority; `unknownCallback` is the site admitting
-  // that a callable it was handed is opaque (DESIGN.md §4.2 rule 4). Folding
+  // that a callable it was handed is opaque. Folding
   // the rendered triple into one token made the conservative side — the one
   // that adds `unknownCallback` — read as *losing* authority, which inverts
   // the very direction this is here to get right.

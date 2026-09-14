@@ -5,7 +5,7 @@ import { legacyTsBackend } from "../src/checker/index.ts";
 import type { ExtractedProject, SkippedFunctionKind } from "../src/core/index.ts";
 
 /**
- * `ExtractedProject.modules` — the per-file record DESIGN.md §6.2's resident
+ * `ExtractedProject.modules` — the per-file record the resident check path's
  * store is keyed by.
  *
  * Two properties are asserted, and they are the two that decide whether a
@@ -18,7 +18,7 @@ import type { ExtractedProject, SkippedFunctionKind } from "../src/core/index.ts
  * 2. **The per-file slices re-sum to the project aggregates.** The cold path
  *    reads the project-level fields and the resident store re-sums the
  *    slices; if the two disagree, `check --coverage` disagrees with itself
- *    across the two paths, which §6.2's equivalence law forbids.
+ *    across the two paths, which the resident-equals-cold law forbids.
  */
 
 const FIXTURES = path.resolve(import.meta.dirname, "fixtures");
@@ -76,7 +76,7 @@ describe("ExtractedProject.modules", () => {
       [],
     );
     // `missing-module-import.ts` imports "./no-such-file.ts". No resolution,
-    // so no edge — which is exactly why §6.2 makes a file *addition* re-check
+    // so no edge — which is exactly why a file *addition* re-checks
     // everything instead of closing over the edges already held.
     expect(project.modules.find((m) => m.filePath === "missing-module-import.ts")?.imports).toEqual(
       [],

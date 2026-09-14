@@ -58,7 +58,7 @@ export const DYNAMIC_BY_ADAPTER = ambitHandler({ capabilities: built }, dynamicB
   "",
 ]);
 
-// --- §4.4's agreement check on `@budget` ---------------------------------
+// --- The spec/JSDoc agreement check on `@budget` -------------------------
 
 /**
  * @entrypoint
@@ -146,7 +146,7 @@ export const DYNAMIC_BUDGET = ambitHandler(
   () => [""],
 );
 
-// --- The spec as the declaration (DESIGN.md §4.4) -------------------------
+// --- The spec as the declaration ------------------------------------------
 
 /**
  * @entrypoint
@@ -194,7 +194,7 @@ export function specNotLiteral(id: string): string {
 // that stays visible as AMB-W004 plus AMB-W002.
 export const SPEC_NOT_LITERAL = ambitHandler({ capabilities: built }, specNotLiteral, () => [""]);
 
-// --- The Next.js adapter reads the same way (DESIGN.md §4.4) --------------
+// --- The Next.js adapter reads the same way -------------------------------
 
 /**
  * @entrypoint

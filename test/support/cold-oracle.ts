@@ -37,7 +37,7 @@ try {
   process.stdout.write(renderAnalysis(await analyze(dir)));
 } catch (error) {
   // Exit 2, matching `ambit check`: an analysis that could not run must never
-  // be reported as an empty successful result (DESIGN.md §3.4).
+  // be reported as an empty successful result.
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   process.exit(2);
 }

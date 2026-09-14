@@ -28,16 +28,16 @@ import { isFirstArgumentMutator, isMutatingBuiltin } from "../../stubs/mutating-
 import type { ResidentNarrowing } from "../resident.ts";
 
 /**
- * `TsBackend` implementation on the TypeScript Compiler API (DESIGN.md §3.4).
+ * `TsBackend` implementation on the TypeScript Compiler API.
  *
  * **This is the adopted backend**, not a placeholder. M0.5's comparison ran and
- * chose it — DESIGN.md §3.5 and `docs/adr/0001-analysis-backend.md`, with the measurements
+ * chose it — `docs/adr/0001-analysis-backend.md`, with the measurements
  * in `docs/status.md`. The native TypeScript 7 engine (Go) was faster on every
  * corpus and was still not adopted: its API is published entirely under
  * `unstable/`, it answers from a stale snapshot unless told which files
- * changed, and none of its speed was needed to meet a threshold. §3.5 also
+ * changed, and none of its speed was needed to meet a threshold. DESIGN.md also
  * records what would reopen the decision; changing the default now requires an
- * RFC (§9).
+ * RFC.
  *
  * The name `typescript-legacy` is the engine id in diagnostics and predates
  * that decision. It distinguishes the JavaScript implementation from the Go
@@ -48,7 +48,8 @@ import type { ResidentNarrowing } from "../resident.ts";
  * is the ONLY file allowed to import `typescript`, and no `ts.Node`,
  * `ts.Symbol`, or `ts.Type` may be returned from `extractProject` — see
  * `src/core/backend.ts`. Adoption makes the boundary more useful, not less: it
- * is what will let §3.5's review happen without touching the contract layer.
+ * is what will let a backend re-evaluation happen without touching the
+ * contract layer.
  */
 export const legacyTsBackend: TsBackend = {
   name: "typescript-legacy",
@@ -67,8 +68,8 @@ async function extractProject(rootDir: string): Promise<ExtractedProject> {
 
 /**
  * A missing/non-directory target must fail loudly, not silently produce zero
- * files (DESIGN.md §3.4: "Do not convert a failure to start, an unsupported
- * setting, or an analysis failure into 'no violations'"). Without this check,
+ * files: a failure to start, an unsupported setting, or an analysis failure is
+ * never converted into "no violations". Without this check,
  * `ts.findConfigFile` still walks upward from a nonexistent path and can find
  * an unrelated ancestor tsconfig.json, silently analyzing the wrong (or no)
  * files.
@@ -91,11 +92,11 @@ function resolveProjectRoot(rootDir: string): string {
  * resolves calls through, and a call in a re-extracted file can resolve into a
  * declaration in any other file — so a map built over a subset would turn a
  * resolved call into an `unresolved` one, which is a violation quietly becoming
- * an `unknown` (DESIGN.md §3.4). It is a syntactic walk with no checker in it,
+ * an `unknown`. It is a syntactic walk with no checker in it,
  * which is what makes rebuilding it every generation affordable.
  *
  * `only` restricts **pass 2** — the checker-driven half — to a set of
- * root-relative paths, for the resident path's reverse-import closure (§6.2).
+ * root-relative paths, for the resident path's reverse-import closure.
  * Absent means the whole project, which is what `extractProject` passes and
  * what every full rebuild passes.
  */
@@ -124,13 +125,13 @@ function extractFromProgram(
     const mintedInFile = new Set<SymbolId>();
     for (const [node, declPath] of declarations) {
       const id = symbolId(relativePath(absoluteRoot, sourceFile), declPath);
-      // DESIGN.md §4.1: "the declaration path and the function the backend
-      // returns must be one to one, or §4.2 rule 7's fixed-point iteration
-      // does not converge". Two declarations under one id do not make a wrong
-      // answer — they make no answer: `propagate` overwrites one summary with
-      // the other every pass and `ambit check` never returns. So a residual
-      // collision has to stop the run rather than reach the fixed point
-      // (§3.4 — a failure to analyze is never reported as "no violations").
+      // The declaration path and the function the backend returns must be one
+      // to one, or propagation's fixed-point iteration does not converge. Two
+      // declarations under one id do not make a wrong answer — they make no
+      // answer: `propagate` overwrites one summary with the other every pass
+      // and `ambit check` never returns. So a residual collision has to stop
+      // the run rather than reach the fixed point (a failure to analyze is
+      // never reported as "no violations").
       //
       // Checked in pass 1, so a collision anywhere in the project stops a
       // partial update too — the resident path must not commit a generation
@@ -140,7 +141,7 @@ function extractFromProgram(
         throw new Error(
           `two declarations share the symbol id ${id} (the second is at line ${line}): ` +
             "a declaration path must name exactly one function, or the analysis does not " +
-            "terminate (DESIGN.md §4.1). Report the shape — this is a gap in Ambit's " +
+            "terminate. Report the shape — this is a gap in Ambit's " +
             "declaration paths, not in the code being checked.",
         );
       }
@@ -151,11 +152,11 @@ function extractFromProgram(
 
   // Pass 2: extract each function's JSDoc and calls, resolving callees
   // against the map built in pass 1; and tally every function-like node this
-  // slice saw but did not extract (`skippedFunctions` — DESIGN.md §4.3).
+  // slice saw but did not extract (`skippedFunctions`).
   // Reuses pass 1's declarationsByFile instead of re-walking each file.
   const files: ExtractedFile[] = [];
   // One entry per source file under the root, whether or not it declares
-  // anything — DESIGN.md §6.2's resident store is keyed by it, and a barrel
+  // anything — the resident store is keyed by it, and a barrel
   // that only re-exports is exactly the file `files` does not carry and the
   // store cannot do without.
   const modules: ExtractedModule[] = [];
@@ -178,7 +179,7 @@ function extractFromProgram(
       const id = symbolId(filePath, declPath);
       const location = locationOf(absoluteRoot, sourceFile, nameOrNode(node));
       // An accessor / anonymous default export propagates like any other
-      // function but does not adopt a contract comment (DESIGN.md §4.1 (a)).
+      // function but does not adopt a contract comment.
       // Its JSDoc is deliberately not read — and a contract written there is
       // reported as AMB-E003 rather than dropped, exactly as it was before
       // the declaration became indexable.
@@ -202,7 +203,7 @@ function extractFromProgram(
       }
       // The inline-callback owner's calls are collected per body and then
       // flattened, rather than collected flat and partitioned afterwards: the
-      // groups are what the multiset comparison reads (DESIGN.md §6.3) and
+      // groups are what the authority multiset comparison reads and
       // the flat list is what every other consumer reads, and deriving the
       // second from the first is what keeps the two from disagreeing.
       const bodies = ts.isSourceFile(node)
@@ -259,7 +260,7 @@ function inRootSourceFiles(program: ts.Program, absoluteRoot: string): readonly 
     .filter((sf) => !sf.isDeclarationFile && isUnderRoot(sf.fileName, absoluteRoot));
 }
 
-// ---- the resident project session (DESIGN.md §6.2) ---------------------
+// ---- the resident project session --------------------------------------
 
 /**
  * What this backend has to be sure of before it may re-extract only part of a
@@ -273,7 +274,8 @@ function inRootSourceFiles(program: ts.Program, absoluteRoot: string): readonly 
  *
  * Every field is evidence, never an assumption. A value this session cannot
  * compare is a full re-extraction, which costs time; a value it compares wrong
- * in the permissive direction is a stale answer, which §3.4 forbids.
+ * in the permissive direction is a stale answer, by which a violation can
+ * disappear unreported.
  */
 interface ProjectBaseline {
   /** The program's root file names, absolute, as a set. */
@@ -281,7 +283,7 @@ interface ProjectBaseline {
   /**
    * The resolved compiler options, serialized with sorted keys, or `undefined`
    * where a value could not be read — which refuses reuse rather than standing
-   * in for one (§3.4).
+   * in for one.
    */
   readonly optionsHash: string | undefined;
   /**
@@ -315,8 +317,8 @@ interface ProjectBaseline {
    * True for a non-module (a script whose top-level names are global), for a
    * `declare global` block, and for an ambient `declare module "…"`. Editing
    * one of these changes what names resolve to in files that never imported
-   * it, so no reverse-import closure can reach the files it affects — §6.2's
-   * table makes it a full rebuild and this is how the row is detected.
+   * it, so no reverse-import closure can reach the files it affects — it
+   * forces a full rebuild, and this is how that case is detected.
    */
   readonly globalScope: ReadonlyMap<string, boolean>;
 }
@@ -328,11 +330,11 @@ interface ExternalFile {
 }
 
 /**
- * Hold the compiler's state open across updates (DESIGN.md §6.2).
+ * Hold the compiler's state open across updates.
  *
  * Everything compiler-owned — the `ts.Program`, its source files, the checker
  * — stays inside this closure. What leaves is `ResidentExtractedUpdate`, which
- * is strings and numbers like every other value crossing this boundary (§3.4).
+ * is strings and numbers like every other value crossing this boundary.
  *
  * @effects fs_read
  */
@@ -832,7 +834,7 @@ function hashCompilerOptions(options: ts.CompilerOptions): string | undefined {
  * The compiler-side verdict: may this update re-extract only the closure the
  * caller asked for?
  *
- * Every clause is a §6.2 full-rebuild row read off the program rather than
+ * Every clause is a full-rebuild condition read off the program rather than
  * guessed at. `false` is always safe; `true` has to be earned.
  */
 function permitsPartialExtraction(
@@ -844,8 +846,8 @@ function permitsPartialExtraction(
   if (before.optionsHash === undefined || after.optionsHash === undefined) return false;
   if (before.optionsHash !== after.optionsHash) return false;
 
-  // A file *addition* is the row §6.2 forces rather than merely prefers: the
-  // edges the store holds are resolved import targets, so a specifier that
+  // A file *addition* forces a full rebuild rather than merely preferring one:
+  // the edges the store holds are resolved import targets, so a specifier that
   // resolved to nothing held no edge to close over. A root-name set that grew
   // says one arrived whether or not the caller reported it.
   const deleted = new Set(
@@ -905,7 +907,7 @@ function permitsPartialExtraction(
     }
   }
 
-  // A file whose declarations are global cannot be closed over: §6.2's table.
+  // A file whose declarations are global cannot be closed over: a full rebuild.
   // Checked in both baselines, because *becoming* a script is the same hazard
   // as being one.
   for (const change of changed) {
@@ -925,14 +927,14 @@ function permitsPartialExtraction(
  * with a separately assembled argument list is a second resolution model
  * living beside the first. A specifier the compiler could not resolve yields
  * no symbol and therefore no edge, which is the honest answer and is why
- * DESIGN.md §6.2 makes a file *addition* re-check everything.
+ * a file *addition* re-checks everything.
  *
  * Every form that names a module is walked: `import` and `export … from`,
  * `import =`, a dynamic `import()`, type-only imports, and an `import("…")`
  * type node — which has no import statement at all and is still a dependency,
  * because a parameter annotated with one makes a call on that parameter resolve
- * into the named file. §6.2's table is a minimum, so an edge too many costs
- * time and an edge too few costs correctness.
+ * into the named file. Re-checking more than required is allowed, so an edge
+ * too many costs time and an edge too few costs correctness.
  */
 function collectImportTargets(
   sourceFile: ts.SourceFile,
@@ -999,7 +1001,7 @@ function loadProjectConfig(absoluteRoot: string): {
     const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
     // A malformed tsconfig.json (unparseable JSON) must fail loudly, not
     // silently fall back to an empty `config` object — that would produce
-    // 0 root files and read as "checked, no violations" (DESIGN.md §3.4).
+    // 0 root files and read as "checked, no violations".
     if (configFile.error) {
       throw new Error(
         `failed to read ${configPath}: ${ts.flattenDiagnosticMessageText(configFile.error.messageText, "\n")}`,
@@ -1023,7 +1025,7 @@ function loadProjectConfig(absoluteRoot: string): {
   }
 
   // No tsconfig.json found: fall back to every .ts file under the root with
-  // a reasonable default (DESIGN.md §3.4 — analysis must not silently
+  // a reasonable default (analysis must not silently
   // degrade to "no violations" just because a config is missing).
   const rootNames = collectTsFiles(absoluteRoot);
   const options: ts.CompilerOptions = {
@@ -1042,7 +1044,7 @@ function loadProjectConfig(absoluteRoot: string): {
  * of them to the 6.0.3 this backend runs. Taken literally, an existing
  * project's `node:fs` / `node:child_process` imports stop resolving: a `pure`
  * function that gains `writeFileSync` checks and diffs green, with the call
- * only warned as `unknown` (DESIGN.md §3.5 gate 2 — TS 5.x tsconfigs are the
+ * only warned as `unknown` (backend gate 2, ADR-0001 — TS 5.x tsconfigs are the
  * compatibility target). `["*"]` is TypeScript 6's own spelling of the old
  * default. An explicit `types`, including `[]`, is left as written.
  */
@@ -1089,7 +1091,7 @@ type FunctionLikeDeclaration =
    * `<inline callbacks>`. The `SourceFile` stands in for a set of bodies that
    * have no declaration of their own: the function expressions written
    * directly as call arguments at module scope, which nothing else in this
-   * walk reaches (DESIGN.md §4.1 (a), "The inline-callback owner").
+   * walk reaches.
    */
   | ts.SourceFile
   | ts.GetAccessorDeclaration
@@ -1104,8 +1106,7 @@ type FunctionLikeDeclaration =
  * Walk a source file collecting function declarations, class methods,
  * variable-declared function/arrow expressions, and the identifier-named
  * members of a module-scope `const` object literal — each paired with its
- * "."-joined declaration path (DESIGN.md §5.3: "A symbol ID's declaration
- * path is joined with `"."`"). Anonymous functions and functions nested
+ * "."-joined declaration path. Anonymous functions and functions nested
  * inside another function's body are not extracted — nested closures' calls
  * are still walked and attributed to their enclosing named declaration.
  */
@@ -1117,7 +1118,7 @@ function collectFunctionLikeDeclarations(
   function visitTop(node: ts.Node, containerPath: readonly string[]): void {
     // `export default function () {}` / `export default () => {}`: no name,
     // but exactly one such declaration can exist per file, so `#default` is
-    // as stable a path as any identifier (DESIGN.md §4.1 (a)). Indexed at the
+    // as stable a path as any identifier. Indexed at the
     // top level only — a default export is not nestable.
     if (containerPath.length === 0) {
       const anonymousDefault = anonymousDefaultExport(node);
@@ -1165,8 +1166,8 @@ function collectFunctionLikeDeclarations(
         }
         // An accessor's body runs like any other method's, so it propagates
         // like one; it is indexed under `get x` / `set x` because `get` and
-        // `set` share a name and a plain `x` could not tell them apart
-        // (DESIGN.md §4.1 (a)). A JSDoc tag written on it is still inert —
+        // `set` share a name and a plain `x` could not tell them apart.
+        // A JSDoc tag written on it is still inert —
         // see `configOnlyPath`. A static accessor takes both markers:
         // `static get x`.
         if (
@@ -1181,8 +1182,8 @@ function collectFunctionLikeDeclarations(
         }
       }
       // `new C(...)` has to have somewhere to propagate *from*, or a
-      // constructor that opens a socket is invisible rather than `unknown`
-      // (DESIGN.md §3.4). The explicit constructor is indexed when the class
+      // constructor that opens a socket is invisible rather than `unknown`.
+      // The explicit constructor is indexed when the class
       // writes one; otherwise the class node stands in for the implicit one,
       // which still runs property initializers and the base constructor.
       // Overload signatures carry no body, so the implementation is the one
@@ -1199,7 +1200,7 @@ function collectFunctionLikeDeclarations(
     // object literal's do. Descending with the path unchanged would give
     // `namespace sql { export function param() {} }` the same path as a
     // top-level `param` in the same file — two functions under one id, which
-    // §4.1 states as the one-to-one rule and `propagate` needs to terminate.
+    // breaks the one-to-one rule `propagate` needs to terminate.
     // Observed on `drizzle-orm`'s `src/sql/sql.ts`, which has both.
     // A string-named `declare module "x"` is not a namespace and names
     // nothing here: its members are ambient and carry no body.
@@ -1244,7 +1245,7 @@ function collectFunctionLikeDeclarations(
         // Identifier names only, mirroring the class-method rule above. A
         // computed, string, or numeric name has no spelling that survives
         // `symbolId`'s "."-join — `{ "a.b": … }` would be indistinguishable
-        // from nesting — and DESIGN.md §5.3 requires a stable path that does
+        // from nesting — and a symbol ID requires a stable path that does
         // not lean on anything compiler-internal to disambiguate. Those stay
         // counted as `object-literal-method`.
         if (!member.name || !ts.isIdentifier(member.name)) continue;
@@ -1269,9 +1270,9 @@ function collectFunctionLikeDeclarations(
   // written directly as a call argument has no name to index; when it also has
   // no extracted ancestor, no other entry's body walks it either, so its calls
   // belonged to nothing at all and authority added inside it was reported
-  // nowhere — the outcome DESIGN.md §6.4 names as the one that must not
+  // nowhere — an unanalyzed change reported as silence, which must not
   // happen. They are owned collectively, per file, because an anonymous
-  // sibling has no non-positional name to be told apart by (§4.1 (a)).
+  // sibling has no non-positional name to be told apart by.
   if (unownedInlineCallbacks(sourceFile).length > 0) {
     results.push([sourceFile, [INLINE_CALLBACKS_PATH_SEGMENT]]);
   }
@@ -1410,7 +1411,7 @@ function isFunctionLikeNode(node: ts.Node): node is ts.FunctionLikeDeclaration {
  * Every function-like node in `sourceFile` that `collectFunctionLikeDeclarations`
  * did not index, classified by kind (`SkippedFunctionKind`), plus any contract
  * written on one of them. The count turns "silent skip" into a visible number
- * (`ambit check --coverage`, DESIGN.md §4.3); the contracts turn a silently
+ * (`ambit check --coverage`); the contracts turn a silently
  * dropped declaration into `AMB-E003`.
  */
 function collectSkippedFunctions(
@@ -1466,7 +1467,7 @@ function collectSkippedFunctions(
 }
 
 /**
- * The JSDoc tags that declare a contract (DESIGN.md §4.1). Only `@effects` is
+ * The JSDoc tags that declare a contract. Only `@effects` is
  * enforced today, but a contract tag on a node that cannot carry one is dead
  * whichever tag it is, so all four are reported.
  */
@@ -1480,27 +1481,27 @@ const CONTRACT_TAGS = ["effects", "capabilities", "budget", "entrypoint", "bound
  */
 const CONSTRUCTOR_PATH_SEGMENT = "constructor";
 
-/** The declaration-path segment an anonymous `export default` is indexed under (DESIGN.md §4.1 (a)). */
+/** The declaration-path segment an anonymous `export default` is indexed under. */
 const DEFAULT_EXPORT_PATH_SEGMENT = "default";
 
 /**
  * The declaration-path segment a file's unowned inline callbacks are indexed
- * under (DESIGN.md §4.1 (a), "The inline-callback owner").
+ * under.
  *
  * The angle brackets are what make it safe: no TypeScript identifier can
  * contain one, so this can never collide with a declaration path a real
- * declaration produces, and it holds no `"."` — the joiner §5.3 fixes — so it
+ * declaration produces, and it holds no `"."` — the symbol-id joiner — so it
  * survives every split a symbol id is put through.
  */
 const INLINE_CALLBACKS_PATH_SEGMENT = "<inline callbacks>";
 
 /**
  * `static run` — a `static` member's segment carries the marker, for exactly
- * the reason an accessor's carries `get` / `set` (DESIGN.md §4.1 (a)): a class
+ * the reason an accessor's carries `get` / `set`: a class
  * may declare `run()` and `static run()` at once, and a plain `run` cannot tell
  * them apart. They are two functions with two bodies, so one declaration path
- * for both breaks the one-to-one rule §4.1 states as "a termination
- * requirement as well as a notation" — `propagate` then has two summaries for
+ * for both breaks the one-to-one rule, which is a termination
+ * requirement as well as a notation — `propagate` then has two summaries for
  * one key, overwrites one with the other every pass, and never converges.
  * Measured on a third-party backend, with an 11-line reproduction, in
  * `docs/measurements/2026-09-11-third-third-party-validation-outline.md`.
@@ -1522,7 +1523,7 @@ function memberSegment(member: ts.ClassElement, segment: string): string {
 /** `static ` — see {@link memberSegment}. */
 const STATIC_PATH_MARKER = "static ";
 
-/** `get total` / `set total` — the accessor's kind is part of the segment (DESIGN.md §4.1 (a)). */
+/** `get total` / `set total` — the accessor's kind is part of the segment. */
 function accessorSegment(
   node: ts.GetAccessorDeclaration | ts.SetAccessorDeclaration,
   name: string,
@@ -1551,13 +1552,13 @@ function anonymousDefaultExport(node: ts.Node): FunctionLikeDeclaration | undefi
 
 /**
  * True for the declaration paths only `ambit.config.ts` can name: an accessor
- * and an anonymous default export (DESIGN.md §4.1 (a)).
+ * and an anonymous default export.
  *
  * These nodes propagate like any other function, but a contract *comment* on
- * them is not adopted — §4.1 (a) keeps the config namespace a superset of the
- * JSDoc one, and §12 records the asymmetry that leaves. Derived from the path
- * rather than tracked in a side table so that the rule has exactly one
- * spelling.
+ * them is not adopted — the config namespace is kept a superset of the
+ * JSDoc one, and `docs/open-questions.md` records the asymmetry that leaves.
+ * Derived from the path rather than tracked in a side table so that the rule
+ * has exactly one spelling.
  */
 function configOnlyPath(declPath: readonly string[]): boolean {
   if (declPath.length === 1 && declPath[0] === DEFAULT_EXPORT_PATH_SEGMENT) return true;
@@ -1704,7 +1705,7 @@ function nameOrNode(decl: FunctionLikeDeclaration): ts.Node {
   // The inline-callback owner stands for a set of bodies scattered through the
   // file, so the one position that is true of all of them is the file itself.
   // The position a reader needs is the operation's, and an authority path
-  // carries that (DESIGN.md §5.1, `contract.operation`).
+  // carries that (`contract.operation`).
   if (ts.isSourceFile(decl)) return decl;
   if (ts.isVariableDeclaration(decl) || ts.isPropertyDeclaration(decl)) return decl.name;
   // An arrow function has no name node at all; an anonymous default export is
@@ -1782,15 +1783,15 @@ function isFunctionValuedProperty(member: ts.ClassElement): member is ts.Propert
  * local `as` alias or a re-export chain does not hide one, and a `withAmbit`
  * of one's own from somewhere else is not mistaken for it.
  *
- * The framework adapters are here because DESIGN.md §4.4 chose explicit
+ * The framework adapters are here because the runtime uses explicit
  * registration: a literal `spec` beside a same-file handler *is* that
- * handler's `@capabilities` and `@budget` (§4.4, "Removing the double
- * declaration"), so a registration this pass cannot see would take the
- * declaration with it — and where a project does write the JSDoc tag as well,
- * the agreement check (`AMB-E010` / `AMB-E011`) has to reach the registration
- * or the duplication would go uncompared. All three take `(spec, handler, …)`
- * in the same two positions, which is what makes one extraction serve them
- * all; an adapter that reordered them would silently stop being read.
+ * handler's `@capabilities` and `@budget`, so a registration this pass cannot
+ * see would take the declaration with it — and where a project does write the
+ * JSDoc tag as well, the agreement check (`AMB-E010` / `AMB-E011`) has to reach
+ * the registration or the duplication would go uncompared. All three take
+ * `(spec, handler, …)` in the same two positions, which is what makes one
+ * extraction serve them all; an adapter that reordered them would silently
+ * stop being read.
  */
 const RUNTIME_WRAPPER_NAMES: ReadonlyMap<string, string> = new Map([
   ["ambit-ts/runtime.withAmbit", "withAmbit"],
@@ -1901,7 +1902,8 @@ function literalCapabilityListOf(spec: ts.Expression | undefined): readonly stri
 /**
  * The spec's `budget` as written, or `undefined` when the source does not fix
  * it — the spec is not an object literal, the `budget` value is not an object
- * literal, a key is not one of §4.5's four, or a value is not a literal.
+ * literal, a key is not one of the four budget keys, or a value is not a
+ * literal.
  *
  * A spec with no `budget` key yields `{ kind: "absent" }`, on the same
  * reasoning as an absent `capabilities` key: writing no budget is a statement
@@ -1945,7 +1947,8 @@ function literalBudgetOf(spec: ts.Expression | undefined): WrapperBudget | undef
     if (member.name.text === "timeMs") timeMs = numeric;
     else if (member.name.text === "costUsd") costUsd = numeric;
     else if (member.name.text === "llmCalls") llmCalls = numeric;
-    // A key outside §4.5's four is not a budget this comparison understands.
+    // A key outside the four budget keys is not a budget this comparison
+    // understands.
     else return undefined;
   }
 
@@ -1976,8 +1979,7 @@ function numericLiteralOf(node: ts.Expression): number | undefined {
  * reader sees together — the JSDoc above the handler and the spec beside it.
  * A handler declared elsewhere is reported as uncompared (`AMB-W004`), not
  * silently accepted; whether the same equality is the right test across files
- * is part of §12's "Mapping contracts to handlers", which this does not
- * settle.
+ * is still an open question, which this does not settle.
  */
 function sameFileHandlerOf(
   handler: ts.Expression | undefined,
@@ -2031,7 +2033,7 @@ function extractJsDoc(decl: FunctionLikeDeclaration, absoluteRoot: string): RawJ
  * `tag.getEnd()` runs to where the next tag or the closing `*/ ` begins, so it
  * swallows the whitespace after the tag text. A fix that replaced that span
  * would produce `; /** @effects network*​/`. The patch has to be one a person
- * would have written (DESIGN.md §5.3), so the range stops at the last
+ * would have written, so the range stops at the last
  * non-whitespace character.
  */
 function jsDocTagLocation(
@@ -2097,8 +2099,7 @@ function collectCalls(
       );
     } else {
       // Assignments are not calls, but they mutate exactly the same way a
-      // mutating builtin method does (DESIGN.md §4.2, "Local mutation and
-      // `pure`"), so they enter the same array.
+      // mutating builtin method does, so they enter the same array.
       const mutation = classifyAssignment(node, sourceFile, checker, absoluteRoot, decl);
       if (mutation) calls.push(mutation);
     }
@@ -2115,7 +2116,7 @@ function collectCalls(
   // An implicit constructor still calls its base constructor. There is no
   // `super(...)` node to classify, so the heritage clause stands in for it;
   // without this a `class Derived extends Effectful {}` would report no calls
-  // at all (DESIGN.md §3.4).
+  // at all.
   if (ts.isClassDeclaration(decl)) {
     const base = baseTypeExpressionOf(decl);
     if (base) {
@@ -2137,11 +2138,10 @@ function collectCalls(
  * function — is this callee already walked into my summary, does this
  * assignment escape me — is asked about the callback the call is in, not
  * about the whole file. Asking it of the file would make every module-scope
- * binding look local and quiet the mutations that leave a callback (DESIGN.md
- * §4.2, "Local mutation and `pure`").
+ * binding look local and quiet the mutations that leave a callback.
  *
  * The grouping is what lets the owner's authority be compared as a multiset
- * over its bodies (DESIGN.md §6.3), which is the whole reason one symbol may
+ * over its bodies, which is the whole reason one symbol may
  * stand for several bodies without merging them into silence.
  */
 function ownedBodyCalls(
@@ -2176,7 +2176,7 @@ function baseTypeExpressionOf(node: ts.ClassLikeDeclaration): ts.Expression | un
 /**
  * `new X(...)`. Before this existed the expression was dropped unless it was
  * `new Function`, so a `pure` function that did `new PrismaClient()` reported
- * no call at all — not even `unknown`. DESIGN.md §3.4 forbids exactly that:
+ * no call at all — not even `unknown`. That is exactly what must not happen:
  * an unanalyzed path must stay visible, never collapse into "no violation".
  */
 function classifyNewExpression(
@@ -2256,12 +2256,12 @@ function classifyConstruct(
       unresolvedReason: importBindingReason ?? ambientReason,
       // `new Promise(namedExecutor)` runs `namedExecutor` immediately; the
       // pure-constructor allowlist must not cover a body this walk never
-      // visited (DESIGN.md §4.2 rule 4). A named executor that *is* an
+      // visited. A named executor that *is* an
       // extracted function is a `callbackTargets` edge instead — the body is
       // right there to propagate from.
       ...(ts.isNewExpression(site) ? callableArgumentFields(site, checker, declaredNodeToId) : {}),
       // `new Date()` reads the clock; `new Date(2020, 0, 1)` does not
-      // (DESIGN.md §4.2 lists the clock under `env`).
+      // (the clock is an `env` input).
       constructedWithoutArguments:
         (ts.isNewExpression(site) ? (site.arguments?.length ?? 0) === 0 : true) || undefined,
     };
@@ -2358,8 +2358,8 @@ function unwrapNonNullAssertions(expression: ts.Expression): ts.Expression {
  * it is extracted (`collectFunctionLikeDeclarations`), so a call that stopped
  * at `declarations[0]` would reach a node with no id and no body — and a
  * body-less node infers an empty effect set, which reads as `pure` however the
- * implementation behaves. DESIGN.md §3.2 names this case: "With overloads
- * the selected declaration may have no body".
+ * implementation behaves. With overloads the selected declaration may have
+ * no body.
  *
  * Returning the first declaration when nothing has a body is deliberate: the
  * caller needs a node to classify (ambient vs. project, parameter vs.
@@ -2498,8 +2498,8 @@ function classifyCall(
   // summary either: `collectCalls` walked straight through it, so every call
   // it makes is already recorded here. The call site therefore adds nothing,
   // and reporting it `unknown` would claim the analysis lost a body it in fact
-  // read (DESIGN.md §3.4 cuts the other way too — an *analyzed* path must not
-  // read as an unanalyzed one).
+  // read (the no-silence rule cuts the other way too — an *analyzed* path must
+  // not read as an unanalyzed one).
   //
   // Deliberately not the same thing as extracting the nested function: it
   // gets no id, no contract, and no summary of its own. Whether it should is
@@ -2510,7 +2510,7 @@ function classifyCall(
 
   if (declaration && !isAmbientDeclaration) {
     // A parameter (higher-order function calling its own callback argument):
-    // out of scope for this slice's propagation (DESIGN.md §4.2 rule 4).
+    // out of scope for this slice's propagation.
     if (ts.isParameter(declaration)) {
       return { location, unresolvedReason: "callback-parameter" };
     }
@@ -2546,7 +2546,7 @@ function classifyCall(
   // The factory origin is withheld when the method being called is the
   // compiler's own — a package interface may extend a default-lib type, and a
   // name here would take the call off the `pureBuiltinName` path below, which
-  // is the only path that can prove it effect-free (DESIGN.md §4.2).
+  // is the only path that can prove it effect-free.
   const qualifiedName = qualifiedNameOf(
     checker,
     program,
@@ -2563,7 +2563,7 @@ function classifyCall(
       // Carried for the same reason it is carried on `pureBuiltinName`: a
       // name in this namespace can also be allowlisted as pure (a bare global
       // like `Number(x)`), and an opaque callable argument must refuse that
-      // verdict (DESIGN.md §4.2 rule 4). It says nothing about a stub match,
+      // verdict. It says nothing about a stub match,
       // which is decided by the name and the literal arguments alone.
       ...callableArgumentFields(node, checker, declaredNodeToId),
     };
@@ -2583,8 +2583,8 @@ function classifyCall(
       const callbackTargets =
         callable.targets.length > 0 ? { callbackTargets: callable.targets } : {};
       // A name that writes into its first argument (`Object.assign(target,
-      // …)`) is a mutation of *that* value. DESIGN.md §4.2's locality rule
-      // reads "the root of the mutation target", which here is the argument,
+      // …)`) is a mutation of *that* value. The locality rule
+      // reads the root of the mutation target, which here is the argument,
       // not the `Object` global the call is spelled through.
       const mutatedArgument = isFirstArgumentMutator(builtinName) ? node.arguments[0] : undefined;
       if (mutatedArgument) {
@@ -2603,7 +2603,7 @@ function classifyCall(
         const escaping = !isLocallyOwnedMutationTarget(callee.expression, enclosing, checker);
         // A local mutation carries no effect, so a callback the walk never
         // enters is the only thing left that could — and that is plain
-        // `unknown`, not a mutation site (DESIGN.md §4.2 rule 4).
+        // `unknown`, not a mutation site.
         if (!escaping && callbackByReference) {
           return {
             location,
@@ -2725,20 +2725,19 @@ function objectLiteralReceiverTarget(
  * The extracted method a receiver bound by `const` to `new C(...)` names, when
  * `C` is a class in this project.
  *
- * DESIGN.md §4.2 rule 7 requires the annotation not to change the answer:
- * "Because it follows the entity rather than the type annotation, `const
- * handlers: H = { read }` and `const handlers = { read }` give the same
- * result", and "Method resolution on class instances rests on the same
- * premise". Without this, only the unannotated form resolved — the checker
- * lands on the class's own member for `const c = new C()`, and on the
+ * A call through a property resolves from the receiver's value, not its type
+ * annotation, so `const handlers: H = { read }` and `const handlers = { read }`
+ * give the same result — and method resolution on class instances rests on
+ * the same premise. Without this, only the unannotated form resolved — the
+ * checker lands on the class's own member for `const c = new C()`, and on the
  * *annotation's* member signature for `const c: I = new C()`, which no
  * declaration path names.
  *
- * The premise is the one §4.2 rule 7 already states and no wider: `const`
- * fixes the binding, so the value really is that `new`; it does not freeze the
- * properties, so `c.m = other` still defeats it. A receiver that is anything
- * else — a parameter, a `let`, a factory result — yields nothing and stays
- * unresolved.
+ * The premise is the one property resolution already rests on and no wider:
+ * `const` fixes the binding, so the value really is that `new`; it does not
+ * freeze the properties, so `c.m = other` still defeats it. A receiver that is
+ * anything else — a parameter, a `let`, a factory result — yields nothing and
+ * stays unresolved.
  *
  * The `extends` chain is walked because an inherited method is the one that
  * runs. An override is found first: members are searched from the derived
@@ -2793,10 +2792,9 @@ function symbolTargetOf(expression: ts.Expression, checker: ts.TypeChecker): ts.
 }
 
 /**
- * The assignment-shaped mutation at `node`, if any (DESIGN.md §4.2, "Local
- * mutation and `pure`"): `a.b = 1`, `a.b += 1`, `a.b++`, `delete a.b`, and a
- * write
- * to a binding declared outside `enclosing`.
+ * The assignment-shaped mutation at `node`, if any: `a.b = 1`, `a.b += 1`,
+ * `a.b++`, `delete a.b`, and a write to a binding declared outside
+ * `enclosing`.
  *
  * Reassigning a variable the function itself declared (`let i = 0; i++`) is
  * not a mutation of anything: nothing outside can observe it, and it is not
@@ -2813,8 +2811,7 @@ function classifyAssignment(
   if (!target) return undefined;
 
   // A destructuring assignment writes to several places at once; one escaping
-  // leaf makes the whole statement a `state_write` (DESIGN.md §4.2,
-  // "The rule for deciding locality").
+  // leaf makes the whole statement a `state_write`.
   const escaping = assignmentLeavesOf(target).some(
     (leaf) => !isLocalAssignmentLeaf(leaf, enclosing, checker),
   );
@@ -2902,11 +2899,10 @@ function isAssignmentOperator(kind: ts.SyntaxKind): boolean {
 
 /**
  * Whether the value `target` writes through was allocated inside `enclosing`
- * — the locality rule of DESIGN.md §4.2, "The rule for deciding locality",
- * deliberately
- * as narrow as §4.2 rule 7 and, like it, not a soundness claim: a fresh value
- * handed to something else before being mutated still reads as local, because
- * Ambit does no alias analysis.
+ * — the locality rule for mutation, deliberately as narrow as property
+ * resolution through a receiver and, like it, not a soundness claim: a fresh
+ * value handed to something else before being mutated still reads as local,
+ * because Ambit does no alias analysis.
  *
  * Local iff the root of the access chain is a fresh allocation itself, or an
  * identifier bound by `const` inside `enclosing` to a fresh allocation.
@@ -3016,10 +3012,10 @@ function callableArgumentFields(
  * body and attributes its calls to the enclosing function already.
  *
  * `targets` are the references that name a declaration this project extracted,
- * so DESIGN.md §4.2 rule 4's "inferred from the actual argument at the call
- * site" can be carried out literally. `opaque` is what is left — a callable
- * from a package, a parameter, a `.bind()` result — for which the rule's other
- * half applies: "If it cannot be inferred, `unknown`".
+ * so the rule that a callback's effects are inferred from the actual argument
+ * at the call site can be carried out literally. `opaque` is what is left — a
+ * callable from a package, a parameter, a `.bind()` result — for which the
+ * rule's other half applies: "If it cannot be inferred, `unknown`".
  *
  * An argument counts as callable when it is passed by reference (an
  * identifier, property access, or other expression with call signatures)
@@ -3135,7 +3131,8 @@ function acceptsCallableArgument(
  * yes despite having no call signatures at all, so a true answer means "this
  * could be a callback, scan it" rather than "this is a function". Both
  * fail-open cases exist to keep an opaque callable from reading as a
- * non-callback, which is the direction DESIGN.md §4.2 rule 4 forbids.
+ * non-callback, which is the direction that would treat a callback's effects
+ * as settled by its type alone.
  *
  * Asked of a *declared parameter* type by {@link acceptsCallableArgument} and
  * of an *argument's own* type by {@link callableArgumentsOf}, and it must be
@@ -3271,8 +3268,8 @@ function memberChainQualifiedNameOf(
  * `this.db`, or through a parameter, and not one of them was named — so the
  * bundled `pg`, `mysql2` and Prisma rules could not have fired on any of them
  * either. A client a
- * class is *handed* is the ordinary shape in server code, and DESIGN.md §3.4's
- * rule cuts against leaving it silent.
+ * class is *handed* is the ordinary shape in server code, and an unanalyzed
+ * path must never be left silent.
  *
  * What this rule reads is the receiver's **type**, which is a different fact
  * from the ones above and is kept to what a type can honestly settle:
@@ -3281,13 +3278,13 @@ function memberChainQualifiedNameOf(
  *   declaration of the type must be a class or interface in a `.d.ts` that
  *   came from an installed package ({@link installedPackageNameOf}), so a
  *   project-local interface — Unleash's own `ITagStore`, Ambit's own
- *   `TsBackend` — yields nothing and §4.2 rule 7 still decides those through
- *   the receiver's value;
+ *   `TsBackend` — yields nothing and the receiver-value rule still decides
+ *   those through the receiver's value;
  * - it is a name, not a verdict, exactly as the three origins above are. A
  *   package no bundled table covers gets its name here and still reports
  *   `unknown`;
- * - it reads the receiver's type where §4.2 rule 7 refuses to read a
- *   receiver's *annotation*. The two answer different questions:
+ * - it reads the receiver's type where the receiver-value rule refuses to read
+ *   a receiver's *annotation*. The two answer different questions:
  *   {@link factoryResultQualifiedNameOf}'s comment declines the annotation
  *   because a body could be resolved from the value instead, and here there is
  *   no body — the declaration is a package's `.d.ts`, and which package API the
@@ -3306,7 +3303,7 @@ function memberChainQualifiedNameOf(
  *
  * Unlike the receiver's *value*, a type is not evidence about the object's
  * identity: a subclass may override the method named here. That is the same
- * gap DESIGN.md §4.2 rule 7 already states for method resolution on class
+ * gap DESIGN.md already states for method resolution on class
  * instances, and no wider — what a type does settle is which package API the
  * call site was type-checked against.
  */
@@ -3405,16 +3402,16 @@ function ambientModuleNameOf(declaration: ts.Declaration): string | undefined {
  *   like a stub candidate and is not. A project-local wrapper around a
  *   package's factory therefore stays unnamed;
  * - the type name is read off the declaration the *call expression's own type*
- *   resolves to — not off the variable, whose annotation §4.2 rule 7 forbids
- *   letting decide, and not off the factory's local spelling.
+ *   resolves to — not off the variable, whose annotation the receiver-value
+ *   rule forbids letting decide, and not off the factory's local spelling.
  *
  * Four conditions keep the name honest, and each rules out a shape where it
  * would be a coincidence rather than a fact:
  *
  * - **`const`**, exactly as for `new`: a `let` may hold something else by the
  *   time the call runs. `const` fixes the binding, not the object's
- *   properties, so this is the same premise §4.2 rule 7 already states — and
- *   no wider.
+ *   properties, so this is the same premise property resolution already rests
+ *   on — and no wider.
  * - **an imported callee**, because a project-local factory has no
  *   module-qualified name, and its result is a class this analysis could in
  *   principle follow to a body. Naming it would hide that.
@@ -3579,7 +3576,7 @@ function importedModuleSpecifierOf(
  * expression naming an *imported* class. `const` because a `let` may hold a
  * different object by the time the call runs; imported because a locally
  * declared class has no module-qualified name. This rests on exactly the
- * assumption DESIGN.md §4.2 rule 7 already states for object literals —
+ * assumption DESIGN.md already states for object literals —
  * `const` fixes the binding, not the object's properties — and adds no other.
  */
 function constructedClassQualifiedNameOf(
@@ -3837,8 +3834,8 @@ function locationOf(
     // Relative to the project root passed to `ambit check` (core/location.ts's
     // contract) — never absolute: it would leak the local filesystem layout
     // into NDJSON output and make `via[].file`/`location.file` inconsistent
-    // with the already-relative `via[].symbol` (DESIGN.md §5.1 example uses
-    // "src/tax.ts", not an absolute path).
+    // with the already-relative `via[].symbol` (DESIGN.md's diagnostic example
+    // uses "src/tax.ts", not an absolute path).
     file: relativePath(absoluteRoot, sourceFile),
     line: start.line + 1,
     col: start.character + 1,

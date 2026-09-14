@@ -6,8 +6,8 @@
  * different namespace from `src/stubs/node-builtins.ts`'s module-specifier
  * keys (e.g. `"node:fs.readFileSync"`) — the two tables are never merged or
  * compared (`src/core/backend.ts`'s `CallSite.pureBuiltinName` doc comment).
- * In-place mutation is a separate table, `src/stubs/mutating-builtins.ts`
- * (DESIGN.md §4.2, "Local mutation and `pure`"): a mutator's effect depends on
+ * In-place mutation is a separate table, `src/stubs/mutating-builtins.ts`:
+ * a mutator's effect depends on
  * its receiver, so it cannot be answered by a name alone the way this table
  * answers. Nondeterminism beyond `env` is still outside the model; this
  * allowlist claims only "no `KnownEffect`", not "pure" in a stricter sense.
@@ -24,14 +24,14 @@
  * — the connector layer marks that call `callbackByReference` and
  * `summarize.ts`'s `toCall` refuses to treat it as pure even if the method
  * name is listed here, because an opaque callback might do anything
- * (DESIGN.md §4.2 rule 4: a higher-order call's callback effects must be
+ * (a higher-order call's callback effects must be
  * inferred from the actual argument, never treated as complete from the
  * type signature alone).
  *
  * Populated from what measurement actually surfaces on real code, not written
- * ahead of evidence. DESIGN.md §4.2 fixes the admission rule: "Only names that
+ * ahead of evidence. The admission rule: only names that
  * showed up in measurements, and their in-place-mutation sibling methods on the
- * same builtin type, are listed; when in doubt, not listed." The measurement is
+ * same builtin type, are listed; when in doubt, not listed. The measurement is
  * `node scripts/bench-corpus.ts` over the fixed corpus in
  * `test/corpus/corpus.json`, plus `ambit check --coverage` on Ambit's own
  * source. When unsure, leave a name out — it just falls back to `unknown`,
@@ -200,9 +200,9 @@ const DATE_READERS: readonly string[] = [
 /**
  * Grouped by the builtin type the name belongs to. Every group is complete for
  * the non-mutating members of that type as of ES2023 plus the WHATWG types the
- * corpus surfaced — the sibling half of §4.2's rule — so that a reader can tell
- * an intentional omission (the three kinds listed above) from an accident of
- * which method a particular measurement happened to hit.
+ * corpus surfaced — the sibling half of the admission rule — so that a reader
+ * can tell an intentional omission (the three kinds listed above) from an
+ * accident of which method a particular measurement happened to hit.
  */
 const PURE_BUILTINS: ReadonlySet<string> = new Set([
   // -- Array ------------------------------------------------------------
@@ -265,8 +265,8 @@ const PURE_BUILTINS: ReadonlySet<string> = new Set([
     "parseFloat",
     "parseInt",
   ]),
-  // `Math.random` is left out on purpose: DESIGN.md §4.2 lists randomness
-  // under `env`, so it is an effect, not the absence of one
+  // `Math.random` is left out on purpose: randomness is an `env` input,
+  // so it is an effect, not the absence of one
   // (`src/stubs/builtin-effects.ts`).
   ...members("Math", [
     "abs",
@@ -324,8 +324,7 @@ const PURE_BUILTINS: ReadonlySet<string> = new Set([
   // -- Promise ----------------------------------------------------------
   // Registering a continuation performs no effect of its own; the callback's
   // effects are the callback's, and an opaque one passed by reference is
-  // refused by `callbackByReference` before this table is consulted
-  // (DESIGN.md §4.2 rule 4).
+  // refused by `callbackByReference` before this table is consulted.
   ...members("Promise", ["then", "catch", "finally"]),
   ...members("PromiseConstructor", [
     "all",
@@ -409,7 +408,7 @@ const PURE_BUILTINS: ReadonlySet<string> = new Set([
  * from {@link PURE_BUILTINS} rather than merged into it.
  *
  * `Function` is deliberately absent: `Function(body)` compiles a string, which
- * DESIGN.md §4.2 rule 6 makes `unknown` — the same verdict `new Function` gets.
+ * is always `unknown` — the same verdict `new Function` gets.
  * So are `setTimeout` / `queueMicrotask` and friends, which run a callback the
  * analysis never enters.
  */
@@ -448,7 +447,7 @@ const PURE_GLOBAL_CALLS: ReadonlySet<string> = new Set([
  * The allowlisted members that can *invoke* a function argument.
  *
  * A callable passed by reference only threatens the pure verdict where the
- * callee might run it (DESIGN.md §4.2 rule 4). `Array.isArray(handler)` and
+ * callee might run it. `Array.isArray(handler)` and
  * `Number(handler)` inspect an argument and never call it, so refusing them
  * over the argument's type would report a call that cannot happen.
  *

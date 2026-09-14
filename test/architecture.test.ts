@@ -54,7 +54,7 @@ describe("architecture constraint: only the connection layer depends on typescri
 });
 
 describe("architecture constraint: the resident path holds nothing the compiler owns", () => {
-  // DESIGN.md §6.2: "A compiler node, type, signature, or internal id is valid
+  // docs/DESIGN.md: "A compiler node, type, signature, or internal id is valid
   // for the snapshot that produced it and is discarded with it — a rule the
   // connection layer already enforces at the `ambit check` boundary, and which
   // the resident path must not weaken by holding such a value in state that
@@ -106,12 +106,12 @@ describe("architecture constraint: the resident path holds nothing the compiler 
 });
 
 describe("architecture constraint: the M0.5 comparison probes stay out of the product", () => {
-  // DESIGN.md §3.5's gate probes live under `scripts/` and load a second
+  // The M0.5 gate probes (ADR-0001) live under `scripts/` and load a second
   // TypeScript compiler from `.m05-native/`, outside this package's
   // dependencies. They are measurement code: nothing shipped may import them,
   // and no second compiler may enter `src/` without the backend decision in
-  // §3.5 changing first. The `typescript` rule above would not catch either,
-  // because neither is spelled `"typescript"`.
+  // ADR-0001 changing first. The `typescript` rule above would not catch
+  // either, because neither is spelled `"typescript"`.
   const FORBIDDEN = [
     { pattern: /from\s+["'][^"']*scripts\//, what: "scripts/" },
     { pattern: /from\s+["']typescript-native/, what: '"typescript-native"' },
@@ -142,7 +142,7 @@ describe("architecture constraint: the M0.5 comparison probes stay out of the pr
 });
 
 describe("architecture constraint: the config layer is independent of the compiler", () => {
-  // DESIGN.md §4.1 (c): `ambit.config.ts` is loaded by importing it, not by
+  // `ambit.config.ts` is loaded by importing it, not by
   // parsing it, and the contracts it declares are plain data about symbol ids
   // the backend already produced. Named file by file rather than left to the
   // src/-wide rule above, because these three are the ones a future change
@@ -164,7 +164,7 @@ describe("architecture constraint: the config layer is independent of the compil
 
   it("src/core/ and src/stubs/ still import neither typescript nor the checker", async () => {
     // The `src/`-wide rule above allows `src/checker/` to reach the backend;
-    // core and stubs may not reach either (DESIGN.md §6.1).
+    // core and stubs may not reach either.
     for (const dir of ["core", "stubs"]) {
       const files = await listTsFiles(path.join(PROJECT_ROOT, "src", dir));
       expect(files.length, `expected .ts files under src/${dir}`).toBeGreaterThan(0);
@@ -182,7 +182,7 @@ describe("architecture constraint: the config layer is independent of the compil
 });
 
 describe("architecture constraint: the runtime is independent of the analysis engine", () => {
-  // DESIGN.md §3.4, on runtime enforcement: "Independent of the compiler. Do
+  // docs/DESIGN.md, on runtime enforcement: "Independent of the compiler. Do
   // not make the analysis engine a production dependency". A production
   // process that enforces capabilities must
   // not have to load a TypeScript compiler or Ambit's checker to do it.

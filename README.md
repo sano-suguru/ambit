@@ -1,12 +1,13 @@
 # Ambit
 
-**Review changes in what AI-written TypeScript is allowed to do.**
+**Authority-aware review for TypeScript.**
 
 A code diff says what changed. An authority diff says what became possible.
 
-An agent can widen a function's authority faster than a human can review it.
 Ambit makes authority explicit in the source, checks it, and puts increases in
-front of a reviewer.
+front of a reviewer — whoever wrote the change. The case it is built for first
+is AI-assisted and agent-generated changes: an agent can widen a function's
+authority faster than a human can read the diff.
 
 - **Contracts** declare a function's authority, as JSDoc on ordinary
   TypeScript.
@@ -174,8 +175,7 @@ base HEAD (81ea225) vs the working tree, over test/fixtures/accident
     - `pricing.ts#priceOrder` `effect:network` — <why this increase is correct>
 
 Add each line above to ambit.approvals.md, with the reason, and
-commit it in the same change (DESIGN.md §6.3). An approval already in the base
-grants nothing.
+commit it in the same change. An approval already in the base grants nothing.
 
 2 symbols unchanged, out of 3 symbols compared.
 exit=1

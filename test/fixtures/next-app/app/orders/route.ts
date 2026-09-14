@@ -10,7 +10,7 @@ import { insertOrder, selectOrderTotals } from "../../lib/db.ts";
  * module — and the contract lives in the `ambitRoute` call beside it.
  *
  * Neither handler writes `@capabilities` or `@budget`: the literal `spec` is
- * the declaration (DESIGN.md §4.4, "Removing the double declaration").
+ * the declaration, so nothing is declared twice.
  */
 
 /**

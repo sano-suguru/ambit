@@ -16,7 +16,7 @@ export interface BudgetInput {
 }
 
 /**
- * A per-invocation budget (DESIGN.md §4.5). A budget is "a declaration, a
+ * A per-invocation budget. A budget is "a declaration, a
  * measurement, and a block", never a static guarantee: the checker's job here
  * is to make sure the
  * declaration itself is well-formed and to carry it to the runtime, not to
@@ -30,14 +30,14 @@ export interface Budget extends BudgetInput {
   readonly onExceed: OnExceed;
 }
 
-/** §4.5: `throw` (default) / `warn` / `abort`. */
+/** `throw` (default) / `warn` / `abort`. */
 export type OnExceed = "throw" | "warn" | "abort";
 
 const ON_EXCEED = ["throw", "warn", "abort"] as const;
 
 export const DEFAULT_ON_EXCEED: OnExceed = "throw";
 
-/** Whether a string is one of §4.5's three `onExceed` policies. */
+/** Whether a string is one of the three `onExceed` policies. */
 export function isOnExceed(value: string): value is OnExceed {
   return (ON_EXCEED as readonly string[]).includes(value);
 }
@@ -75,7 +75,7 @@ function isNumericKey(key: string): key is NumericKey {
  * Parse a `@budget timeMs=500 costUsd=0.01 llmCalls=2 onExceed=throw` tag.
  *
  * `undefined` when any part is malformed — an unknown key, a non-numeric
- * limit, a negative limit, an `onExceed` outside the three §4.5 names, a
+ * limit, a negative limit, an `onExceed` outside the three policy names, a
  * repeated key, or no limit at all. A budget that does not parse is rejected
  * rather than partly applied, for the reason AMB-E002 rejects a misspelled
  * effect: a declaration read as narrower than written is a manufactured

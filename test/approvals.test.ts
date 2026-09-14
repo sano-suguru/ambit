@@ -8,7 +8,7 @@ import {
 } from "../src/core/index.ts";
 
 /**
- * The approval ledger, as a pure function (DESIGN.md §6.3).
+ * The approval ledger, as a pure function.
  *
  * Text and two authority dumps in, a decision out. No repository is involved
  * here for the same reason `authority-diff.test.ts` needs none: the rule that
@@ -97,7 +97,7 @@ describe("parseApprovals", () => {
 
   it("reports a `-` line that is not an approval instead of demoting it to prose", () => {
     // A typo in an approval that reads as prose is an approval that does
-    // nothing and says nothing (DESIGN.md §3.4).
+    // nothing and says nothing.
     const { approvals, malformed } = parseApprovals(
       [
         "## Approvals",
@@ -178,7 +178,7 @@ describe("reviewIncreases", () => {
   });
 
   it("matches an authority as exact text, so a wider capability does not cover a narrower one", () => {
-    // Containment is how a grant relates to a requirement (§4.4). An approval
+    // Containment is how a grant relates to a requirement. An approval
     // is neither, and one line must not quietly cover a family of increases.
     const diff = diffAuthority(
       [

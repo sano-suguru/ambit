@@ -59,7 +59,7 @@ export const literalSatisfies = {
 } satisfies Dispatcher;
 
 // A member whose body lives in the literal carries its own contract
-// (DESIGN.md §4.1: `@effects` goes on any function or method).
+// (`@effects` goes on any function or method).
 export const literalWithDeclaredMethod = {
   /** @effects fs_read */
   read(): number {
@@ -141,8 +141,8 @@ export function callsTypeAliasParam(d: DispatcherAlias): number {
 }
 
 // -- the same rule on a class instance ------------------------------------
-// DESIGN.md §4.2 rule 7: "Method resolution on class instances rests on the
-// same premise". The annotated and the bare binding must give one answer.
+// Method resolution on class instances rests on the same premise as on a
+// literal. The annotated and the bare binding must give one answer.
 
 interface Runner {
   run(): number;

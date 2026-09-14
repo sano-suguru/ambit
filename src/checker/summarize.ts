@@ -76,7 +76,8 @@ export interface SummarizedFiles {
 
 /**
  * Turn a backend's raw extraction into Ambit's own analysis representation
- * (DESIGN.md §3.4 layer 2), independent of which backend produced it.
+ * — compiler-free, so no compiler object outlives this step — independent of
+ * which backend produced it.
  *
  * The summaries alone. {@link summarizeFiles} is the same walk reporting the
  * config keys it matched as well.
@@ -106,8 +107,8 @@ export function summarizeFiles(
         boundary: parseDeclaredBoundary(fn.jsDoc),
         entrypoint: fn.jsDoc?.tags.has("entrypoint") ?? false,
       };
-      // An entry that owns several bodies is declarable by nobody (DESIGN.md
-      // §4.1 (a)). A config key naming it is deliberately not looked up, so
+      // An entry that owns several bodies is analyzed but declarable by
+      // nobody. A config key naming it is deliberately not looked up, so
       // it stays in `unmatchedExactKeys()` and is reported: a contract there
       // would be one sentence standing for several functions the author
       // cannot see separately, which is the guarantee surface growing by
@@ -164,7 +165,7 @@ interface SpecContract {
 
 /**
  * The declarations the registrations in one file make about the handlers they
- * name (DESIGN.md §4.4).
+ * name: a literal spec is read as that handler's own declaration.
  *
  * Only a registration whose `handler` is a declaration in this same file says
  * anything here — one naming a handler from elsewhere has no summary to attach
@@ -194,8 +195,7 @@ function specContracts(wrappers: readonly RuntimeWrapper[]): ReadonlyMap<SymbolI
 
 /**
  * Combine a JSDoc contract with the one `ambit.config.ts` declares for the
- * same symbol and the one the registration beside it fixes (DESIGN.md §4.1,
- * §4.4).
+ * same symbol and the one the registration beside it fixes.
  *
  * JSDoc wins per tag — a tag JSDoc declares is the one that propagates, and the
  * other sides fill only the tags JSDoc left out, so `@effects` in the code plus
@@ -343,8 +343,8 @@ function mergeContract(
  * A config `effects` list turned into an {@link EffectSet}. Every name is
  * either a standard effect or a user-defined one, which `validateConfig`
  * already guaranteed — a user-defined name expands to the standard effects it
- * stands for, and nothing but standard effects ever leaves this function
- * (DESIGN.md §4.1 (d)).
+ * stands for, and nothing but standard effects ever leaves this function, so
+ * only standard names reach a diagnostic.
  */
 function expandConfigEffects(names: readonly string[], aliases: EffectAliases): EffectSet {
   const effects: KnownEffect[] = [];
@@ -408,7 +408,7 @@ function parseDeclaredBudget(jsDoc: RawJsDoc | undefined): DeclaredBudget {
 }
 
 /**
- * `@boundary reason="..."`. DESIGN.md §4.6 makes `reason` mandatory, so a tag
+ * `@boundary reason="..."`. `reason` is mandatory, so a tag
  * without one does not declare a boundary — it declares an unexplained hole,
  * which is exactly what the tag exists to prevent. Both quoted and bare
  * `reason=` forms are accepted; anything else is `"invalid"`.
@@ -428,7 +428,7 @@ function parseDeclaredBoundary(jsDoc: RawJsDoc | undefined): DeclaredBoundary {
 }
 
 /**
- * `pure` is the literal spelling for the empty set (DESIGN.md §4.2 rule 2).
+ * `pure` is the literal spelling for the empty set.
  * Returns `undefined` when a token is neither `pure` nor a known effect (a
  * typo, e.g. `@effects netwrok`) — such a declaration must not silently
  * collapse to an empty (`pure`) contract. The caller reports this as
@@ -446,10 +446,9 @@ export function parseEffectsTag(text: string, aliases?: EffectAliases): EffectSe
       continue;
     }
     // A user-defined name is usable from `@effects` too, not only from
-    // config (DESIGN.md §4.2: "User-defined effects can be declared in
-    // `ambit.config.ts` as combinations of standard effects"). It expands here, so
-    // nothing downstream ever sees a name that is not a standard effect
-    // (§4.1 (d)).
+    // config, where it is defined as a combination of standard effects. It
+    // expands here, so nothing downstream ever sees a name that is not a
+    // standard effect.
     const expansion = aliases?.get(token);
     if (expansion === undefined) return undefined;
     effects.push(...expansion);
@@ -468,9 +467,9 @@ export type EffectAliases = ReadonlyMap<string, readonly KnownEffect[]> | undefi
  * {@link Call}, and more than one where the site also hands a function
  * reference to a callee that runs it (`arr.map(toCall)`).
  *
- * The extra entries are ordinary resolved calls: DESIGN.md §4.2 rule 4 says a
- * higher-order call's callback effects are "inferred from the actual argument
- * at the call site", and when that argument names a function this project
+ * The extra entries are ordinary resolved calls: a higher-order call's
+ * callback effects are inferred from the actual argument at the call site,
+ * not from a type signature, and when that argument names a function this project
  * extracted, the argument *is* the answer. Only a callee already known to
  * invoke what it is handed produces them — a higher-order allowlisted builtin
  * or constructor, or a mutating builtin, whose verdict covers the receiver and
@@ -498,9 +497,9 @@ function toCalls(site: CallSite): readonly Call[] {
  */
 function invokesItsCallableArguments(call: Call): boolean {
   // A mutating builtin that was handed a comparator runs it — `arr.sort(cmp)`
-  // is the case DESIGN.md §4.2 names. The mutation verdict answers what
-  // happens to the receiver and says nothing about the comparator, so without
-  // the edge the comparator's effects would simply vanish.
+  // is settled on the actual argument like any callback. The mutation verdict
+  // answers what happens to the receiver and says nothing about the comparator,
+  // so without the edge the comparator's effects would simply vanish.
   if (call.kind === "mutation") return true;
   if (call.kind !== "known-pure" || call.qualifiedName === undefined) return false;
   return isConstructorKey(call.qualifiedName)
@@ -564,8 +563,8 @@ function toCall(site: CallSite): Call {
     }
     // A named call that didn't resolve to a project function and doesn't
     // match a known stub (e.g. a third-party library call): unresolved, not
-    // "no effect" (DESIGN.md §3.4 — never turn an unanalyzed call into
-    // "violation-free"). The connector layer may already know a more
+    // "no effect" — an unanalyzed call is never turned into "violation-free".
+    // The connector layer may already know a more
     // specific reason than the residual "unresolved-symbol" (see
     // `CallSite.unresolvedReason`'s doc comment).
     return {
@@ -637,7 +636,7 @@ function toConstructorCall(site: CallSite, qualifiedName: string): Call {
   }
   // A callback passed by reference is never walked, so an allowlisted
   // constructor that runs one (`new Promise(namedExecutor)`) cannot be
-  // trusted as effect-free (DESIGN.md §4.2 rule 4).
+  // trusted as effect-free: a callback it cannot infer is `unknown`.
   if (
     isKnownPureConstructor(qualifiedName, withoutArguments) &&
     !(site.callbackByReference && isHigherOrderConstructor(qualifiedName))

@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import process from "node:process";
 
 /**
- * What both §3.5 gate-4 probes count, and how they report it.
+ * What both M0.5 gate-4 probes count, and how they report it.
  *
  * The counts exist to prove the two backends did the same work. If `calls` or
  * `resolved` differ between them, the timings below are not comparable and the
@@ -32,7 +32,7 @@ export function emptyCounts(): ProbeCounts {
   };
 }
 
-/** The tags Ambit reads off a declaration (DESIGN.md §4.1). */
+/** The tags Ambit reads off a declaration. */
 export const CONTRACT_TAGS: ReadonlySet<string> = new Set([
   "effects",
   "capabilities",
@@ -45,7 +45,7 @@ export const CONTRACT_TAGS: ReadonlySet<string> = new Set([
  * Peak RSS of this process's own child processes, in MiB.
  *
  * A backend that runs the analysis out of process pays for two heaps, and
- * §3.5 gate 4 asks for "memory including child processes". The client
+ * M0.5 gate 4 asks for "memory including child processes". The client
  * exposes no pid,
  * so the children are found through the process table; a backend with no child
  * simply reports 0.

@@ -1,15 +1,15 @@
 /**
- * DESIGN.md §3.5 gate 3 — correctness of updates.
+ * M0.5 gate 3 (ADR-0001) — correctness of updates.
  *
  *     node scripts/m05-update-correctness.ts
  *
  * Changes one thing at a time in a throwaway copy of
  * `test/fixtures/backend-conformance` and asks each backend whether it now
  * reports the new state. Everything is checked at the *backend* level, which is
- * the layer §3.5 gate 3 is about; this is not M1's resident checker and does
+ * the layer gate 3 is about; this is not M1's resident checker and does
  * not implement one.
  *
- * Two of §3.5's five change kinds are deliberately not measured per backend.
+ * Two of gate 3's five change kinds are deliberately not measured per backend.
  * `ambit.config.ts` and `src/stubs/` are read by Ambit and never by a compiler
  * — `src/checker/config.ts` imports it, `src/stubs/*` is plain data — so both
  * backends receive exactly the same bytes through exactly the same code.

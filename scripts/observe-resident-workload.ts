@@ -137,7 +137,7 @@ interface FileRecord {
   readonly closure?: number;
 }
 
-/** The batch's class, and what the in-root part alone would be. Precedence is the §6.2 table's: the widest row wins. */
+/** The batch's class, and what the in-root part alone would be. Precedence: the class that re-checks the most wins. */
 function classifyBatch(
   files: readonly FileRecord[],
   unknownOps: number,
@@ -838,7 +838,7 @@ async function commitChild(sha: string, dir: string): Promise<CommitRecord> {
       }
     }
     // A caller reports in-root changes; an out-of-root project file cannot be
-    // reported, and §6.2 makes it a whole rebuild, so that batch reports nothing.
+    // reported, and it forces a re-check of every file, so that batch reports nothing.
     const changes: FileChange[] = files
       .filter(
         (f) =>

@@ -40,7 +40,7 @@ function routesFor(diagnostics: readonly Diagnostic[], name: string): readonly s
   return lines;
 }
 
-describe("AMB-I002 (DESIGN.md §4.1, §4.2 rule 6)", () => {
+describe("AMB-I002: why ambit init cannot propose a contract", () => {
   it("reports one diagnostic per function, naming each unresolved call and the route its reason implies", async () => {
     const { diagnostics, exitCode } = await run("init", FIXTURE_ROOT);
     expect(exitCode).toBe(0);
@@ -62,8 +62,8 @@ describe("AMB-I002 (DESIGN.md §4.1, §4.2 rule 6)", () => {
     const { diagnostics } = await run("init", FIXTURE_ROOT);
     const route = (name: string): string => routesFor(diagnostics, name).join("\n");
 
-    // A third-party declaration: a stub, or explicit isolation — named with
-    // the accounting §4.3 gives it, never as a fix (ADR-0011).
+    // A third-party declaration: a stub, or explicit isolation — the latter
+    // named as tallied apart from analysis, never as a fix (ADR-0011).
     expect(route("callsExternalModule")).toContain("node:path.resolve (app.ts:");
     expect(route("callsExternalModule")).toContain("external-module");
     expect(route("callsExternalModule")).toContain("a stub for that package");
@@ -79,20 +79,24 @@ describe("AMB-I002 (DESIGN.md §4.1, §4.2 rule 6)", () => {
     expect(route("callsBuiltinMethod")).toContain("Date.setFullYear (app.ts:");
     expect(route("callsBuiltinMethod")).toContain("a gap in Ambit, not in this codebase");
 
-    // Decided at the call sites, per §4.2 rule 4 — both the parameter called
-    // directly and the one handed to a mutator by reference.
+    // Decided from the actual argument at each call site — both the parameter
+    // called directly and the one handed to a mutator by reference.
     expect(route("callsCallbackParameter")).toContain("callback-parameter");
-    expect(route("callsCallbackParameter")).toContain("§4.2 rule 4");
+    expect(route("callsCallbackParameter")).toContain(
+      "inferred from the actual argument at each call site",
+    );
     expect(route("sortsWithCallbackByReference")).toContain("callback-by-reference");
-    expect(route("sortsWithCallbackByReference")).toContain("§4.2 rule 4");
+    expect(route("sortsWithCallbackByReference")).toContain("inferred from the actual argument");
 
     expect(route("callsAnyTyped")).toContain("any-typed");
     expect(route("callsAnyTyped")).toContain("a type annotation on that value");
 
-    // §4.2 rule 6 — unanalyzable by design, so the route says so rather than
-    // asking for work that would not help.
+    // Dynamic `import()`, `eval` and `new Function` are `unknown` by rule, so
+    // the route says so rather than asking for work that would not help.
     for (const name of ["callsDynamicImport", "callsEval", "callsNewFunction"]) {
-      expect(route(name)).toContain("not analyzable by design (§4.2 rule 6)");
+      expect(route(name)).toContain(
+        "not analyzable by design, so Ambit always treats it as unknown",
+      );
     }
     expect(route("callsDynamicImport")).toContain("dynamic-import");
     expect(route("callsEval")).toContain("eval");
@@ -102,14 +106,16 @@ describe("AMB-I002 (DESIGN.md §4.1, §4.2 rule 6)", () => {
     expect(route("callsBodylessDeclaration")).toContain("no implementation in the project");
 
     expect(route("callsThroughUnknownReceiver")).toContain("unresolved-symbol");
-    expect(route("callsThroughUnknownReceiver")).toContain("§4.2 rule 7");
+    expect(route("callsThroughUnknownReceiver")).toContain(
+      "no one object literal certainly behind it",
+    );
   });
 
   it("carries no fixes at all — reporting why a contract cannot be written is not proposing one", async () => {
-    // DESIGN.md §5.3: `fixes[].edits` are concrete applicable patches. Every
-    // route here is a person's decision or work on Ambit itself, so there is
-    // no patch to emit — and §4.3's accounting is why `@boundary` in
-    // particular is never offered as one (ADR-0011).
+    // `fixes[].edits` are concrete applicable patches. Every route here is a
+    // person's decision or work on Ambit itself, so there is no patch to emit
+    // — and a boundary being tallied apart from succeeding at analysis is why
+    // `@boundary` in particular is never offered as one (ADR-0011).
     const { diagnostics } = await run("init", FIXTURE_ROOT);
     const reported = diagnostics.filter((d) => d.id === "AMB-I002");
     expect(reported.length).toBeGreaterThan(0);

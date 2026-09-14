@@ -1,12 +1,12 @@
 /**
- * DESIGN.md §3.5 gate 3, legacy side.
+ * M0.5 gate 3 (ADR-0001), legacy side.
  *
  *     node scripts/m05-probe/update-legacy.ts <corpusRoot> <mutationId>
  *
  * Observes, mutates, and observes again inside one process. The legacy path has
  * no snapshot to keep, so "re-query" means building a second `ts.Program` — the
  * same thing `ambit check` does on every run. That is why the re-query cost
- * below is the *whole* cost and not an increment: §6.2's resident path is not
+ * below is the *whole* cost and not an increment: the resident check path is not
  * implemented, and this measurement is the reason the gap matters rather than a
  * substitute for closing it.
  */

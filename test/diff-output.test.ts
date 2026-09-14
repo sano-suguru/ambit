@@ -22,7 +22,7 @@ function record(symbol: string, parts: Partial<AuthorityRecord> = {}): Authority
 }
 
 interface Ledgers {
-  /** The ledger text on each side, as `ambit diff` reads it (DESIGN.md §6.3). */
+  /** The ledger text on each side, as `ambit diff` reads it. */
   readonly base?: string;
   readonly head?: string;
   readonly renames?: RenamedFiles;
@@ -265,7 +265,7 @@ describe("formatDiffGithub", () => {
       ),
     );
     const annotations = output.split("\n").filter((line) => line.startsWith("::"));
-    // `llm` implies `network` (DESIGN.md §4.2), so the declared set expands.
+    // `llm` implies `network`, so the declared set expands.
     expect(annotations.length).toBeGreaterThanOrEqual(1);
     expect(output).toContain("(new symbol)");
   });

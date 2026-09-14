@@ -3,7 +3,7 @@ import type { LiteralArgument } from "../src/core/index.ts";
 import { lookupHttpCapability } from "../src/stubs/http-capabilities.ts";
 
 /**
- * DESIGN.md §4.4's static half: which `http:<method>:<host>` a call requires,
+ * Static capability checking: which `http:<method>:<host>` a call requires,
  * read from the source. The rule these tests exist to hold is the negative
  * one — a target the source does not fix must come back `targetUnknown`, never
  * as a host guessed from a prefix.
@@ -57,7 +57,7 @@ describe("lookupHttpCapability", () => {
     });
   });
 
-  it("keeps the port as written, matching §4.4's own `http:get:localhost:8080` spelling", () => {
+  it("keeps the port as written, never filling in or eliding a default", () => {
     expect(lookupHttpCapability("fetch", url("http://localhost:8080/health"))).toEqual({
       capability: { resource: "http", action: "get", target: "localhost:8080" },
     });

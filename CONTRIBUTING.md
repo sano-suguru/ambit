@@ -1,6 +1,6 @@
 # Contributing
 
-Ambit is pre-1.0 with no external adopters. This file is the procedure: how a
+Ambit is pre-1.0. This file is the procedure: how a
 change is proposed, what record it leaves, and what is verified before it lands.
 What Ambit *is* is [`docs/DESIGN.md`](docs/DESIGN.md); the working rules for
 coding agents are [`AGENTS.md`](AGENTS.md).

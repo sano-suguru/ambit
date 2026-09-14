@@ -22,8 +22,7 @@ export interface CoverageReport {
   readonly functionsDeclared: number;
   /**
    * How {@link functionsDeclared} splits by where the declaration was written
-   * (DESIGN.md §4.1, "Out-of-code declarations"). Reported apart because the
-   * two are not
+   * — in JSDoc or in `ambit.config.ts`. Reported apart because the two are not
    * interchangeable evidence: a JSDoc contract travels with the code and
    * survives the package being removed (P5), while a config contract is a
    * statement *about* code that was not touched — often third-party or
@@ -33,12 +32,11 @@ export interface CoverageReport {
   readonly functionsDeclaredByJsDoc: number;
   readonly functionsDeclaredByConfig: number;
   /**
-   * Functions whose body is excluded from static analysis by `@boundary`
-   * (DESIGN.md §4.6). Counted apart from everything else because §4.3
-   * requires it: "Moving something to a boundary is tallied separately from
-   * succeeding at analysis". A boundary is a
-   * declared hole, and a coverage figure that folded it into the resolved
-   * count would report the hole as progress.
+   * Functions whose body is excluded from static analysis by `@boundary`.
+   * Counted apart from everything else because moving something to a boundary
+   * is not succeeding at analysis. A boundary is a declared hole, and a
+   * coverage figure that folded it into the resolved count would report the
+   * hole as progress.
    */
   readonly functionsBoundary: number;
   /** Functions marked `@entrypoint`, and how many of those declare no `@capabilities`. */
@@ -47,9 +45,8 @@ export interface CoverageReport {
   readonly functionsSkipped: number;
   readonly skippedByKind: ReadonlyMap<SkippedFunctionKind, number>;
   /**
-   * The primary KPI (DESIGN.md §4.3: "`ambit check --coverage` outputs the
-   * proportion of the codebase that depends on `unknown` and where it occurs.
-   * It is treated as a primary KPI"): the fraction of *all* extracted functions
+   * The primary KPI — the proportion of the codebase that depends on
+   * `unknown`: the fraction of *all* extracted functions
    * — declared or not — whose propagated effect set carries `unknown`. This
    * is what a user actually cares about ("can Ambit say anything definite
    * about this function?"), not the raw call-site resolution rate below,
@@ -61,8 +58,8 @@ export interface CoverageReport {
    * {@link functionUnknownRate} because tagging a function `@boundary` moves
    * it out of the unknown numerator while leaving it in the denominator.
    * Without this figure beside it, declaring boundaries would read as an
-   * improving KPI (DESIGN.md §4.3: "Moving something to a boundary is tallied
-   * separately from succeeding at analysis").
+   * improving KPI, when moving something to a boundary is not succeeding at
+   * analysis.
    * The two rates together are the fraction of functions whose contract is
    * not backed by a verified body.
    */
@@ -80,7 +77,7 @@ export interface CoverageReport {
    */
   readonly callSitesInlined: number;
   /**
-   * In-place mutation sites (DESIGN.md §4.2, "Local mutation and `pure`").
+   * In-place mutation sites, local or escaping.
    * Counted apart from `callSitesPure` and `callSitesStub`: a local mutation
    * carries no effect but is not the same evidence as a call proven pure, and
    * an escaping one is a `state_write` that no stub table produced.
@@ -196,10 +193,10 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
  *
  * Both maps this is applied to are filled in the order files were walked and
  * kinds encountered, and both reach the output through `Object.fromEntries`
- * and through the text formatter, which serialize insertion order. DESIGN.md
- * §6.2's equivalence law is over bytes, and a resident path that re-sums these
- * from per-file slices would otherwise have to reproduce an encounter order to
- * be equal — which is a property of the walk, not of the tree.
+ * and through the text formatter, which serialize insertion order. A resident
+ * result must equal a cold run byte for byte, and a resident path that re-sums
+ * these from per-file slices would otherwise have to reproduce an encounter
+ * order to be equal — which is a property of the walk, not of the tree.
  *
  * Sorted by code point for the reason `sortDiagnostics` is.
  */

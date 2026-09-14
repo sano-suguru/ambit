@@ -203,7 +203,7 @@ describe("summariesEqual", () => {
     ).toBe(false);
   });
 
-  it("separates positions, which are part of the bytes §6.2 compares", () => {
+  it("separates positions, which are part of the compared bytes", () => {
     expect(summariesEqual(summary(), summary({ location: ELSEWHERE }))).toBe(false);
     expect(summariesEqual(summary(), summary({ declarationStart: ELSEWHERE }))).toBe(false);
     expect(summariesEqual(summary(), summary({ jsDocRange: AT }))).toBe(false);

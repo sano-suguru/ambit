@@ -67,7 +67,7 @@ function named(diagnostics: readonly Diagnostic[], name: string): Diagnostic | u
   return diagnostics.find((d) => d.message.startsWith(`${name} `));
 }
 
-describe("ambit init (DESIGN.md §4.1)", () => {
+describe("ambit init", () => {
   it("proposes the observed effect set for each undeclared function", async () => {
     const { diagnostics, exitCode } = await run("init", FIXTURE_ROOT);
     // Contracts left to write are not a failed check.
@@ -91,7 +91,7 @@ describe("ambit init (DESIGN.md §4.1)", () => {
 
   it("proposes nothing for a function whose effects could not be resolved", async () => {
     // The guard that matters: proposing `pure` for an unanalyzable function
-    // would convert "could not tell" into a declared guarantee (§4.3). What
+    // would convert "could not tell" into a declared guarantee. What
     // it gets instead is AMB-I002 — the reason, carrying no patch.
     const { diagnostics } = await run("init", FIXTURE_ROOT);
     const reported = named(diagnostics, "opaque");

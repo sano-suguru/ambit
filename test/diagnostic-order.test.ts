@@ -11,9 +11,9 @@ import type { ExtractedProject, TsBackend } from "../src/core/index.ts";
  * Before this, `diagnose` iterated the propagated state's insertion order,
  * which follows the summaries, which follow `ExtractedProject.files`. That is
  * a property of the walk: a backend that read a directory differently — or
- * DESIGN.md §6.2's resident path, which patches one file's entry into a store
+ * the resident check path, which patches one file's entry into a store
  * rather than rebuilding the list — would report the same findings in a
- * different order, and §6.2's equivalence law is stated in bytes.
+ * different order, and resident must equal cold byte for byte.
  *
  * The test drives that difference directly rather than hoping a real backend
  * produces one: the same adopted backend, with `files` reversed. Everything

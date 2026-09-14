@@ -10,7 +10,7 @@ import {
 } from "../src/core/effects.ts";
 
 describe("EffectSet", () => {
-  it("pure is the empty effect set (DESIGN.md §4.2 rule 2)", () => {
+  it("pure is the empty effect set", () => {
     const pure = emptyEffectSet();
     expect(pure.effects.size).toBe(0);
     expect(pure.unknown).toBe(false);

@@ -1,5 +1,5 @@
-// Calling a method on a receiver bound by `const` to one `new` (DESIGN.md
-// §4.2 rule 7, the same premise as the object-literal receiver: `const` fixes
+// Calling a method on a receiver bound by `const` to one `new` (the
+// same premise as the object-literal receiver: `const` fixes
 // the binding, not the object). The `extends` chain is walked because an
 // inherited method is the one that runs — and walked derived-first, because an
 // override is the implementation reached at runtime.

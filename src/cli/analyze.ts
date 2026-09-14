@@ -17,13 +17,13 @@ export type Analysis = AnalysisResult;
 export interface AnalyzeOptions {
   /** `init`: report contract proposals instead of violations. */
   readonly propose?: boolean;
-  /** `init --config`: also propose `ambit.config.ts` entries (DESIGN.md §4.1 (a)). */
+  /** `init --config`: also propose `ambit.config.ts` entries where JSDoc cannot go. */
   readonly proposeConfig?: boolean;
-  /** `--strict`: promote the `unknown` warnings to errors (DESIGN.md §4.2 rule 3). */
+  /** `--strict`: promote the `unknown` warnings to errors. */
   readonly strict?: boolean;
   /**
    * The connection layer to extract with. Defaults to `legacyTsBackend`, the
-   * backend DESIGN.md §3.5 adopted, and every product path leaves it unset —
+   * backend Ambit adopted (ADR-0001), and every product path leaves it unset —
    * `ambit check`, `ambit diff` and `ambit init` do not expose it, so the
    * authority for a diagnostic, an exit code and a review outcome is the
    * adopted backend and nothing else.
@@ -31,11 +31,11 @@ export interface AnalyzeOptions {
    * It is here so that a *shadow* run (`scripts/shadow-analysis.ts`) can put a
    * second backend through the identical pipeline and compare Ambit's own
    * semantics rather than two compilers' ASTs. Passing one does not make it
-   * authoritative: §3.5's default is changed by an RFC, not by a parameter.
+   * authoritative: the default backend is changed by an RFC, not by a parameter.
    *
    * It is also not reachable from outside this repository. `analyze` is not
    * re-exported by `src/index.ts` and no subpath in `package.json`'s `exports`
-   * leads to it, so the guaranteed surface §9.2 lists is unchanged and no
+   * leads to it, so the guaranteed surface is unchanged and no
    * consumer can substitute a backend. Should `analyze` ever be published, this
    * option must not go with it: a measurement-only entry point belongs beside
    * it rather than inside it, or the library's authority boundary widens where
@@ -53,13 +53,12 @@ export interface AnalyzeOptions {
  * directory even slightly differently would report the difference as a change
  * in authority.
  *
- * This is also the oracle the resident path (DESIGN.md §6.2) is tested
+ * This is also the oracle the resident path is tested
  * against, so it stays a pure function of the directory: nothing here is
  * allowed to become a cache.
  *
  * Throws on any failure. A caller turns that into exit 2 — an analysis that
- * could not run must never be reported as "checked, nothing wrong"
- * (DESIGN.md §3.4).
+ * could not run must never be reported as "checked, nothing wrong".
  *
  * `process` is `loadConfig`'s, not this function's own: an `ambit.config.ts`
  * that imports another module is evaluated in a worker thread, because Node's
@@ -73,7 +72,7 @@ export interface AnalyzeOptions {
  */
 export async function analyze(dir: string, options: AnalyzeOptions = {}): Promise<Analysis> {
   // Loaded before extraction so a broken config stops the run before any
-  // work is reported (DESIGN.md §3.4): a config that could not be read must
+  // work is reported: a config that could not be read must
   // never come out as "checked, no violations".
   const loaded = await loadConfig(dir);
   const config: ResolvedConfig | undefined = loaded ? resolveConfig(loaded, dir) : undefined;
@@ -91,7 +90,7 @@ export async function analyze(dir: string, options: AnalyzeOptions = {}): Promis
     : await legacyTsBackend.extractProject(dir);
   // No extracted function anywhere means "nothing analyzable was found"
   // (zero .ts files, or every function-like node was skipped) — that must
-  // not read the same as "checked, no violations" (DESIGN.md §3.4). Counted
+  // not read the same as "checked, no violations". Counted
   // over functions rather than over `files`, because a file can now be
   // pushed for its `withAmbit` wrappers alone.
   const functionsFound = project.files.reduce((total, file) => total + file.functions.length, 0);
@@ -125,10 +124,10 @@ export async function analyze(dir: string, options: AnalyzeOptions = {}): Promis
  * Where `ambit init --config` should write, and what is already there — the
  * config file's path and text.
  *
- * `undefined` when no config file was found: §4.1's patch is an *append* to a
+ * `undefined` when no config file was found: the patch is an *append* to a
  * `contracts` block, and inventing a whole file (with a `defineConfig` import
  * whose specifier depends on how the consumer installed Ambit) is not a patch
- * this command can generate safely (§5.3).
+ * this command can generate safely.
  */
 function configTarget(
   config: ResolvedConfig | undefined,

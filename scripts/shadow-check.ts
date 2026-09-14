@@ -87,7 +87,7 @@ async function reportFor(root: string, selfCheck: boolean): Promise<ShadowReport
   const { report, errors } = await compareRoot(root, selfCheck);
   if (!report) {
     const detail = errors.map((e) => `${e.backend} failed during ${e.phase}: ${e.message}`);
-    // A side that did not run is not a clean gate (DESIGN.md §3.4).
+    // A side that did not run is not a clean gate, and never reads as one.
     throw new Error(`${root}: the comparison could not be made\n  ${detail.join("\n  ")}`);
   }
   return report;
@@ -135,7 +135,7 @@ async function main(): Promise<number> {
 
   // Refuses rather than falling back to the adopted backend on both sides: a
   // clean gate that means "the shadow backend never ran" is the failure
-  // DESIGN.md §3.4 forbids.
+  // Ambit never allows.
   if (!nativeTs7Backend.version) {
     process.stderr.write(
       "the native compiler reported no version.\nRun: node scripts/m05-native-install.ts\n",

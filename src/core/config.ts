@@ -1,5 +1,5 @@
 /**
- * The shape of `ambit.config.ts` (DESIGN.md §4.1, "Out-of-code declarations").
+ * The shape of `ambit.config.ts`: contracts declared outside the code.
  *
  * Types only — no loader, no filesystem, no compiler. This module is what
  * `ambit-ts/config` exports, so a consumer's config file gets the same type
@@ -11,13 +11,13 @@ import type { BudgetInput } from "./budget.ts";
 /**
  * One symbol's contract, written where the code cannot be touched.
  *
- * The five keys are the five JSDoc contract tags (§4.1), and they mean the
+ * The five keys are the five JSDoc contract tags, and they mean the
  * same thing here as there — a config declaration is not a weaker kind of
  * declaration, it is the same declaration written somewhere else.
  *
  * `effects` accepts a user-defined name from {@link AmbitConfig.effects}
  * alongside the standard ones; the loader expands it before anything else
- * sees it (§4.1 (d)).
+ * sees it.
  */
 export interface ConfigContract {
   readonly effects?: readonly string[];
@@ -25,15 +25,14 @@ export interface ConfigContract {
   /** The `@budget` tag's fields, as an object rather than as tag text. */
   readonly budget?: BudgetInput;
   readonly entrypoint?: boolean;
-  /** `@boundary reason="…"`'s reason. §4.6 makes it mandatory, so there is no bare `true`. */
+  /** `@boundary reason="…"`'s reason. It is mandatory, so there is no bare `true`. */
   readonly boundary?: string;
 }
 
 export interface AmbitConfig {
   /**
-   * User-defined effect names, each a combination of standard effects
-   * (DESIGN.md §4.2: "User-defined effects can be declared in
-   * `ambit.config.ts` as combinations of standard effects"). Usable from both
+   * User-defined effect names, each a combination of standard effects.
+   * Usable from both
    * `@effects` and {@link ConfigContract.effects}. Values are standard effect names
    * only: a definition never expands into another definition.
    */
@@ -41,13 +40,12 @@ export interface AmbitConfig {
   /**
    * Contracts keyed by `"<file>#<symbol>"`. `<file>` is relative to this
    * config file's directory and may use `*` and `**`; `<symbol>` is the
-   * declaration path and may not (§4.1 (a), (b)).
+   * declaration path and may not.
    */
   readonly contracts?: Readonly<Record<string, ConfigContract>>;
   /**
    * File globs — same syntax as a key's `<file>` half — whose diagnostics get
-   * the promotion `--strict` applies, and only theirs (§4.3: "`strict` can be
-   * set per directory in `ambit.config.ts`").
+   * the promotion `--strict` applies, and only theirs.
    */
   readonly strict?: readonly string[];
 }

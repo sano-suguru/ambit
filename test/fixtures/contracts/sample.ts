@@ -1,5 +1,5 @@
-// Fixtures for the contract tags beyond @effects: @capabilities (DESIGN.md
-// §4.4), @entrypoint (§4.1/§4.4), @boundary (§4.6), @budget (§4.5).
+// Fixtures for the contract tags beyond @effects: @capabilities,
+// @entrypoint, @boundary, @budget.
 
 /** @capabilities db:read:users */
 export async function readUser(): Promise<void> {}

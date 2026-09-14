@@ -123,7 +123,7 @@ describe("ky", () => {
 
   it("says nothing about the methods that build an instance instead of sending", () => {
     // `create` / `extend` return a new `KyInstance`. No row, so `unknown` —
-    // never "no effect" (DESIGN.md §3.4).
+    // never "no effect".
     expect(lookupStubEffect("ky.create")).toBeUndefined();
     expect(lookupStubEffect("ky.extend")).toBeUndefined();
     expect(lookupHttpCapability("ky.extend", url("https://example.test"))).toBeUndefined();

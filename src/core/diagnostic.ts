@@ -34,12 +34,12 @@ export interface ContractOperation {
 }
 
 /**
- * DESIGN.md §5.1 `contract` field, for the `effects` category.
+ * A diagnostic's `contract` field, for the `effects` category.
  *
  * `declared` uses `"pure"` as a literal spelling for the declared empty set
- * (matching the §5.1 example: `"declared": ["pure"]`), rather than `[]` —
+ * (`"declared": ["pure"]`), rather than `[]` —
  * `EffectSet`'s internal representation collapses `pure` to an empty
- * `effects` set (DESIGN.md §4.2 rule 2), but that internal choice should not
+ * `effects` set, but that internal choice should not
  * leak into what a human or an agent reads back from the diagnostic.
  */
 export interface EffectsContract {
@@ -51,16 +51,16 @@ export interface EffectsContract {
    * callee's `@effects` declaration with no matching operation in its body, or
    * from a mutation, which has no operation to name. Never synthesized — an
    * unknown site stays absent rather than falling back to the function's
-   * declaration line (DESIGN.md §5.3).
+   * declaration line.
    */
   readonly operation?: ContractOperation;
 }
 
 /**
- * DESIGN.md §5.1 `contract` field for the `capabilities` category. Same
+ * A diagnostic's `contract` field for the `capabilities` category. Same
  * declared/observed/via shape as {@link EffectsContract}; `required` is the
  * capability set the body actually needs, and `excess` narrows it to the ones
- * the declaration does not grant (§4.4: capabilities may only narrow from
+ * the declaration does not grant (capabilities may only narrow from
  * caller to callee).
  */
 export interface CapabilitiesContract {
@@ -74,7 +74,7 @@ export type DiagnosticContract = EffectsContract | CapabilitiesContract;
 
 /**
  * Narrow a diagnostic's `contract` to the effects shape. The union carries no
- * discriminant field on purpose: DESIGN.md §5.1 fixes the wire shape of a
+ * discriminant field on purpose: docs/DESIGN.md fixes the wire shape of a
  * `contract`, and an extra key invented for TypeScript's convenience would be
  * a schema change nobody asked for. `category` already tells a consumer which
  * shape to expect; this is the in-process equivalent.
@@ -102,9 +102,9 @@ export interface FixImpact {
 
 /**
  * A fix candidate. `edits` must be a concrete, applicable patch — never a
- * summary-only or elided candidate (DESIGN.md §5.3). `consistentWithContract`
+ * summary-only or elided candidate. `consistentWithContract`
  * separates a fix that preserves the declared contract from one that widens
- * it (§5.2).
+ * it.
  */
 export interface DiagnosticFix {
   readonly rank: number;
@@ -117,11 +117,11 @@ export interface DiagnosticFix {
 }
 
 /**
- * The analysis backend that produced a diagnostic (DESIGN.md §3.4: "Give
- * diagnostics, coverage, and performance records information that identifies
- * the analysis engine and its version").
+ * The analysis backend that produced a diagnostic, so that a backend switch
+ * never happens without notice: diagnostics identify the analysis engine and
+ * its version.
  * Only the engine identity is captured here; the schema version and Ambit's
- * own version that §5.2 groups alongside it are not yet defined.
+ * own version are not yet defined.
  */
 export interface DiagnosticEngine {
   readonly name: string;
@@ -129,7 +129,7 @@ export interface DiagnosticEngine {
 }
 
 /**
- * One diagnostic, matching the shape in DESIGN.md §5.1. `ambit check
+ * One diagnostic, matching the shape in docs/DESIGN.md. `ambit check
  * --format json` emits one of these per line (NDJSON).
  */
 export interface Diagnostic {
@@ -139,7 +139,7 @@ export interface Diagnostic {
   readonly message: string;
   readonly location: SourceLocation;
   readonly contract?: DiagnosticContract;
-  /** Empty when no concrete, applicable patch could be generated (§5.3). */
+  /** Empty when no concrete, applicable patch could be generated. */
   readonly fixes: readonly DiagnosticFix[];
   readonly docs?: string;
   readonly engine: DiagnosticEngine;

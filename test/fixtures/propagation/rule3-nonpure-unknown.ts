@@ -1,6 +1,6 @@
 /**
  * A non-pure declaration reaching `unknown` (generalized rule 3: AMB-W001 is
- * not limited to `@effects pure` — see DESIGN.md §4.2, diagnose.ts).
+ * not limited to `@effects pure` — see diagnose.ts).
  * `network` is declared and also observed directly, so no excess-effects
  * violation (AMB-E001) fires here; only the unresolved call should warn.
  */

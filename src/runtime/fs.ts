@@ -14,15 +14,15 @@ import { checkCapabilities } from "./enforce.ts";
  * `import { readFileSync } from "node:fs"` in the application would then be
  * bound to the original — even from a preload. Reaching the module through
  * `createRequire` leaves the snapshot to be taken later, from the patched object,
- * which is what makes §4.4 (a)'s preload row true. Measured both ways.
+ * which is what lets a hook installed from a preload take effect. Measured
+ * both ways.
  */
 const requireBuiltin = createRequire(import.meta.url);
 const fs = requireBuiltin("node:fs") as typeof nodeFs;
 const fsPromises = requireBuiltin("node:fs/promises") as typeof nodeFsPromises;
 
 /**
- * Runtime enforcement for `node:fs` and `node:fs/promises` (DESIGN.md §4.4
- * (a), (b)).
+ * Runtime enforcement for `node:fs` and `node:fs/promises`.
  *
  * The mechanism is a monkeypatch of the module's own exports object, chosen
  * over `diagnostics_channel` (which cannot block: a subscriber's `throw` does
@@ -83,8 +83,8 @@ const OPERATIONS: ReadonlyMap<string, FsRule> = new Map<string, FsRule>([
 const FLAG_OPERATIONS: ReadonlySet<string> = new Set(["open"]);
 
 /**
- * `existsSync` is the one read that must not answer `false` when denied
- * (DESIGN.md §4.4 (a)): "not there" and "not allowed to look" are different
+ * `existsSync` is the one read that must not answer `false` when denied:
+ * "not there" and "not allowed to look" are different
  * answers, and returning `false` would report the second as the first.
  */
 const SYNC_ONLY: ReadonlySet<string> = new Set(["existsSync"]);
@@ -94,8 +94,9 @@ const SYNC_ONLY: ReadonlySet<string> = new Set(["existsSync"]);
  * exactly what a given path resolves to before granting it.
  *
  * Relative paths resolve against `process.cwd()` *at the time of the call*,
- * `Buffer` paths are decoded, and a `file:` URL is converted — §4.4 (b)'s
- * normalisation, so that one file has one spelling in a grant.
+ * `Buffer` paths are decoded, and a `file:` URL is converted — the target is
+ * the absolute path resolved at call time, so that one file has one spelling in
+ * a grant.
  */
 export function fsCapabilities(rule: FsRule, args: readonly unknown[]): readonly string[] {
   const required: string[] = [];
@@ -186,7 +187,7 @@ export function installFsHook(): () => void {
 /**
  * Deliver a denial the way the API's own errors arrive: `throw` for the sync
  * family, `process.nextTick(callback, error)` for the callback family, a
- * rejected promise for `fs/promises` (DESIGN.md §4.4 (a)). A callback API that
+ * rejected promise for `fs/promises`. A callback API that
  * threw synchronously would break `try`/`catch`-free call sites that are
  * correct as written.
  */

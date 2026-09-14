@@ -29,7 +29,7 @@ function forFunction(diagnostics: readonly Diagnostic[], name: string): readonly
 }
 
 describe("construction (new X / super) is part of the call graph", () => {
-  // DESIGN.md §3.4: an unanalyzed path must stay visible. Before this,
+  // An unanalyzed path must stay visible. Before this,
   // `new X(...)` produced no call site at all, so a `pure` function that
   // constructed a networking client passed the check silently.
   it("propagates a constructor's own effects to the constructing function", async () => {

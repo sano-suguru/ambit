@@ -27,8 +27,8 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 
 | Metric | Current | Target |
 |---|---:|---:|
-| **External adopters** | **0** | **1** |
-| Authority increases an external team rejected or explicitly approved | 0 | > 0 |
+| **External pilot evidence** | **not yet collected** | the Phase 1 evidence in `ROADMAP.md` |
+| Reviewer actions an Ambit report caused on an external team's pull requests | not yet collected | > 0 |
 | `unknown` rate, real third-party code (corpus median, 4,200 functions) | 52.9% | lower — no target (see below) |
 | `unknown` rate, adopting-team-equivalent fixture (`realistic-api`) | 1.9% (1/53) | no target (see below) |
 | `unknown` rate, Ambit's own source (`check src`) | 39.5% (163/413) | — |
@@ -44,15 +44,16 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | Runtime hooks | 4 (`fetch`, `node:fs`, `node:child_process`, `pg`) | — |
 | Framework adapters | 2 (Hono, Next.js App Router) | — |
 
-**None of the four `unknown` rows has a target, and that is deliberate.**
-`ROADMAP.md`'s 30% KPI is about **an adopting team's own code, with its own
-`node_modules`, three months in.** No row here is that population: the corpus is
-five repositories measured with no dependencies installed, `realistic-api` is a
-fixture written in this repository, `src` is Ambit's own connection layer, and
-immich is a third-party backend nobody here has adopted. Driving any of them to
-30% would not satisfy the KPI. They are read as movement, not as progress
-against it — the fixture's 1.9% least of all, since it says only that the
-analysis handles the shapes it was given.
+**None of the five `unknown` rows has a target, and that is deliberate.**
+`ROADMAP.md`'s Phase 1 criterion sets no absolute `unknown` rate: it tracks
+**an adopting team's own code, with its own `node_modules`,** relative to that
+team's first run, and asks that `unknown` not stop the team from gating. No row
+here is that population: the corpus is five repositories measured with no
+dependencies installed, `realistic-api` is a fixture written in this repository,
+`src` is Ambit's own connection layer, and immich is a third-party backend
+nobody here has adopted. They are read as movement, not as Phase 1 evidence —
+the fixture's 1.9% least of all, since it says only that the analysis handles
+the shapes it was given.
 
 Three third-party runs now say something the rows themselves do not: **the
 `unknown` rate and the usefulness of `diff` move independently**, and the third
@@ -66,13 +67,14 @@ All three runs also found that closing hundreds of call sites moved the rate
 not at all. What the gate is worth has tracked *standing noise on an unchanged
 tree*, *the precision of the delta*, and *whether a real increase is reported
 at all* — not the absolute rate. Recorded as an observation from three
-subjects. It is **not** a decision: `ROADMAP.md`'s KPI is about a population
-none of the three runs measured, and nothing here changes it.
+subjects, not a finding about adopters: `ROADMAP.md` tracks noise and whether
+increases are reported as Phase 1 candidate metrics for this reason, but its
+criterion is about a population none of the three runs measured.
 
 The second row replaced "serious incidents prevented". An incident that did not
-happen is a counterfactual and cannot be observed; an authority increase that an
-external team actually rejected or approved can be. Incident reduction stays
-where it is measurable, as a Phase 1 exit metric in `ROADMAP.md`.
+happen is a counterfactual and cannot be observed; a reviewer action an Ambit
+report caused can be. Incident reduction is a long-term hypothesis in
+`ROADMAP.md`, not a Phase 1 metric, because one pilot cannot observe it.
 
 ### Baseline commands
 
@@ -212,9 +214,9 @@ Each of these was measured, and the run is archived.
 
 ## What is not proven
 
-- **That anyone wants this.** Zero external adopters, zero pilot teams, zero
-  observed incidents prevented. This is the single most important row above, and
-  no amount of test coverage substitutes for it.
+- **That anyone wants this.** External pilot evidence has not yet been
+  collected. This is the single most important row above, and no amount of test
+  coverage substitutes for it.
 - **That a file-level report on an inline handler is reviewable enough.** An
   increase inside a route registered as an argument-position arrow now fails
   the gate, but it names the file rather than the handler, and on a count
@@ -568,7 +570,7 @@ The snapshot-bound-state rule (§6.2, §3.4) is asserted two ways:
 | M2 — capabilities, budget, hooks, adapters, 50 stubs | **partial** | Four hooks, not more: `node:http`/`https`/`net`, `mysql2`, Prisma, Drizzle, MongoDB and every LLM SDK have none, so calling them is neither blocked nor recorded. `costUsd` and `llmCalls` are not enforced. Two adapters (Hono, Next.js App Router); Express, BullMQ, `worker_threads`, Server Actions, `middleware.ts`, the Pages Router and Edge have none. No `@budget` loop-pattern warnings. **Stubs are 5 client packages and 9 builtin namespaces, not 50 packages** |
 | M3 — fix patches, agent protocol | **partial** | `fixes[].edits` exists for `AMB-E001` only. **`ambit agent` does not exist** — no protocol, no iteration limit, no approval gate for loosening fixes |
 | M4 — editor, SBOM, npm | **partial** | Published as [`ambit-ts`](https://www.npmjs.com/package/ambit-ts): 0.1.0 on 2026-09-10 by hand, **without provenance**; 0.2.0 (`latest`) on 2026-09-14 through `release.yml`, with provenance. No editor integration of any kind. **`ambit sbom` does not exist**, nor do stub trust levels in diagnostics (§8). No pilot team. The runtime ships with the CLI, so installing Ambit pulls in `typescript` ([ADR-0009](adr/0009-package-name-and-single-package.md)) |
-| M5 — Phase 1 exit criteria | **untouched** | A real team showing a measured change in delivery speed and incident rate. No sample, self-test, or synthetic benchmark substitutes for it |
+| M5 — Phase 1 exit criteria | **untouched** | An external pilot producing the evidence `ROADMAP.md` lists: sustained use on production-bound pull requests, and reviewer actions its reports caused. No sample, self-test, or synthetic benchmark substitutes for it |
 
 What each milestone's acceptance criteria are is [`ROADMAP.md`](../ROADMAP.md).
 

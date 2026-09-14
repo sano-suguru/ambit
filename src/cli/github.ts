@@ -33,7 +33,7 @@ export function workspacePath(rootDir: string, file: string): string {
  *
  * The body is folded onto one line with `%0A`, so an annotation carrying a
  * call path stays self-sufficient — a reader on the diff sees every hop
- * without opening the job log (DESIGN.md §5.1).
+ * without opening the job log.
  */
 export function githubAnnotation(annotation: {
   readonly severity: string;

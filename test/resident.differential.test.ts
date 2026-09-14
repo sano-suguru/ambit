@@ -30,7 +30,7 @@ import type { SymbolId } from "../src/core/index.ts";
 import { renderAnalysis } from "./support/render-analysis.ts";
 
 /**
- * DESIGN.md §6.2's **equivalence law**, asserted rather than argued.
+ * The resident path's **equivalence law**, asserted rather than argued.
  *
  * > For any tree and any sequence of edits, the resident path's result must
  * > equal what a cold run over the same tree produces — the same diagnostics,
@@ -65,7 +65,7 @@ afterEach(() => {
  *
  * The `package.json` is not decoration: `ambit.config.ts` is found by walking
  * up and stopping at the first directory holding a `package.json` or `.git`
- * (§4.1 (c)), and the fingerprint's resolution inputs are found the same way.
+ * and the fingerprint's resolution inputs are found the same way.
  * Without one, a tree under the OS temporary directory would search upward out
  * of itself.
  */
@@ -220,7 +220,7 @@ describe("resident session: each mutation's update equals a cold run over the sa
     const session = await open(dir);
     const before = session.current();
 
-    // Nothing about the code changes — only the contract comment. §6.2 names
+    // Nothing about the code changes — only the contract comment. The spec says
     // this explicitly: "Do not ignore a change to contract comments alone, even
     // when type information is unchanged."
     edit(dir, "direct-import.ts", "/** @effects pure */", "/** @effects network */");
@@ -295,7 +295,7 @@ describe("resident session: each mutation's update equals a cold run over the sa
 
     // `missing-module-import.ts` imports "./no-such-file.ts", which resolves to
     // nothing — so the store holds no import edge to it. This is the case
-    // §6.2 makes a file *addition* re-check everything for: no closure over the
+    // for which a file *addition* re-checks everything: no closure over the
     // edges already held could find the importer.
     expect(effectsOf(before, "missing-module-import.ts#callsMissingModuleImport")).toContain(
       "unknown",
@@ -711,7 +711,7 @@ describe("resident session: each mutation's update equals a cold run over the sa
 
 describe("resident session: a failed update is a failure, not an answer", () => {
   /**
-   * §6.2: "An update that throws ... leaves the resident state at the last
+   * "An update that throws ... leaves the resident state at the last
    * generation it committed and is reported as a failure ... The previous
    * generation's diagnostics are never re-served as though they described the
    * current tree."
@@ -736,7 +736,7 @@ describe("resident session: a failed update is a failure, not an answer", () => 
     expect(failed.ok).toBe(false);
     if (failed.ok) throw new Error("unreachable");
 
-    // The cold path fails on the same tree, **with the same message**: §6.2
+    // The cold path fails on the same tree, **with the same message**: the spec
     // asks for "the same exit code and the same distinction a one-shot run
     // would give it", and two paths that fail on different halves of a doubly
     // broken tree would give different distinctions. Asserting only that both
@@ -802,7 +802,7 @@ describe("resident session: a failed update is a failure, not an answer", () => 
       () => write(dir, "collision.ts", collision),
       () => remove(dir, "collision.ts"),
     );
-    // §4.1: a residual collision has to stop the run rather than reach the
+    // A residual collision has to stop the run rather than reach the
     // fixed point, which would never converge.
     expect(error.message).toMatch(/share the symbol id/);
   });
@@ -837,7 +837,7 @@ describe("resident session: a failed update is a failure, not an answer", () => 
         for (const [file, text] of contents) write(dir, file, text);
       },
     );
-    // §3.4: "no analyzable functions" must not read as "checked, no violations".
+    // "No analyzable functions" must not read as "checked, no violations".
     expect(error.message).toMatch(/no analyzable functions/);
   });
   it("a tsconfig and a config broken at once fail the same way on both paths", async () => {
@@ -953,7 +953,7 @@ describe("ProjectFingerprint fails toward rebuilding", () => {
     const before = fingerprintOf(dir);
 
     // The config file itself is untouched. Hashing its text alone would report
-    // this as "nothing changed" — the permissive direction §6.2 forbids.
+    // this as "nothing changed" — a direction invalidation may never err in.
     write(
       dir,
       "config-contracts.ts",
@@ -1054,7 +1054,7 @@ describe("resident session: nothing snapshot-bound is retained", () => {
     // snapshot-bound *primitive* (an internal numeric or string id) clones
     // fine. What rules those out is the other two: `test/architecture.test.ts`
     // forbids this file from importing `typescript` at all, and `src/core`'s
-    // `TsBackend` boundary fixes what may cross it (§3.4). The three together
+    // `TsBackend` boundary fixes what may cross it. The three together
     // are the argument; this assertion alone is not.
     expect(() => structuredClone(store)).not.toThrow();
 
@@ -1070,7 +1070,7 @@ describe("resident session: nothing snapshot-bound is retained", () => {
     expect([...(store.reverseImports.get("index.ts") ?? [])]).toContain("deep-barrel.ts");
   });
 
-  it("reports every phase §6.2 names, and reports transfer as a measured zero", async () => {
+  it("reports every resident phase, and reports transfer as a measured zero", async () => {
     const dir = copyFixture("cross-module");
     const session = await open(dir);
     const result = await session.update();
@@ -1104,8 +1104,7 @@ describe("resident session: nothing snapshot-bound is retained", () => {
     // adapter, which reaches the engine only through `extractProject` and so
     // cannot see where building the program ends and walking it begins. It says
     // so by leaving the field absent rather than by reporting a zero that would
-    // read as free (§3.4's distinction between "nothing found" and "nothing
-    // looked for").
+    // read as free ("not measured" is not "measured nothing").
     const session = await openResidentSession(dir, {
       backend: {
         name: legacyTsBackend.name,
@@ -1164,7 +1163,7 @@ function renderState(state: ReadonlyMap<SymbolId, PropagatedFunction>): string {
 /**
  * One generation, with every phase-3 obligation asserted:
  *
- * 1. the resident result equals a cold `analyze()` byte for byte (§6.2);
+ * 1. the resident result equals a cold `analyze()` byte for byte;
  * 2. the **scoped** state equals `propagate` over the same summaries, symbol
  *    for symbol — the oracle `propagateScoped` is written against;
  * 3. the fixed point actually ran scoped, so a row that silently fell back to
@@ -1386,8 +1385,8 @@ describe("resident session: the scoped fixed point (phase 3)", () => {
     expect(effectsOf(added.resident, "cycle.ts#callsCycle")).toContain("network");
     // All three are in `S`, and only the first for a body reason: inserting a
     // line moves every declaration below it, and `location` is compared
-    // because a diagnostic's reported position is part of the bytes §6.2
-    // compares. That is the comparator being conservative in the direction it
+    // because a diagnostic's reported position is part of the bytes
+    // compared. That is the comparator being conservative in the direction it
     // is allowed to be wrong in — it costs a recomputation, never an answer.
     expect(added.impact.changed.toSorted()).toEqual([
       "cycle.ts#callsCycle",
@@ -1640,7 +1639,7 @@ describe("resident session: the scoped fixed point (phase 3)", () => {
     expect(session.committed().store.generation).toBe(rendered.length + 1);
   });
 
-  it("answers §3.5's gate-3 mutations from the new tree, never from a stale one", async () => {
+  it("answers the gate-3 mutations from the new tree, never from a stale one", async () => {
     const dir = copyFixture("cross-module");
     // The gate-3 subject, as `scripts/m05-probe/mutations.ts` expects to find
     // it. ADR-0001's headline failure was a contract comment rewritten and a
@@ -1844,9 +1843,9 @@ describe("resident session: self-hosting", () => {
  * Every row asserts five things, because four of them can pass while the fifth
  * is wrong:
  *
- * 1. the resident result equals a cold run byte for byte (§6.2);
+ * 1. the resident result equals a cold run byte for byte;
  * 2. the scoped state equals `propagate` over the same summaries;
- * 3. the **verdict** — full or partial — is the one §6.2's table names;
+ * 3. the **verdict** — full or partial — is the one the invalidation table names;
  * 4. the **closure** — which files were re-extracted — is the expected set;
  * 5. no stale edge survives in either reverse graph.
  *
@@ -1895,7 +1894,7 @@ describe("resident session: the reverse-import closure (phase 4)", () => {
       CHANGED("direct-import.ts"),
     ]);
 
-    // A JSDoc-only edit: §6.2 requires it to propagate backwards, and the
+    // A JSDoc-only edit: it must propagate backwards to callers, and the
     // extraction closure is still just the file, because nothing imports it.
     expect(full).toBe(false);
     expect(reextracted).toEqual(["direct-import.ts"]);
@@ -2040,7 +2039,7 @@ describe("resident session: the reverse-import closure (phase 4)", () => {
     );
     const { full, reextracted, resident } = await updateAndProveScoped(session, dir, []);
 
-    // §6.2's config row: extraction untouched, every contract re-derived. The
+    // The config row: extraction untouched, every contract re-derived. The
     // closure is empty because no source file moved.
     expect(full).toBe(false);
     // Only the config file itself: no source file moved, and no contract in the
@@ -2180,7 +2179,7 @@ describe("resident session: the reverse-import closure (phase 4)", () => {
   });
 
   it("rebuilds everything when a program input outside the checked root changes", async () => {
-    // §6.2's row: "a file in the program but outside the checked root". The
+    // A file the project holds but the checked root does not contain. The
     // extraction is filtered to files under the root, so no import edge exists
     // to close over — and the file can still change what names inside the root
     // resolve to.
@@ -2268,7 +2267,7 @@ describe("resident session: the reverse-import closure (phase 4)", () => {
     const dir = copyFixture("cross-module");
     const session = await open(dir);
 
-    // The one honest gap §6.2 leaves open, made explicit: a caller that does
+    // The one honest gap left open, made explicit: a caller that does
     // not report changes gets a whole re-extraction, because a closure over
     // nothing would answer from the previous tree.
     edit(dir, "callee.ts", "  return 0;", "  return 1;");
@@ -2412,7 +2411,7 @@ describe("resident session: the reverse-import closure (phase 4)", () => {
     expect(session.committed().store.generation).toBe(steps.length + 1);
   });
 
-  it("answers §3.5's gate-3 mutations through the closure, never from a stale tree", async () => {
+  it("answers the gate-3 mutations through the closure, never from a stale tree", async () => {
     const dir = copyFixture("cross-module");
     write(
       dir,

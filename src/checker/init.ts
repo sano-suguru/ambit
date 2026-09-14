@@ -19,7 +19,7 @@ import type { PropagatedFunction } from "./propagate.ts";
  *
  * The root is needed because the two are written against different bases —
  * a symbol id is relative to `check <dir>`, a `contracts` key is relative to
- * the config file (DESIGN.md §4.1 (c)) — and a patch that ignored the
+ * the config file — and a patch that ignored the
  * difference would propose a key that names nothing.
  */
 export interface ConfigTarget {
@@ -30,9 +30,9 @@ export interface ConfigTarget {
 }
 
 /**
- * `ambit init`'s analysis half (DESIGN.md §4.1: "`ambit init` infers the
- * effects of existing code from the evidence in 4.2 and emits JSDoc additions
- * as fix candidates in diagnostics (chapter 5, `fixes[].edits`)").
+ * `ambit init`'s analysis half: infer the effects of existing code from the
+ * same evidence propagation uses, and emit JSDoc additions as fix candidates
+ * in diagnostics (`fixes[].edits`).
  *
  * For every function that has no `@effects` tag and whose propagated effect
  * set is fully known, emit an `AMB-I001` info diagnostic carrying one
@@ -40,9 +40,9 @@ export interface ConfigTarget {
  *
  * The `unknown` guard is the whole point. A function whose effects could not
  * be resolved gets **no** proposal: writing `@effects pure` on it would turn
- * "we could not tell" into a declared guarantee, which is precisely what §4.3
- * says `unknown` exists to prevent. Those functions stay undeclared and keep
- * showing up in `--coverage`, exactly as §4.1 says they should.
+ * "we could not tell" into a declared guarantee, which is precisely what
+ * `unknown` exists to prevent. Those functions stay undeclared and keep
+ * showing up in `--coverage`, where the unresolved extent stays visible.
  *
  * What they no longer get is silence. Where such a function holds an
  * unresolvable call in its own body, an `AMB-I002` reports those calls and
@@ -82,17 +82,16 @@ export function proposeContracts(
     // The inline-callback owner stands for several bodies at once and has no
     // declaration site for any of them, so there is no edit — in JSDoc or in
     // config — that would attach the inferred set to what produced it. A
-    // proposal naming it would be a patch nobody can apply (DESIGN.md §4.1
-    // (a), "The inline-callback owner"). The `unknown` branch above still
-    // reports the calls that stopped the inference, because that is a report
-    // about call sites and not a proposal about a declaration.
+    // proposal naming it would be a patch nobody can apply. The `unknown`
+    // branch above still reports the calls that stopped the inference, because
+    // that is a report about call sites and not a proposal about a declaration.
     if (summary.undeclarable) continue;
 
     // Declarations no JSDoc comment can carry: an accessor or an anonymous
-    // default export (DESIGN.md §4.1 (a)), and a class that writes no
-    // constructor (its construction has a declaration path and no declaration
-    // site at all). All three have a stable symbol id, so `ambit.config.ts`
-    // can name them — which is what `--config` proposes.
+    // default export, and a class that writes no constructor (its
+    // construction has a declaration path and no declaration site at all).
+    // All three have a stable symbol id, so `ambit.config.ts` can name them —
+    // which is what `--config` proposes.
     if (summary.configOnly || summary.implicitConstructor) {
       const edit = configTarget ? configEdit(configTarget, summary.id, effects) : undefined;
       proposals.push(
@@ -168,10 +167,11 @@ export function proposeContracts(
  * `AMB-I002`: an undeclared function whose own body holds a call that could
  * not be resolved, so `AMB-I001` cannot propose anything for it.
  *
- * The §4.1 prohibition is unchanged — nothing is proposed and `fixes` is
- * empty. What changes is that the reason is no longer silent. A reader gets
- * the call sites that stopped the inference and, for each, the route its
- * reason implies (`docs/diagnostics/README.md#amb-i002`).
+ * The prohibition on turning "could not tell" into a declaration is
+ * unchanged — nothing is proposed and `fixes` is empty. What changes is that
+ * the reason is no longer silent. A reader gets the call sites that stopped
+ * the inference and, for each, the route its reason implies
+ * (`docs/diagnostics/README.md#amb-i002`).
  *
  * Only functions that hold a blocking call **themselves** are reported. One
  * that merely inherited `unknown` from a callee is left alone: the callee is
@@ -180,8 +180,8 @@ export function proposeContracts(
  *
  * There are no `fixes` because there is no patch. Every route here is either
  * a decision only a person can make (isolate this behind a boundary, annotate
- * this value) or work on Ambit itself (a missing stub). DESIGN.md §5.3 defines
- * `fixes[].edits` as concrete applicable patches, and a candidate that only
+ * this value) or work on Ambit itself (a missing stub). `fixes[].edits` are
+ * concrete applicable patches, and a candidate that only
  * describes what to do is exactly what it forbids
  * ([ADR-0011](../../docs/adr/0011-reporting-why-a-contract-cannot-be-proposed.md)).
  */
@@ -196,7 +196,7 @@ function unresolvedReport(
     // The name is what the stub tables would key on, and a great many
     // unresolved calls have none — a callback parameter, an `any` receiver,
     // `eval`. Those lead with the location rather than with a placeholder
-    // standing in for a name that does not exist (DESIGN.md §5.3).
+    // standing in for a name that does not exist.
     const named = call.qualifiedName ? `${call.qualifiedName} ` : "";
     return `${named}(${call.location.file}:${call.location.line}) ${reason}: ${ROUTES[reason]}`;
   });
@@ -223,7 +223,7 @@ function unresolvedReport(
  * The route each reason implies. Written as what the reason *is*, not as a
  * recommendation: three of them are not the reader's work at all, and the one
  * that is a choice — isolating a third-party call behind `@boundary` — is
- * named with the accounting §4.3 gives it, because a boundary is tallied
+ * named with the accounting `--coverage` gives it, because a boundary is tallied
  * separately from succeeding at analysis and Ambit must not sell it as
  * progress (ADR-0011).
  *
@@ -232,26 +232,27 @@ function unresolvedReport(
  */
 const ROUTES: Readonly<Record<UnresolvedOperationReason, string>> = {
   "external-module":
-    'declared in a package under node_modules — a stub for that package resolves it, or `@boundary reason="<package>"` isolates it, which --coverage tallies separately from analysis (§4.3)',
+    'declared in a package under node_modules — a stub for that package resolves it, or `@boundary reason="<package>"` isolates it, which --coverage tallies separately from analysis',
   "import-binding":
-    'an import binding that follows to no declaration — check the module specifier and the named export first; if the module is third-party, a stub resolves it, or `@boundary reason="<package>"` isolates it, tallied separately (§4.3)',
+    'an import binding that follows to no declaration — check the module specifier and the named export first; if the module is third-party, a stub resolves it, or `@boundary reason="<package>"` isolates it, tallied separately',
   "ambient-declaration":
-    'declared in a .d.ts belonging to this project — a contract written on that declaration resolves it, or `@boundary reason="<package>"` isolates it, tallied separately (§4.3)',
+    'declared in a .d.ts belonging to this project — a contract written on that declaration resolves it, or `@boundary reason="<package>"` isolates it, tallied separately',
   "builtin-method":
     "a TypeScript default-lib method Ambit's own bundled tables do not name — a gap in Ambit, not in this codebase; report the name",
   "callback-parameter":
-    "a callback parameter: §4.2 rule 4 infers its effects from the actual argument at each call site, so this is decided by the callers, not here",
+    "a callback parameter: its effects are inferred from the actual argument at each call site, so this is decided by the callers, not here",
   "callback-by-reference":
-    "a callback passed to a mutator by reference: §4.2 rule 4 infers its effects from the actual argument, so this is decided by the callers, not here",
+    "a callback passed to a mutator by reference: its effects are inferred from the actual argument, so this is decided by the callers, not here",
   "any-typed":
-    "the callee's type is `any`, so nothing identifies it (§4.2 rule 6) — a type annotation on that value restores the call",
-  "dynamic-import": "dynamic `import()`: not analyzable by design (§4.2 rule 6)",
-  eval: "`eval`: not analyzable by design (§4.2 rule 6)",
-  "new-function": "`new Function`: not analyzable by design (§4.2 rule 6)",
+    "the callee's type is `any`, so nothing identifies it — a type annotation on that value restores the call",
+  "dynamic-import":
+    "dynamic `import()`: not analyzable by design, so Ambit always treats it as unknown",
+  eval: "`eval`: not analyzable by design, so Ambit always treats it as unknown",
+  "new-function": "`new Function`: not analyzable by design, so Ambit always treats it as unknown",
   "overload-without-body":
-    'reaches a declaration with no implementation in the project (§4.1 "Overloads and bodyless declarations") — the body is elsewhere, so there is nothing to propagate from',
+    "reaches a declaration with no implementation in the project — the body is elsewhere, so there is nothing to propagate from",
   "unresolved-symbol":
-    "no single declaration Ambit can follow — a nested function, or a receiver with no one object literal certainly behind it (§4.2 rule 7)",
+    "no single declaration Ambit can follow — a nested function, or a receiver with no one object literal certainly behind it",
 };
 
 /**
@@ -326,11 +327,11 @@ function configProposalMessage(
  * line's insertion into text this command did not parse — the config was
  * loaded by importing it, not by building an AST, and guessing where the
  * block *ends* would mean matching braces in a file that may contain any
- * expression. `undefined` when there is no such line: §5.3 forbids emitting a
- * candidate that does not apply.
+ * expression. `undefined` when there is no such line: a fix candidate that
+ * does not apply is never emitted.
  *
- * The key is rebased from the analysis root to the config file's directory
- * (§4.1 (c)).
+ * The key is rebased from the analysis root to the config file's directory,
+ * which is what a `contracts` key is relative to.
  */
 function configEdit(
   target: ConfigTarget,
@@ -362,7 +363,7 @@ function configEdit(
   };
 }
 
-/** A symbol id rebased onto the config file's directory (DESIGN.md §4.1 (c)). */
+/** A symbol id rebased onto the config file's directory. */
 function configKeyFor(target: ConfigTarget, id: SymbolId): string {
   const hash = id.indexOf("#");
   if (hash < 0) return id;

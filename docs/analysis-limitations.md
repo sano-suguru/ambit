@@ -516,9 +516,11 @@ signature, `abstract` member, or `.ts`-file `declare`.
 
 This number is not a target that has been met, and it is dominated by
 `external-module` — almost entirely calls into the TypeScript compiler API from
-the one file meant to be replaceable. `ROADMAP.md`'s goal of 30% is for an
-*adopting team*. `docs/status.md` records that figure separately, measured
-against `test/fixtures/realistic-api`, and the two must not be mixed.
+the one file meant to be replaceable. It says nothing about an *adopting
+team's* code, whose rate is set largely by its own dependencies: `ROADMAP.md`
+tracks that relative to the team's first run, and `docs/status.md` records the
+adopting-team-equivalent fixture, `test/fixtures/realistic-api`, separately. The
+figures must not be mixed.
 
 The summary line (`files= functions= declared=`) is printed on every run, with
 or without `--coverage`, so a check that analyzed nothing is never

@@ -1,4 +1,4 @@
-// Fixture for DESIGN.md §4.2, "Local mutation and `pure`": which in-place
+// Fixture for local mutation and `pure`: which in-place
 // changes `pure` allows, and which are `state_write`.
 
 const moduleTotals: number[] = [];
@@ -53,7 +53,7 @@ export class Counter {
 
 /** @effects pure */
 export function reassignsLooseLocal(): number[] {
-  // §4.2 treats a `let` binding as escaping even when nothing reassigns it;
+  // A `let` binding counts as escaping even when nothing reassigns it;
   // rewriting this as `const` would delete the case the test asserts.
   // biome-ignore lint/style/useConst: the `let` is the fixture
   let loose: number[] = [];

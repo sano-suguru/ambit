@@ -1,4 +1,4 @@
-// Regression fixture for DESIGN.md §3.4: before constructions were recorded,
+// Regression fixture for a silent gap: before constructions were recorded,
 // `new X(...)` was dropped from the call graph entirely — a `pure` function
 // that constructed a networking client reported no call at all, not even
 // `unknown`. Every case below must produce a call site.
@@ -54,7 +54,7 @@ export function constructsPureBuiltin(): Map<string, number> {
   return new Map<string, number>();
 }
 
-/** `new Date()` reads the clock; `env` in DESIGN.md §4.2. */
+/** `new Date()` reads the clock, which is the `env` effect. */
 /** @effects pure */
 export function readsClock(): Date {
   return new Date();

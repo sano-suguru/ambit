@@ -9,7 +9,7 @@ import { packedTarball } from "./support/pack.ts";
 const execFileAsync = promisify(execFile);
 
 /**
- * DESIGN.md §6 (`npm install -D`) and P5 ("Test the removal procedure
+ * The one-package install (`npm install -D`) and P5 ("Test the removal procedure
  * automatically").
  *
  * Runs the whole distribution path against a project that has nothing to do
@@ -26,7 +26,7 @@ const execFileAsync = promisify(execFile);
  * - npm installs `bin` as a symlink, so the entry-point guard sees
  *   `process.argv[1]` as the symlink and `import.meta.url` as its target.
  *   When that comparison failed, the installed CLI ran nothing and exited 0
- *   — indistinguishable from "checked, no violations" (DESIGN.md §3.4).
+ *   — indistinguishable from "checked, no violations".
  */
 
 interface RunResult {
@@ -153,8 +153,8 @@ describe("distribution: pack, install into a clean project, uninstall", () => {
     );
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("fetchRate declares pure but performs [network] directly");
-    // A run that analyzed nothing must never look like a clean run
-    // (DESIGN.md §3.4) — the summary line is the evidence it did work.
+    // A run that analyzed nothing must never look like a clean run — the
+    // summary line is the evidence it did work.
     expect(result.stdout).toContain("files=1 functions=3 declared=2");
   }, 120_000);
 
@@ -192,7 +192,7 @@ describe("distribution: pack, install into a clean project, uninstall", () => {
     expect(result.stdout).toContain("fetchRate declares pure but performs [network] directly");
   }, 120_000);
 
-  it("resolves the ambit-ts/runtime/hono subpath and enforces through it (§4.4)", async () => {
+  it("resolves the ambit-ts/runtime/hono subpath and enforces through it", async () => {
     // Deliberately outside `src/`: the uninstall test typechecks `src/`, and a
     // file importing `ambit-ts/runtime/hono` cannot type-check once the package is
     // gone. P5 claims the *contract JSDoc* survives removal, not the imports.
@@ -262,13 +262,13 @@ console.log("DENIED:" + JSON.stringify(await denied.json()));
 
     // The route is registered through the adapter, so the context comes from
     // the registration: an ungranted host is refused, and the error reaches the
-    // framework's handler untranslated (§4.4).
+    // framework's handler untranslated, not as an HTTP status.
     const executed = await run("node", ["--experimental-strip-types", "adapter.ts"], consumer);
     expect(executed.stderr).toBe("");
     expect(executed.stdout.trim()).toBe('DENIED:{"error":"AmbitCapabilityError"}');
   }, 120_000);
 
-  it("loads an ambit.config.ts that imports defineConfig from ambit-ts/config (§4.1)", async () => {
+  it("loads an ambit.config.ts that imports defineConfig from ambit-ts/config", async () => {
     // The whole point of the `ambit-ts/config` subpath is that a consumer's
     // config file can import it. Nothing in this repository can test that: in
     // a clone the specifier resolves to `./dist/config.js` by self-reference,
@@ -322,11 +322,11 @@ export default defineConfig({
     await fs.rm(path.join(consumer, "ambit.config.ts"));
   }, 120_000);
 
-  it("reads a spec through every installed runtime specifier (§4.4)", async () => {
+  it("reads a spec through every installed runtime specifier", async () => {
     // The wrapper table in `src/checker/backend/legacy-ts.ts` keys on the
     // *written* module specifier, so the package's name is part of the
     // checker's behavior and not only of its manifest: a key that stops
-    // matching stops every `spec` from being read as a declaration (§4.4).
+    // matching stops every `spec` from being read as a declaration.
     // `test/fixtures/wrappers/` asks the same question of an ambient
     // `declare module`, where the alias resolves in one hop. Here the hops run
     // through a real `node_modules/ambit-ts/dist/**.d.ts`, which is the shape
@@ -462,7 +462,7 @@ export const BY_NEXT = ambitRoute({ capabilities: ["db:write:orders"] }, byNext,
     const program = unnamed.join("\n");
 
     // A run that extracted nothing must never look like a clean run
-    // (DESIGN.md §3.4): an empty program type-checks. Every registration path
+    // — an empty program type-checks. Every registration path
     // the documents describe has to be in what was extracted.
     expect(examples.length).toBeGreaterThan(0);
     expect(program).toContain("withAmbit(");

@@ -12,7 +12,7 @@ export async function postsThroughBareCall(): Promise<unknown> {
 
 /**
  * `extend` builds another instance and sends nothing. No row, so the call is
- * `unknown` — never "no effect" (DESIGN.md §3.4).
+ * `unknown` — never "no effect".
  */
 /** @effects pure */
 export function buildsInstance(): unknown {

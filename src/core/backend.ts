@@ -3,8 +3,7 @@ import type { SourceLocation } from "./location.ts";
 import type { SymbolId } from "./symbol-id.ts";
 
 /**
- * Why a call's target — or its effects — could not be resolved
- * (DESIGN.md §4.2 rule 6, and rule 4 for `callback-parameter`).
+ * Why a call's target — or its effects — could not be resolved.
  *
  * `import-binding`, `builtin-method`, and `external-module` sub-classify
  * what was previously reported as a bare `unresolved-symbol`, so `ambit
@@ -53,11 +52,11 @@ export type UnresolvedReason =
   | "unresolved-symbol";
 
 /**
- * What kind of function-like node was seen but not extracted (DESIGN.md
- * §4.3's coverage concern, and the connector layer's documented slice
- * boundary — see `collectFunctionLikeDeclarations` in
- * `src/checker/backend/legacy-ts.ts`). Purely descriptive; carries no
- * compiler-specific node, so it can cross the `TsBackend` boundary freely.
+ * What kind of function-like node was seen but not extracted (a coverage
+ * concern, and the connector layer's documented slice boundary — see
+ * `collectFunctionLikeDeclarations` in `src/checker/backend/legacy-ts.ts`).
+ * Purely descriptive; carries no compiler-specific node, so it can cross the
+ * `TsBackend` boundary freely.
  *
  * `class-declaration` is not a function-like node at all; it appears only as
  * the reason a contract written on a `class` cannot be carried — the contract
@@ -74,10 +73,9 @@ export type UnresolvedReason =
  * `bodyless-declaration` is a function-like node that declares a signature and
  * no code: an overload signature, an `abstract` member, or an ambient
  * `declare` written in a `.ts` file. It is skipped because it is not a
- * function — the implementation is (DESIGN.md §4.1, "Overloads and bodyless
- * declarations"). Indexing one would give two declarations the same declaration
- * path, and the first of them has no body to infer effects from, so every
- * caller would read as `pure` whatever the implementation does.
+ * function — the implementation is. Indexing one would give two declarations
+ * the same declaration path, and the first of them has no body to infer effects
+ * from, so every caller would read as `pure` whatever the implementation does.
  */
 export type SkippedFunctionKind =
   | "class-declaration"
@@ -92,8 +90,8 @@ export type SkippedFunctionKind =
 /**
  * What the connector layer could read statically from one call argument.
  *
- * Carries no compiler object, so it crosses the `TsBackend` boundary freely
- * (DESIGN.md §3.4). Two consumers need it, and both need the same distinction
+ * Carries no compiler object, so it crosses the `TsBackend` boundary freely.
+ * Two consumers need it, and both need the same distinction
  * between "this is the whole value" and "this is only how the value starts":
  * `src/stubs/data-clients.ts` reads a SQL statement's leading keyword, and
  * `src/stubs/http-capabilities.ts` reads a URL's host. A template literal's
@@ -146,7 +144,7 @@ export interface LiteralArgument {
  * attributed to the enclosing function, and a resolvable reference becomes a
  * {@link CallSite.callbackTargets} edge, but a callback that is neither is
  * never visited, so `pureBuiltinName` must not be trusted as pure when this is
- * set (DESIGN.md §4.2 rule 4) — regardless of what
+ * set — regardless of what
  * `src/stubs/pure-builtins.ts` says about the method name itself.
  */
 export interface CallSite {
@@ -160,7 +158,7 @@ export interface CallSite {
    * function this project extracted (`arr.map(toCall)` where `toCall` is a
    * declaration in the analyzed tree).
    *
-   * DESIGN.md §4.2 rule 4 asks for exactly this — "the effects of a callback
+   * The design asks for exactly this — "the effects of a callback
    * parameter are inferred from the actual argument at the call site" — and
    * the actual argument here is a function whose body was analyzed. Recorded
    * apart from {@link CallSite.callbackByReference}, which is what remains
@@ -176,12 +174,12 @@ export interface CallSite {
    */
   readonly callbackTargets?: readonly SymbolId[];
   /**
-   * Set when this site mutates a value in place (DESIGN.md §4.2, "Local
-   * mutation and `pure`") — a mutating builtin method, or an assignment / `++` /
-   * `delete` on a property. An assignment is not a call, but it propagates
-   * exactly like one, so it rides in the same array rather than in a parallel
-   * channel every consumer would have to remember to read. `escaping` is
-   * false only when the mutated value was allocated inside the function.
+   * Set when this site mutates a value in place — a mutating builtin method, or
+   * an assignment / `++` / `delete` on a property. An assignment is not a call,
+   * but it propagates exactly like one, so it rides in the same array rather
+   * than in a parallel channel every consumer would have to remember to read.
+   * `escaping` is false only when the mutated value was allocated inside the
+   * function.
    */
   readonly mutation?: {
     readonly escaping: boolean;
@@ -213,7 +211,7 @@ export interface CallSite {
    * The site therefore contributes nothing of its own. It is not
    * `unresolved`: that would report a body the analysis actually read as one
    * it could not reach, which overstates `unknown` exactly as badly as the
-   * reverse understates it (DESIGN.md §3.4).
+   * reverse understates it.
    */
   readonly inlinedCallee?: true;
   readonly unresolvedReason?: UnresolvedReason;
@@ -224,11 +222,11 @@ export interface RawJsDoc {
   readonly tags: ReadonlyMap<string, string>;
   /**
    * Where each tag was written, so a fix can replace the tag itself rather
-   * than guess at a line (DESIGN.md §5.3: `fixes[].edits` must be a concrete,
-   * applicable patch). Same 1-based, end-exclusive convention as every other
-   * `SourceLocation`; `diagnose.ts` converts to the 0-based edit range §5.3
-   * specifies. Character offsets are UTF-16 units, which is what the
-   * compiler already reports.
+   * than guess at a line (`fixes[].edits` must be a concrete, applicable
+   * patch). Same 1-based, end-exclusive convention as every other
+   * `SourceLocation`; `diagnose.ts` converts to the 0-based, end-exclusive edit
+   * range diagnostics use. Character offsets are UTF-16 units, which is what
+   * the compiler already reports.
    */
   readonly tagLocations: ReadonlyMap<string, SourceLocation>;
 }
@@ -261,19 +259,19 @@ export interface ExtractedFunction {
    */
   readonly implicitConstructor?: true;
   /**
-   * Set on a declaration only `ambit.config.ts` can name (DESIGN.md §4.1
-   * (a)): a `get`/`set` accessor, or an anonymous `export default`.
+   * Set on a declaration only `ambit.config.ts` can name: a `get`/`set`
+   * accessor, or an anonymous `export default`.
    *
    * The declaration is extracted and propagates like any other — its body's
    * effects are real — but {@link ExtractedFunction.jsDoc} is left undefined
-   * for it on purpose: §4.1 (a) keeps the config namespace a superset of the
+   * for it on purpose: the config namespace is a superset of the
    * JSDoc one, so a contract comment here is inert and is reported as
    * `AMB-E003` instead (with the config key that would work).
    */
   readonly configOnly?: true;
   /**
-   * Set on the entry that owns a file's unowned inline callbacks (DESIGN.md
-   * §4.1 (a), "The inline-callback owner"). The third tier: analyzed and
+   * Set on the entry that owns a file's unowned inline callbacks (the
+   * inline-callback owner). The third tier: analyzed and
    * compared like any other function, and declarable by nobody — there is no
    * declaration site for JSDoc and no single function for a config key to
    * name, so neither `ambit init` nor `ambit init --config` proposes one.
@@ -286,7 +284,7 @@ export interface ExtractedFunction {
   readonly calls: readonly CallSite[];
   /**
    * {@link calls} partitioned by the body each call is in, one group per owned
-   * body — set on the inline-callback owner (DESIGN.md §4.1 (a)) and on
+   * body — set on the inline-callback owner and on
    * nothing else, so a file with a single inline callback has one group.
    * Concatenating the groups reproduces {@link calls} exactly.
    *
@@ -294,7 +292,7 @@ export interface ExtractedFunction {
    * reads an absent field as "one body, holding everything this record
    * holds", so nothing about an ordinary record changes. What it buys is the
    * only thing a merged owner would otherwise lose — authority is compared as
-   * a multiset over the owned bodies (§6.3), so a second body gaining an
+   * a multiset over the owned bodies, so a second body gaining an
    * effect a first body already had is an increase, exactly as it would be if
    * the two bodies were two named functions.
    */
@@ -305,14 +303,14 @@ export interface ExtractedFunction {
  * A call that establishes an entrypoint's context, as the source shows it: a
  * hand-written `withAmbit(spec, handler)` from `ambit-ts/runtime`, or a framework
  * adapter's registration (`ambitHandler(spec, handler, decode)` from
- * `ambit-ts/runtime/hono`) — DESIGN.md §4.4, "Mapping contracts to handlers".
+ * `ambit-ts/runtime/hono`).
  *
  * Ambit reads it to check one thing only: that the capability list the runtime
  * would establish is the one the handler's JSDoc declares. Written twice, the
  * two drift, and nothing noticed before this existed.
  *
- * The check is **on the source alone**. §12's "Mapping contracts to handlers" —
- * a build that strips comments, a bundle that moves the handler — is not
+ * The check is **on the source alone**. What a build does to the mapping —
+ * stripping comments, a bundle moving the handler — is not
  * solved here, and `unmatchedReason` exists so a wrapper this comparison
  * cannot reach is reported rather than passed over.
  */
@@ -388,7 +386,7 @@ export interface ExtractedFile {
  * A contract written on a function-like node the backend did not extract, and
  * which therefore cannot carry one. Reported as `AMB-E003` rather than
  * dropped: a declaration that silently does nothing is the opposite of what
- * Ambit is for (DESIGN.md §3.4 — do not convert an analysis failure into "no
+ * Ambit is for (an analysis failure is never converted into "no
  * violations").
  *
  * `kind` is the same classification `skippedFunctions` counts, so the message
@@ -401,7 +399,7 @@ export interface UncarriedContract {
   readonly raw: string;
   /**
    * The `ambit.config.ts` key that *would* carry this contract, when one
-   * exists (DESIGN.md §4.1 (a) — an accessor or an anonymous default export).
+   * exists (an accessor or an anonymous default export).
    * Absent for a node config cannot name either, where the only honest advice
    * is to restructure the code.
    */
@@ -410,8 +408,7 @@ export interface UncarriedContract {
 
 /**
  * One source file under the analysis root, whether or not it declared
- * anything — the per-file record the resident check path (DESIGN.md §6.2)
- * keys its store by.
+ * anything — the per-file record the resident check path keys its store by.
  *
  * Separate from {@link ExtractedFile} rather than folded into it, because the
  * two answer different questions and cover different files. An
@@ -424,7 +421,7 @@ export interface UncarriedContract {
  * what it exists for is {@link imports}.
  *
  * All of it is strings and numbers: no compiler object crosses the boundary
- * here any more than anywhere else (DESIGN.md §3.4).
+ * here any more than anywhere else.
  */
 export interface ExtractedModule {
   /** Root-relative, the same spelling {@link ExtractedFile.filePath} uses. */
@@ -436,11 +433,11 @@ export interface ExtractedModule {
    * Resolved targets, not specifiers: a specifier naming a package, a `.d.ts`,
    * or a file outside the root is not an edge the analysis holds — and a
    * specifier that resolved to nothing at all leaves no entry, which is
-   * precisely why DESIGN.md §6.2 makes a file *addition* re-check everything
+   * precisely why a file *addition* re-checks everything
    * rather than close over the edges already held.
    *
-   * Type-only imports are included. Over-invalidating costs time; the table in
-   * §6.2 is a minimum, and under-invalidating is what it forbids.
+   * Type-only imports are included. Over-invalidating costs time; the
+   * invalidation table is a minimum, and under-invalidating is what it forbids.
    */
   readonly imports: readonly string[];
   /** This file's share of {@link ExtractedProject.skippedFunctions}. */
@@ -455,7 +452,7 @@ export interface ExtractedModule {
  * contract written on one of those nodes.
  *
  * The count exists so "no violations" and "nothing was analyzed" stay
- * distinguishable (DESIGN.md §3.4) — a file made entirely of, say, callback
+ * distinguishable — a file made entirely of, say, callback
  * arguments would otherwise vanish from `files` with no trace.
  *
  * Both fields are required, not optional: a backend that omitted them would
@@ -484,23 +481,21 @@ export interface ExtractedProject {
 }
 
 /**
- * The connector layer's contract with the rest of Ambit (DESIGN.md §3.4,
- * §3.5). No TypeScript-specific object (`ts.Node`, `ts.Symbol`, `ts.Type`,
+ * The connector layer's contract with the rest of Ambit. No TypeScript-specific
+ * object (`ts.Node`, `ts.Symbol`, `ts.Type`,
  * a compiler-internal id, ...) may cross this boundary in either direction.
  *
  * Implementations live under `src/checker/backend/`. The only one is
- * `legacy-ts.ts`, adopted as the default by DESIGN.md §3.5
- * and ADR-0001, and it must stay the only file that imports
- * `typescript`. `test/backend.conformance.test.ts` states what any
- * implementation of this interface has to satisfy.
+ * `legacy-ts.ts`, adopted as the default by ADR-0001, and it must stay the only
+ * file that imports `typescript`. `test/backend.conformance.test.ts` states
+ * what any implementation of this interface has to satisfy.
  */
 export interface TsBackend {
   readonly name: string;
   readonly version: string;
   extractProject(rootDir: string): Promise<ExtractedProject>;
   /**
-   * Hold the engine's state open across updates, for the resident check path
-   * (DESIGN.md §6.2).
+   * Hold the engine's state open across updates, for the resident check path.
    *
    * Optional, and the rest of the interface is untouched: a backend without it
    * is driven through a full-rebuild adapter that calls `extractProject` and

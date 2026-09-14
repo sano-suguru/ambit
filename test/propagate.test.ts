@@ -213,13 +213,13 @@ describe("propagate", () => {
 });
 
 /**
- * DESIGN.md §4.4: a capability declaration is a trust boundary — a caller
+ * A capability declaration is a trust boundary — a caller
  * inherits what a declaring callee *declares*, not what its body turns out to
  * need, and may only narrow from there. A declaration a literal spec supplied
  * is that same declaration; nothing in propagation knows or cares which side
  * of the source wrote it.
  */
-describe("propagate: a capability set the spec declared (DESIGN.md §4.4)", () => {
+describe("propagate: a capability set the spec declared", () => {
   function project(callerCapabilities: string): ReadonlyMap<SymbolId, PropagatedFunction> {
     const files: ExtractedFile[] = [
       {

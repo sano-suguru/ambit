@@ -147,7 +147,7 @@ describe("withAmbit + installFetchHook (mock-level)", () => {
   });
 });
 
-describe("runtime.unscoped (DESIGN.md §4.4)", () => {
+describe("runtime.unscoped", () => {
   it("allows by default when no entrypoint context is active", () => {
     expect(() => requireCapability("http:get:api.example.test")).not.toThrow();
   });
@@ -162,7 +162,7 @@ describe("runtime.unscoped (DESIGN.md §4.4)", () => {
   });
 });
 
-describe("budget enforcement (DESIGN.md §4.5)", () => {
+describe("budget enforcement", () => {
   it("throws when a timeMs budget is exceeded", async () => {
     const budget = parseBudgetTag("timeMs=10");
     expect(budget).toBeDefined();
@@ -212,10 +212,11 @@ describe("budget enforcement (DESIGN.md §4.5)", () => {
 });
 
 /**
- * `node:fs`, `node:child_process` and `pg` hooks (DESIGN.md §4.4 (a)–(c)).
+ * `node:fs`, `node:child_process` and `pg` hooks (ADR-0006 (a)–(c)).
  *
  * In-process and therefore property-access-form only, which is exactly what
- * §4.4's "graph-internal install" row promises: these files `import fs from
+ * an install from inside the module graph covers (docs/limitations.md,
+ * "Install order decides what a builtin hook covers"): these files `import fs from
  * "node:fs"`, so they see the patched member. The real-file, real-child-
  * process and real-socket versions live in `test/e2e.runtime.test.ts`.
  *
@@ -224,7 +225,7 @@ describe("budget enforcement (DESIGN.md §4.5)", () => {
  * `fs.readFileSync`, so leaving it installed across a `deny` policy would
  * block Vitest's own module loading.
  */
-describe("installFsHook (DESIGN.md §4.4 (b))", () => {
+describe("installFsHook", () => {
   const here = fileURLToPath(import.meta.url);
 
   it("derives fs:read / fs:write from the resolved absolute path", () => {
@@ -336,7 +337,7 @@ describe("installFsHook (DESIGN.md §4.4 (b))", () => {
   });
 });
 
-describe("installChildProcessHook (DESIGN.md §4.4 (b))", () => {
+describe("installChildProcessHook", () => {
   it("names argv[0] as written, and the shell for a shell form", () => {
     expect(spawnCapability("spawn", ["git", ["status"]])).toEqual({
       capability: "proc:spawn:git",
@@ -402,7 +403,7 @@ describe("installChildProcessHook (DESIGN.md §4.4 (b))", () => {
   });
 });
 
-describe("installPgHook (DESIGN.md §4.4 (c))", () => {
+describe("installPgHook", () => {
   /** A `pg` stand-in with the two prototypes the hook patches. */
   function fakePg(statements: string[]) {
     class Pool {
@@ -459,7 +460,7 @@ describe("installPgHook (DESIGN.md §4.4 (c))", () => {
     const restore = installPgHook(pg);
     try {
       // The shape a reader is most likely to get wrong: `db:read:users` reads
-      // like a table grant, and §4.4 (c) says the runtime target is the
+      // like a table grant, but the `pg` hook's runtime target is the
       // database. The message has to say so rather than leave it inferred.
       const pool = new pg.Pool({ database: "app" });
       const handler = withAmbit({ capabilities: ["db:read:users"] }, async () =>

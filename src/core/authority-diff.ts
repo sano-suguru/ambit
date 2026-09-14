@@ -23,12 +23,12 @@ import type { SymbolId } from "./symbol-id.ts";
  * Whether a symbol exists on both sides of the comparison, only on the new
  * side, only on the old one, or on both under different paths.
  *
- * A symbol id contains the file path (DESIGN.md §5.3), so a function whose
+ * A symbol id contains the file path, so a function whose
  * file moved would be a `"deleted"` and a `"new"` symbol. `"moved"` is that
  * pair recombined, and only ever on evidence git supplied: the caller passes
  * the renames git reported, and nothing here guesses at identity beyond them.
  * A guess would put a fabricated "unchanged" in front of a reader whose
- * function may in fact have gained authority on the way (DESIGN.md §6.3).
+ * function may in fact have gained authority on the way.
  */
 export type SymbolStatus = "present" | "new" | "deleted" | "moved";
 
@@ -53,19 +53,20 @@ export interface SymbolAuthorityDiff {
    * The analysis reached something it could not resolve on the new side but
    * not on the old one — the opposite for `unknownLost`.
    *
-   * Reported, never counted as an increase: `unknown` is not authority
-   * (DESIGN.md §4.3). Reported all the same, because a range that stopped
-   * being analyzable must not come out as "nothing increased here".
+   * Reported, never counted as an increase: `unknown` is not authority but the
+   * unresolved extent of a guarantee. Reported all the same, because a range
+   * that stopped being analyzable must not come out as "nothing increased
+   * here".
    */
   readonly unknownGained: boolean;
   readonly unknownLost: boolean;
   /**
    * Operations the new side's body could not resolve and the old side's
-   * either did not hold or held fewer of — DESIGN.md §6.4's second shape.
+   * either did not hold or held fewer of — the unresolved extent widened.
    * `count` is the difference, not the new side's total.
    *
    * Not authority, and never merged into {@link added}: what it reports is
-   * that the verified extent of this symbol got smaller, which §4.3 keeps
+   * that the verified extent of this symbol got smaller, which is kept
    * apart from a permission. Computed only where the two sides are a real
    * comparison; a *new* symbol's whole body is unresolved-to-the-base by
    * definition, and it is {@link unknownGained} that says so.
@@ -73,11 +74,10 @@ export interface SymbolAuthorityDiff {
   readonly unresolvedGained: readonly UnresolvedOperation[];
   /**
    * The analysis cannot say **which** of this symbol's bodies holds what it
-   * holds, and the two sides' bodies cannot be matched — DESIGN.md §6.4's
-   * third shape.
+   * holds, and the two sides' bodies cannot be matched.
    *
    * Only ever true for a symbol that owns several bodies, which today is only
-   * §4.1 (a)'s inline-callback owner. Those bodies are anonymous, so
+   * the inline-callback owner. Those bodies are anonymous, so
    * "authority moved from one handler to another" and "the handlers were
    * reordered" are the same two sequences; one is a change of who may act and
    * the other is nothing at all, and no evidence in the source separates them.
@@ -107,7 +107,7 @@ export interface AuthorityDiff {
 export type RenamedFiles = ReadonlyMap<string, string>;
 
 /**
- * Compare two authority dumps (DESIGN.md §5.1's `kind: "authority"` records).
+ * Compare two authority dumps (`kind: "authority"` records).
  *
  * Pure: two arrays in, one result out. It never reads a file, runs git, or
  * asks a backend anything, which is what lets the whole comparison be unit
@@ -258,12 +258,12 @@ function compareSymbol(
 /**
  * Multiset difference over unresolvable operations: for each `(reason,
  * operation)` the head side holds, how many more of it there are than on the
- * base side (DESIGN.md §6.4).
+ * base side.
  *
  * Plain subtraction, in the one direction. An operation the head side holds
  * *fewer* of is the analysis reaching further than it did, which is the
- * direction this command does not watch — the same rule §6 states for
- * authority that only decreased.
+ * direction this command does not watch — the same rule `ambit diff` applies
+ * to authority that only decreased.
  */
 function gainedUnresolved(
   base: readonly UnresolvedOperation[],
@@ -281,7 +281,7 @@ function gainedUnresolved(
 
 /**
  * The authority more of `bodies` hold than of `against` — the multiset
- * difference DESIGN.md §6.3 compares, in the one direction.
+ * difference an authority increase is judged by, in the one direction.
  *
  * The refs considered, and the order they come out in, are `owner`'s own
  * effective authority: effects in the standard order, then capabilities
@@ -311,7 +311,7 @@ function grewIn(
  * How many of `bodies` hold `ref`.
  *
  * Containment for a capability, equality for an effect. `<resource>:<action>:<target>`
- * has a glob in `target` (DESIGN.md §4.4), and the rule that governs
+ * has a glob in `target`, and the rule that governs
  * caller-to-callee narrowing governs this comparison too: a body granted
  * `http:get:*` is a holder of `http:get:api.example.com`, so narrowing the
  * first to the second is not an increase, while widening it back is — nothing
@@ -337,8 +337,7 @@ function holdersOf(bodies: readonly AuthorityBody[], ref: AuthorityRef): number 
 
 /**
  * Whether something moved between the two sides' bodies without the
- * comparison being able to say what moved where (DESIGN.md §6.4's third
- * shape).
+ * comparison being able to say what moved where.
  *
  * The bodies are anonymous, so the only correspondence there is evidence for
  * is source order, and source order slides: inserting one registration moves
@@ -352,8 +351,9 @@ function holdersOf(bodies: readonly AuthorityBody[], ref: AuthorityRef): number 
  * the bodies. A fact held by as many bodies as before, in a different
  * arrangement, moved: nothing grew, and which handler took it from which is
  * exactly what cannot be said. A fact held by a different *number* of bodies
- * did not move, it was added or removed, and `added` / `removed` / §6.4's
- * first two shapes are what report that — so this does not repeat them.
+ * did not move, it was added or removed, and `added` / `removed` /
+ * `unknownGained` / `unresolvedGained` are what report that — so this does not
+ * repeat them.
  *
  * Per fact rather than per body because authority moves without bodies
  * moving: `[{network}, {db_write}]` becoming `[{network, db_write}, {}]`
@@ -362,15 +362,15 @@ function holdersOf(bodies: readonly AuthorityBody[], ref: AuthorityRef): number 
  * `[false, true]` against `[true, false]` does not.
  *
  * A plain reorder fires too, and must: it reaches the comparison as the same
- * evidence a transfer does. Over-reporting there is the direction §3.4
- * requires, and the cost is a line, not an approval.
+ * evidence a transfer does. Over-reporting there is the direction Ambit
+ * requires — never under-reporting — and the cost is a line, not an approval.
  *
  * An unresolvable operation's *count* is part of its fact, so a body holding
  * `expect x3` and one holding `expect x5` are two facts, and one of them
  * becoming `expect x4` is a change in what exists rather than in where it is.
  *
  * A capability is not a fact a body either has or has not, but one it either
- * permits or does not (§4.4): a body granted `http:get:*` holds
+ * permits or does not: a body granted `http:get:*` holds
  * `http:get:api.example.com` as surely as one granted that host does. The
  * candidates are every capability token either side names, and presence is
  * {@link holdersOf}'s containment, not string equality — the same rule
@@ -438,7 +438,7 @@ function attributionUnmatchedBetween(
   });
 }
 
-/** How many of `bodies` the analysis did not reach the end of (DESIGN.md §6.4's first shape). */
+/** How many of `bodies` the analysis did not reach the end of. */
 function unknownBodies(bodies: readonly AuthorityBody[]): number {
   return bodies.filter((body) => body.unknown).length;
 }
@@ -465,7 +465,7 @@ function comparable(entry: SymbolAuthorityDiff): boolean {
 
 /**
  * Symbols whose authority grew, and new symbols that hold any — the increases
- * an approval is written for (DESIGN.md §6.3).
+ * an approval is written for.
  *
  * A symbol that only moved is not here: it is compared against its own base
  * record, so `added` is empty unless the move also widened something, and then
@@ -498,8 +498,8 @@ export function deletedSymbols(diff: AuthorityDiff): readonly SymbolAuthorityDif
  * Symbols present on both sides that this comparison has nothing to say about.
  *
  * Authority equal on both sides is necessary but not sufficient: a symbol
- * named under §6.4 — the analysis stopped reaching it, or its body gained an
- * operation that cannot be resolved — is counted out, because the footer's
+ * reported as unresolved — the analysis stopped reaching it, or its body gained
+ * an operation that cannot be resolved — is counted out, because the footer's
  * "N unchanged" sits below those sections and must not contradict them.
  */
 export function unchangedSymbols(diff: AuthorityDiff): readonly SymbolAuthorityDiff[] {
@@ -525,10 +525,10 @@ export function unknownGained(diff: AuthorityDiff): readonly SymbolAuthorityDiff
 
 /**
  * Symbols whose own body gained an operation the analysis could not resolve
- * (DESIGN.md §6.4, second shape).
+ * (the unresolved extent widened).
  *
  * Reported always, and a failure only under `ambit diff --strict`: an
- * unresolvable operation is not authority (§4.3), so it does not belong in
+ * unresolvable operation is not authority, so it does not belong in
  * `ambit.approvals.md` and cannot be approved by a line there.
  */
 export function unresolvedGains(diff: AuthorityDiff): readonly SymbolAuthorityDiff[] {
@@ -537,7 +537,7 @@ export function unresolvedGains(diff: AuthorityDiff): readonly SymbolAuthorityDi
 
 /**
  * Symbols whose bodies the two sides cannot be matched across, so the
- * analysis cannot say which of them holds what (DESIGN.md §6.4, third shape).
+ * analysis cannot say which of them holds what.
  *
  * Reported always, and a failure only under `ambit diff --strict`, for the
  * same reason as the other two shapes: nothing was granted, so no approval
@@ -551,7 +551,8 @@ export function attributionUnmatched(diff: AuthorityDiff): readonly SymbolAuthor
 
 /**
  * Whether the comparison widened what the analysis cannot see, in any of
- * §6.4's three shapes — what `ambit diff --strict` exits 1 on and what the
+ * its three shapes (became unresolved, unresolved extent widened, bodies
+ * unmatched) — what `ambit diff --strict` exits 1 on and what the
  * default run reports at exit 0.
  */
 export function hasUnresolvedWidening(diff: AuthorityDiff): boolean {
@@ -570,7 +571,7 @@ export function hasAuthorityIncrease(diff: AuthorityDiff): boolean {
  * The call path a record carries for one authority, if it carries one.
  *
  * Absent when the function declares an authority its body does not reach:
- * there is no path to show and none is invented (DESIGN.md §5.3).
+ * there is no path to show and none is invented.
  */
 export function pathFor(
   record: AuthorityRecord | undefined,
