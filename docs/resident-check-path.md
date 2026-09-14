@@ -7,7 +7,8 @@ a new guarantee — §9.2 puts the existence of a resident path outside the
 guaranteed surface, and this document adds no claim to it.
 
 Status: **phases 0–5 implemented, phase 6 not.** `docs/status.md` carries
-what that means in detail; this file stays the design, and where the
+the current verdict and numbers, and [Verification record](#verification-record)
+below what the suite established; this file stays the design, and where the
 implementation forced a correction the text below says so rather than being
 quietly left behind.
 
@@ -952,6 +953,103 @@ changed, so a reader of an earlier draft is not left with a stale picture.
     predicted it would. A generation that re-summarizes only the closure cannot
     ask `ResolvedConfig.unmatchedExactKeys()`; the store's union over
     `FileEntry.matchedConfigKeys` is what `AMB-W006` is derived from.
+
+## Verification record
+
+What the differential suite and the phase 2–4 work established, beyond the
+phase table in [`docs/status.md`](status.md).
+
+The differential suite covers §6.2's equivalence law over an ordinary edit, a
+JSDoc-only edit, authority added and removed, a file added, a file deleted, an
+unresolved import resolved by adding the file it names, a specifier re-pointed
+at a newly added file, a rename as delete-plus-add, a re-export barrel
+re-pointed, a cycle, a callback edge gained and lost, an `ambit.config.ts`
+contract added/changed/removed, a change and its revert, and ten sequential
+mutations in one session.
+
+Phase 3 added to it: an edit no summary records (`S = ∅`), a direct effect
+added and removed, a caller whose callee changed identity, a call edge added
+and removed, a deleted callee reached through the **old** reverse-call graph
+only, an authority added and removed inside a cycle, an overload
+implementation swapped under unchanged signatures, the inline-callback owner
+gaining and losing a body, `@boundary` added and removed, `AMB-W006` rebuilt
+from the per-file matched config keys, a revert compared on the internal state
+as well as the report, twelve sequential mutations, §3.5's three gate-3
+mutations from `scripts/m05-probe/mutations.ts`, a row proving the scoped path
+runs while the fingerprint refuses extraction reuse, and a mutation on a copy of
+`src/` itself.
+
+Phase 4 added twenty-three more, and each asserts the **verdict** and the
+**re-extracted set** rather than equivalence alone — a row that asserted only
+equivalence would pass just as well against a session that re-extracted
+everything, which is the thing phase 4 stops doing. Partial: an edited file and
+its transitive importers, a leaf nothing imports, a re-pointed barrel that
+declares no function of its own, a deleted file followed through the old import
+graph with no stale edge left behind, a config-only change that re-summarizes
+every file and re-extracts only the config, a mid-edit syntax error, ten
+sequential partial updates, the three gate-3 mutations taken through the
+closure, and a one-file edit on a copy of `src/`. Full: a file added, a rename,
+an unresolved specifier whose target arrives, a tsconfig `paths` change, a
+changed `package.json`, a package rewritten in place under `node_modules`, an
+in-root `.d.ts`, a `declare global`, a source file the program reads from
+outside the checked root, a path this session never extracted, a caller that
+reports no change set at all, a file that enters the program without a root name
+moving (an explicit `files:` tsconfig), and the first update after a failed one. One more row is about the import graph rather than the gate: a file
+that depends on another only through an `import("…")` **type node**, which
+writes no import statement and still resolves a call into the named file.
+
+**A package rewritten in place under `node_modules` moves neither the lockfile
+nor `package.json`**, so the disk-side fingerprint reads "nothing changed". What
+sees it is the backend session, which hashes **every** program input that is not
+an in-root implementation file — in-root `.d.ts`, `node_modules` typings,
+sources pulled in from outside the root, and the compiler's own `lib.*.d.ts`.
+Nothing is excluded by path. An earlier version skipped the default lib's
+directory; it skipped the whole directory rather than the default libs
+(`typescript.d.ts` lives there too), and the argument for it — those files are a
+function of the engine version — does not survive the threat model the hash
+exists for, since a version string is not a proof of content identity. Measured
+at 82 inputs, 2.94 M characters, 4.5 ms on that subject. That clause is what let
+`ProjectFingerprint`'s permanent "resolved compiler options are not available"
+unknown be removed: it was replaced, not deleted.
+
+**Building the closure found one defect that predates it.**
+`ExtractedModule.imports` did not follow an `import("…")` type node, so a file
+whose only dependency on another is a parameter annotated
+`s: import("./svc.ts").Svc` held a resolved call edge into `svc.ts` with no
+import edge under it. Probed against the compiler, not reasoned about; fixed in
+`collectImportTargets`, and the row that covers it fails without the fix.
+
+**Omitting a change set is not the same as passing an empty one.**
+`session.update()` re-extracts everything, because a caller that does not track
+changes cannot be closed over; `session.update([])` is a caller asserting that
+nothing under the root moved. That difference is where §6.2's one open gap — a
+change under the root that the caller never reports — is visible to a caller. Five failure shapes — a tsconfig that stopped
+parsing, a config that no longer loads, both broken at once, two declarations
+colliding on one symbol id (§4.1), and a tree with nothing analyzable in it —
+each prove the same four things: the update reports failure, the previous generation stays committed
+byte-identically, it is **not** served as the current answer, and a later valid
+update succeeds, **and the cold path fails on the same tree with the same
+message** — the doubly-broken row is what makes that last clause mean something.
+One self-hosting row runs a session on `src/` itself across two generations.
+
+**An `ambit.config.ts` that imports anything is loaded in a worker thread**,
+because Node's module registry would otherwise hand the config a cached copy of
+what that module exported before it was edited. "Imports anything" means any
+static `import` or `export … from`, bare or relative, however it is written —
+not the size of the hash closure, which counts only resolved *relative*
+specifiers and so missed both a bare `ambit-ts/config` import and a relative one
+written across several lines. A config that imports nothing pays nothing. The fingerprint's `configHash` covers the same
+transitive closure of *relative* imports; a bare specifier is not followed,
+because a change to an installed package is a resolution change that §6.2
+already answers with a whole rebuild. What the closure walk cannot decide — a
+specifier resolving to no file on disk, a dynamic import — goes into
+`undecidable`. Starting a thread is authority, so `analyze` and the resident
+entry points declare `process` alongside `fs_read`.
+
+The snapshot-bound-state rule (§6.2, §3.4) is asserted two ways:
+`test/architecture.test.ts` forbids `src/checker/resident.ts` from importing
+`typescript` at all, and the differential suite clones the committed store with
+`structuredClone`, which throws on any retained compiler object or closure.
 
 ## Undecided
 

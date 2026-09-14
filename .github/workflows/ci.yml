@@ -46,9 +46,8 @@ jobs:
       # The gate: a contract violation in Ambit's own source fails the build.
       # `--format github` annotates the offending line with the whole call path
       # (DESIGN.md §5.1 / §6), and `--coverage` keeps recording the numbers
-      # docs/status.md tracks. Not `--strict`: measured, `check src --strict`
-      # exits 1 on four unresolved-call warnings in the connection layer — see
-      # docs/status.md, "Ambit's own source".
+      # docs/status.md tracks. Not `--strict`: the unresolved calls on Ambit's
+      # own source, counted in docs/status.md's unknown rate, make it fail.
       - name: Contract check on Ambit's own source
         run: node src/cli/main.ts check src --coverage --format github
 
