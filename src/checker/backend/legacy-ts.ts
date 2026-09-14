@@ -2239,21 +2239,24 @@ function classifyConstruct(
   const ambientReason = declarationSourceFile?.isDeclarationFile
     ? ambientUnresolvedReason(declarationSourceFile, program)
     : undefined;
-  const importBindingReason: UnresolvedReason | undefined =
-    isAlias && !resolvedSymbol?.declarations ? "import-binding" : undefined;
+  // An import binding that follows to no declaration gets no name, for the
+  // reason given in `classifyCall`: `import { URL } from "<unresolvable>"`
+  // would otherwise match the global constructor's row by spelling alone.
+  if (isAlias && !resolvedSymbol?.declarations) {
+    return { location, unresolvedReason: "import-binding" };
+  }
 
   const name = qualifiedNameOf(
     checker,
     program,
     classExpression,
-    importBindingReason === undefined,
     ambientReason !== "builtin-method",
   );
   if (name) {
     return {
       location,
       calleeQualifiedName: constructorStubKey(name),
-      unresolvedReason: importBindingReason ?? ambientReason,
+      unresolvedReason: ambientReason,
       // `new Promise(namedExecutor)` runs `namedExecutor` immediately; the
       // pure-constructor allowlist must not cover a body this walk never
       // visited. A named executor that *is* an
@@ -2269,7 +2272,7 @@ function classifyConstruct(
 
   return {
     location,
-    unresolvedReason: importBindingReason ?? ambientReason ?? "unresolved-symbol",
+    unresolvedReason: ambientReason ?? "unresolved-symbol",
   };
 }
 
@@ -2474,16 +2477,16 @@ function classifyCall(
   // An import binding whose alias couldn't be followed to any declaration at
   // all (e.g. the module specifier doesn't resolve, or the named export
   // doesn't exist) — `getAliasedSymbol()` returns TypeScript's `unknownSymbol`
-  // in that case, whose `declarations` is `undefined`. Recorded as a
-  // fallback reason rather than an early return, so a stub match is still
-  // attempted below: an *unresolvable* `import { fetch } from "undici"`
-  // falls back to the bare identifier text (`qualifiedNameOf`, below), which
-  // still matches the stub table's bare `"fetch"` entry. A *resolvable* one
-  // is qualified as `"undici.fetch"` instead and needs its own stub row
-  // (see `src/stubs/node-builtins.ts`) — otherwise it downgrades from a
-  // known `network` effect to `unknown`.
-  const importBindingReason: UnresolvedReason | undefined =
-    isAlias && !declaration ? "import-binding" : undefined;
+  // in that case, whose `declarations` is `undefined`. Such a call gets no
+  // name. The only name left to give it is the local spelling, and a spelling
+  // is not evidence of identity: an unresolvable `import { fetch } from
+  // "undici"` would match the global `fetch`'s row and report `network` —
+  // a stronger answer than the same import gives once it resolves to
+  // `undici.fetch`. Returned here, before the `any` check below, because the
+  // binding's error type is `any`-flagged and would otherwise hide the reason.
+  if (isAlias && !declaration) {
+    return { location, unresolvedReason: "import-binding" };
+  }
 
   // Ambient declarations (globals and stdlib types from .d.ts files, e.g.
   // `declare function fetch(...)`) are never project overloads or callback
@@ -2535,11 +2538,6 @@ function classifyCall(
       ? ambientUnresolvedReason(declaration.getSourceFile(), program)
       : undefined;
 
-  // `importBindingReason` and `ambientReason` are mutually exclusive (the
-  // former only applies when `declaration` is undefined, the latter only
-  // when it is defined), so combining them loses nothing.
-  const fallbackReason = importBindingReason ?? ambientReason;
-
   const calleeType = checker.getTypeAtLocation(callee);
   const isAnyTyped = (calleeType.flags & ts.TypeFlags.Any) !== 0;
 
@@ -2551,7 +2549,6 @@ function classifyCall(
     checker,
     program,
     callee,
-    importBindingReason === undefined,
     ambientReason !== "builtin-method",
   );
   if (qualifiedName) {
@@ -2559,7 +2556,7 @@ function classifyCall(
       location,
       calleeQualifiedName: qualifiedName,
       literalArguments: literalArgumentsOf(node),
-      unresolvedReason: fallbackReason,
+      unresolvedReason: ambientReason,
       // Carried for the same reason it is carried on `pureBuiltinName`: a
       // name in this namespace can also be allowlisted as pure (a bare global
       // like `Number(x)`), and an opaque callable argument must refuse that
@@ -2637,7 +2634,7 @@ function classifyCall(
     return { location, unresolvedReason: "any-typed" };
   }
 
-  return { location, unresolvedReason: fallbackReason ?? "unresolved-symbol" };
+  return { location, unresolvedReason: ambientReason ?? "unresolved-symbol" };
 }
 
 /**
@@ -3172,19 +3169,16 @@ function ambientUnresolvedReason(
  *
  * A bare identifier normally yields its own text (`"fetch"`) — the best
  * available name for stub matching regardless of whether it resolves to a
- * lib.dom.d.ts symbol. But when it's bound by a *resolved* named import
- * (`aliasResolved` — the alias was followed to a real declaration, see
- * `classifyCall`'s `importBindingReason`), the module specifier is known, so
- * the name is qualified the same way as a property access: `import {
- * readFileSync } from "node:fs"; readFileSync(...)` is reported as
- * `"node:fs.readFileSync"` (using the imported name, not a local `as`
- * alias). An *unresolved* named import (module doesn't resolve, or the
- * named export doesn't exist) still falls back to the bare identifier text
- * — an unresolvable `import { fetch } from "undici"` is still recognized as
- * `fetch` for stub matching, not silently downgraded to no name at all. Once
- * the same import *resolves*, though, it is qualified as `"undici.fetch"`
- * instead, which only matches the stub table if that qualified name has its
- * own row — a bare `"fetch"` row does not cover it.
+ * lib.dom.d.ts symbol. When it's bound by a named import, the module specifier
+ * is known, so the name is qualified the same way as a property access:
+ * `import { readFileSync } from "node:fs"; readFileSync(...)` is reported as
+ * `"node:fs.readFileSync"` (using the imported name, not a local `as` alias),
+ * and `import { fetch } from "undici"` as `"undici.fetch"`, which a bare
+ * `"fetch"` row does not cover.
+ *
+ * Callers never reach this with an import binding that follows to no
+ * declaration: the local spelling is all such a binding has, and a spelling
+ * is not evidence of which export it names (`classifyCall`).
  *
  * This does not resolve re-exported bindings several hops away — see the
  * limitation noted in `src/stubs/node-builtins.ts`.
@@ -3193,15 +3187,10 @@ function qualifiedNameOf(
   checker: ts.TypeChecker,
   program: ts.Program,
   expr: ts.Expression,
-  aliasResolved: boolean,
   factoryOriginAllowed: boolean,
 ): string | undefined {
   if (ts.isIdentifier(expr)) {
-    if (aliasResolved) {
-      const imported = importedQualifiedNameOf(checker, expr);
-      if (imported) return imported;
-    }
-    return expr.text;
+    return importedQualifiedNameOf(checker, expr) ?? expr.text;
   }
   if (ts.isPropertyAccessExpression(expr)) {
     return memberChainQualifiedNameOf(checker, program, expr, factoryOriginAllowed);

@@ -238,6 +238,21 @@ describe("diagnose (cross-module alias resolution)", () => {
     });
     expect(diag?.contract?.via.map((v) => v.symbol)).toEqual(["callee.ts#fetchRate"]);
   });
+
+  it("regression (#14): an unresolvable named import spelled `fetch` is unknown, not the global fetch's network", async () => {
+    const diagnostics = await diagnoseCrossModule();
+    const diag = diagnostics.find((d) => d.message.startsWith("pureCallsUnresolvedFetch "));
+    expect(diag).toMatchObject({ id: "AMB-W001", severity: "warning" });
+    expect(observedEffects(diag)).not.toContain("network");
+  });
+
+  it("regression (#14): an unresolvable named import spelled `URL` is unknown, not the global constructor's allowlisted pure", async () => {
+    // Without the name match this construction would carry no diagnostic at
+    // all — a pure verdict for a call whose target was never found.
+    const diagnostics = await diagnoseCrossModule();
+    const diag = diagnostics.find((d) => d.message.startsWith("pureConstructsUnresolvedUrl "));
+    expect(diag).toMatchObject({ id: "AMB-W001", severity: "warning" });
+  });
 });
 
 /** Reproduces GitHub's Markdown heading-to-anchor slug algorithm. */

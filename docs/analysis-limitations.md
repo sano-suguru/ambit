@@ -297,7 +297,9 @@ if that function declares a contract. It is counted under `unresolved-symbol` in
 `--coverage` — or under the more specific reason the callee's own declaration
 gives (`builtin-method`, `external-module`, `ambient-declaration`). It is
 counted *without a name* unless one could be built, and a name is only built
-for a bare identifier, for a property access whose receiver traces back to an
+for a bare identifier that is not an import binding following to no declaration
+(an `import-binding` call has only its local spelling, which does not say which
+export it names), for a property access whose receiver traces back to an
 import or to a `const` constructed from an imported class or holding an
 imported factory's result, or — failing all of those — for one whose receiver's
 declared type a package declares (see "The database and LLM client table" above

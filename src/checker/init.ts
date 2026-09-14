@@ -234,7 +234,7 @@ const ROUTES: Readonly<Record<UnresolvedOperationReason, string>> = {
   "external-module":
     'declared in a package under node_modules — a stub for that package resolves it, or `@boundary reason="<package>"` isolates it, which --coverage tallies separately from analysis',
   "import-binding":
-    'an import binding that follows to no declaration — check the module specifier and the named export first; if the module is third-party, a stub resolves it, or `@boundary reason="<package>"` isolates it, tallied separately',
+    "an import binding that follows to no declaration — check the module specifier and the named export first; once the import resolves, the reason it then reports says what resolves it",
   "ambient-declaration":
     'declared in a .d.ts belonging to this project — a contract written on that declaration resolves it, or `@boundary reason="<package>"` isolates it, tallied separately',
   "builtin-method":

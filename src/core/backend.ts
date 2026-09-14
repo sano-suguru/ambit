@@ -14,9 +14,10 @@ import type { SymbolId } from "./symbol-id.ts";
  *   specifier doesn't resolve, or the named export doesn't exist
  *   (`checker.getAliasedSymbol()` returns TypeScript's `unknownSymbol`).
  *   Distinct from `unresolved-symbol` in that the shape is known (an import
- *   binding) even though the target is not; unlike `unresolved-symbol`, a
- *   stub match may still apply if the qualified name happens to be
- *   recognized (see `classifyCall`).
+ *   binding) even though the target is not. Such a call carries no
+ *   `calleeQualifiedName`: the local spelling is all it has, and a spelling
+ *   does not say which export it names, so no stub is matched against it
+ *   (see `classifyCall`).
  * - `builtin-method`: the callee resolved to an ambient declaration from
  *   TypeScript's default lib (e.g. `Array.prototype.map`, `Set.prototype.has`)
  *   whose call site (a method on a local value) `qualifiedNameOf` cannot
