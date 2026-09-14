@@ -37,6 +37,9 @@ jobs:
       - name: Type check
         run: pnpm exec tsc --noEmit
 
+      - name: Type check the resident benchmark
+        run: pnpm typecheck:bench-resident
+
       - name: Test
         run: pnpm test
 
