@@ -320,8 +320,9 @@ of the re-check.** The reuse gate's external-input hashing is 0.6–22 ms — 20
 over immich's 2,679 inputs (14.65 M chars, `node_modules` included) — and at
 most 2% of `project-update` anywhere. **`oldProgram` buys nothing measurable** on
 the five subjects without installed dependencies, and on immich passing it made
-`project-update` 280–690 ms *slower* in every row where the program's structure
-could be reused; the cause is not isolated. A resident process peaks 0–1,000 MiB
+`project-update` 280–690 ms *slower* in every row where the root names did not
+move; the cause is not isolated (see the large-subject run below: TypeScript
+reports no structure reuse there at all). A resident process peaks 0–1,000 MiB
 above a cold one (immich: 2.5–3.9 GiB).
 
 **Architecture C (ADR-0014): No-Go for now.** The revisit condition —
@@ -370,6 +371,34 @@ p50 52 s, against a 0.4–0.7 s re-check. No project over 49 files was observed.
 **Mixed-set narrowing: No-Go. Architecture C and `oldProgram`: evidence
 insufficient** — neither dominates here, and the 500+-file workload ADR-0014's
 reopen condition names is still unmeasured.
+
+**Large subjects, per update shape, synthetic**
+([2026-09-14](measurements/2026-09-14-resident-large-workload.md)). drizzle-orm
+(448 files, no dependencies), immich `server/src` (557 files, 2,679 other program
+inputs) and outline `server/` under its root tsconfig (793 files, 7,106 other
+inputs, 45 M chars); 52 of 52 resident answers byte-equal to cold. A leaf,
+contract-only or no-importer deletion update costs 0.36–0.39 s (drizzle-orm),
+1.4–2.0 s (immich) and 3.8–5.5 s (outline) against a cold 2.1 s, 9.6–10.3 s and
+16.1–16.3 s, and `createProgram` + `getTypeChecker` is 79–95% of it, growing with
+program size. A whole rebuild (outside-root, addition, tsconfig) and a hub edit
+cost at or above cold: immich +2–6%, outline +12–24%, drizzle-orm −8–10%.
+Resident peak RSS reaches 3.4 GiB (immich) and 3.8 GiB (outline). **`oldProgram`:**
+withholding it made `project-update` faster in every same-file-list row on
+immich (9 of 9, including a second independent run: +441 / +404 ms on the leaf)
+and outline (4 of 4, +0.5–1.0 s), made no difference on drizzle-orm outside one
+sequence row, and went the
+other way when a file was added (immich −651 ms) or deleted (outline −1,223 ms).
+A throwaway probe reads `structureIsReused` as `Not` with 0 shared `SourceFile`s
+on every leaf edit of immich and outline: the reuse it exists for never happens
+there (immich has no package redirects, so those are not why). Frequencies were
+not measured, so no share of a session is claimed.
+**Architecture C: evidence insufficient** — its cost-side conditions now hold
+on the two dependency-heavy subjects (cp+tc 88–95% of a small update, 1.3–4.9 s),
+but its reopen condition is a measured editor session, which this is not, and
+the one compiler-side reuse already wired in is abandoned by TypeScript on
+exactly these programs for a reason not yet known. **`oldProgram`: evidence
+insufficient** — consistent by update shape, not across shapes. **Next
+investment: none** until a measured session on a 500+-file project exists.
 
 **Outside-root edits: No-Go on the candidate condition**
 ([design investigation](measurements/2026-09-13-outside-root-invalidation-design.md),
