@@ -14,6 +14,10 @@ report.
 
 ## [Unreleased]
 
+## [0.2.0] — unreleased
+
+The date is stamped at publish.
+
 ### Added
 
 - **`file.ts#<inline callbacks>`, a new declaration path** — a function
@@ -142,10 +146,10 @@ report.
   This changes `diff`'s exit code on a valid invocation, which is §9.2 surface.
 
 
-## [0.1.0] — unreleased
+## [0.1.0] — 2026-09-10
 
 The first release, so this records the surface it establishes rather than a
-difference from an earlier one. The date is stamped at publish.
+difference from an earlier one.
 
 Two rules changed while nothing could yet depend on them. Governance takes
 effect at 1.0 or the first external adopter, **not** at the first npm publish
