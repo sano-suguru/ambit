@@ -21,16 +21,7 @@ documented in [What Ambit does not guarantee](#what-ambit-does-not-guarantee).
 
 ## Quick start
 
-Adoption currently goes in three stages — **See**, **Shape**, **Enforce** — and
-stopping at any of them is fine. Requires Node.js 24 and a git repository.
-Ambit reads the nearest `tsconfig.json` at or above the directory it is given,
-and analyzes with the TypeScript it installs rather than the project's; a
-tsconfig written for TypeScript 5 needs no change.
-
-### 1. See: the authority a change adds, with no code changed
-
-Here the last commit added one `fetch` to `currentRate`, two calls below
-`priceOrder`. Nothing in the repository declares anything:
+Requires Node.js 24 and a git repository. No contracts, config or ledger:
 
 ```console
 $ npm i -D ambit-ts
@@ -44,118 +35,22 @@ base HEAD~1 (25b7b46) vs the working tree, over src
       -> applyTax (tax.ts:3)
       -> currentRate (rates.ts:3)
       operation: fetch (rates.ts:4)
-    - `src/pricing.ts#priceOrder` `effect:network` — <why this increase is correct>
   ...
 exit=1
 ```
 
-A function with no contract is compared by what its body does, and a caller
-holds what its callees reach, so the one `fetch` is reported on `currentRate`
-and on both functions above it — as `network`, and as the host it reaches.
-Exit 1 means something increased, 0 that nothing did, and 2 that the
-comparison could not be made.
+The last commit added one `fetch` two calls below `priceOrder`. A function with
+no contract is compared by what its body does, and a caller holds what its
+callees reach. Exit 1 means authority increased, 0 that nothing did, and 2 that
+the comparison could not be made.
 
-In CI, run it on every pull request without blocking anything:
+Ambit reads the nearest `tsconfig.json` at or above the directory it is given,
+and analyzes with the TypeScript it installs; a tsconfig written for TypeScript
+5 needs no change.
 
-```yaml
-# .github/workflows/ambit.yml
-name: Ambit
-on: pull_request
-permissions:
-  contents: read
-jobs:
-  ambit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 2 # `diff` needs the base commit; the default of 1 exits 2
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - run: npm ci
-      # Exit 1 (authority increased) passes; exit 2 (could not compare) still fails.
-      - run: npx ambit diff HEAD~1 src --format github || [ $? -eq 1 ]
-```
-
-`continue-on-error: true` looks equivalent and is not: it passes exit 2 too, so
-a run that could not compare the trees would look the same as one that found
-nothing.
-
-No ledger, contract or config is needed at this stage. The output is not yet
-written for it, though: the job stays green, but each increase is still
-annotated on the pull request as an **error**, and still names a line to add to
-`ambit.approvals.md`. That is stage 3's output with only the exit code
-tolerated; while you are looking, the line can be ignored.
-
-### 2. Shape: contracts where authority enters
-
-Declare the functions authority is meant to come through — the HTTP client, the
-database wrapper, the file adapter — rather than every function. `npx ambit
-init src` prints what each undeclared function was observed to do, which is
-where to look for them; it writes nothing. Write both tags, with the effect
-names from [DESIGN.md §4.2](docs/DESIGN.md#42-effects) — `init`'s `[none]` is
-written `pure`:
-
-```ts
-/**
- * @effects network
- * @capabilities http:get:rates.example.com
- */
-export function currentRate(region: string): number {
-```
-
-Declaring what a function already does is not an increase; declaring more than
-that is. Callers see the contract instead of the body beneath it, so an
-authority the contract already declares, gained further down, is reported where
-it was added rather than again on every caller. Widening the contract itself
-still reaches every undeclared caller, and `@effects` without `@capabilities`
-leaves the host to reach them on its own.
-
-**Add `ambit check` with the first contract.** Once a function is declared,
-`diff` compares its contract, not its body: `appendFileSync` added under an
-unchanged `@effects network` is no increase to `diff`. `check` is what fails
-it:
-
-```console
-$ npx ambit check src; echo "exit=$?"
-error: currentRate declares network but performs [fs_write] directly (rates.ts:7)
-  operation: node:fs.appendFileSync (rates.ts:9)
-files=3 functions=3 declared=1
-exit=1
-```
-
-In CI, that is one more step before `diff`:
-`- run: npx ambit check src --format github`.
-
-### 3. Enforce: an increase needs an approval
-
-Drop `|| [ $? -eq 1 ]` so both steps block, and make the job a required check:
-
-```yaml
-      - run: npx ambit check src --format github
-      - run: npx ambit diff HEAD~1 src --format github
-```
-
-`check` alone would now let the `appendFileSync` above through, because widening
-`currentRate` to `@effects network, fs_write` turns it green. `diff` does not:
-the widening is an increase on `currentRate` and on both callers, and it passes
-only when the same change adds the line `diff` printed for each to
-`ambit.approvals.md` at the repository root — the only ledger `diff` reads —
-with the placeholder replaced by the reason. For `currentRate`, that is:
-
-```markdown
-- `src/rates.ts#currentRate` `effect:fs_write` — rate lookups are audit-logged
-```
-
-The line names the symbol from the repository root, whichever directory `diff`
-was given. `diff` then exits 0 and still lists each increase with the reason
-given. Ambit cannot tell who wrote the line, so name the file in `CODEOWNERS`:
-that is what makes an approval need an approver. `--strict` and `@boundary` come
-last, if at all — [CLI and CI](#cli-and-ci) says when.
-
-The contracts are JSDoc, so `npm remove ambit-ts` leaves ordinary TypeScript
-that still type-checks and runs.
+Next: run it in CI without blocking ([See](#see-advisory-ci)), declare the
+boundaries authority enters through ([Shape](#shape-contracts-at-the-boundaries)),
+or block merges on it ([Enforce](#enforce-approvals)).
 
 ## The accident, and the fix that is not one
 
@@ -252,6 +147,95 @@ makes the increase.
 TypeScript accepts both edits: the types line up either way. It tells you
 whether a value has the type you expect, not whether a function is allowed to do
 what it does.
+
+## Adoption path
+
+Three stages, as the tooling works today. Stopping at any of them is fine.
+
+### See: advisory CI
+
+```yaml
+# .github/workflows/ambit.yml
+name: Ambit
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  ambit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2 # `diff` needs the base commit; the default of 1 exits 2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm ci
+      # Exit 1 (authority increased) passes; exit 2 (could not compare) still fails.
+      - run: npx ambit diff HEAD~1 src --format github || [ $? -eq 1 ]
+```
+
+`continue-on-error: true` is not the same: it would pass exit 2 as well. The
+job stays green, but increases still appear as GitHub error annotations with an
+approval hint today. Ignore the hint until Enforce.
+
+### Shape: contracts at the boundaries
+
+Declare only the functions authority enters through: the HTTP client, the
+database wrapper, the file adapter. `npx ambit init src` lists what each
+undeclared function was observed to do, and writes nothing. Write both tags,
+with the effect names from [DESIGN.md §4.2](docs/DESIGN.md#42-effects); `init`'s
+`[none]` is written `pure`.
+
+```ts
+/**
+ * @effects network
+ * @capabilities http:get:rates.example.com
+ */
+export function currentRate(region: string): number {
+```
+
+Callers then see the contract. A change beneath it that stays within it is no
+longer reported again on every caller; widening the contract still is.
+
+**Add `ambit check` with the first contract, as a blocking step.** A declared
+function is compared by its contract, so `diff` no longer sees what its body
+adds. `check` does:
+
+```console
+$ npx ambit check src; echo "exit=$?"
+error: currentRate declares network but performs [fs_write] directly (rates.ts:7)
+  operation: node:fs.appendFileSync (rates.ts:9)
+files=3 functions=3 declared=1
+exit=1
+```
+
+In CI: `- run: npx ambit check src --format github`.
+
+### Enforce: approvals
+
+Drop `|| [ $? -eq 1 ]` and make the job a required check:
+
+```yaml
+      - run: npx ambit check src --format github
+      - run: npx ambit diff HEAD~1 src --format github
+```
+
+Widening `currentRate` to `@effects network, fs_write` turns `check` green.
+`diff` still fails, once for each symbol the widening reaches, until the same
+change adds each line `diff` printed to `ambit.approvals.md` at the repository
+root, with a reason:
+
+```markdown
+- `src/rates.ts#currentRate` `effect:fs_write` — rate lookups are audit-logged
+```
+
+The line names the symbol from the repository root. Ambit cannot tell who wrote
+it, so name the file in `CODEOWNERS`. `--strict` and `@boundary` come last, if at
+all; [CLI and CI](#cli-and-ci) says when.
+
+Contracts are JSDoc, so `npm remove ambit-ts` leaves ordinary TypeScript that
+still type-checks and runs.
 
 ## Where this sits
 
@@ -399,8 +383,8 @@ does not break code that has no contracts yet.
 
 Exit codes: **0** when nothing was reported, **1** on an error, **2** when the
 analysis itself could not run — never **0** for "could not tell". That exit code
-is the whole CI integration; the workflows are in the
-[Quick start](#1-see-the-authority-a-change-adds-with-no-code-changed).
+is the whole CI integration; the workflows are in
+[Adoption path](#adoption-path).
 
 On a `pull_request` event the checkout is GitHub's merge of the branch into its
 base, so `HEAD~1` is the base branch's tip and `diff` compares exactly the

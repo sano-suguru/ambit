@@ -18,100 +18,84 @@ Phase 1 validates this on real production-bound pull requests.
 
 ## Current bottleneck
 
-**External pilot evidence.** `ambit-ts@0.2.0` installs from npm and its
-pull-request gate runs outside this repository
-([`docs/status.md`](docs/status.md)). The open question is whether authority
-diffs change reviewer decisions on real production-bound pull requests, and
-only a pilot can answer it.
-
-`unknown` is the main technical risk to observe during that pilot, not a gate in
-front of it. The corpus median is 52.9%, but on three third-party backends the
-gate's usefulness tracked standing noise and whether real increases were
-reported, not the rate ([`docs/status.md`](docs/status.md)). Which unresolved
-names are worth fixing is answerable only from a pilot's own pull requests.
+**External pilot evidence.** `ambit-ts@0.2.0` installs from npm and runs outside
+this repository ([`docs/status.md`](docs/status.md)). Whether authority diffs
+change reviewer decisions on production-bound pull requests is a question only a
+pilot can answer.
 
 ## Next proof
 
-**One external repository takes `ambit diff` from an advisory CI signal to a
-gating one**, on a codebase nobody here wrote.
+**One external repository keeps `ambit diff` on its production-bound pull
+requests because the reports change reviewer decisions**, on a codebase nobody
+here wrote.
 
-The pilot starts advisory: a `diff` step that fails nothing and needs no
-contract, which is enough to see whether its reports change what reviewers do.
-Gating is where the proof ends — a repository that found the reports worth acting
-on making them required, and keeping them so — not where a pilot has to begin.
+It can start advisory. A `diff` step that blocks nothing and needs no contract
+is enough to observe this.
 
-That is the first claim about Ambit that is not self-reported. Everything before
-it is preparation for it:
+The stronger proof after it is that the same team **voluntarily** makes `diff`
+a required check, and keeps it one. Asking a pilot to gate so that a criterion is
+met would contaminate the result.
+
+What has to hold for either:
 
 | To prove | What would show it | Where it stands |
 |---|---|---|
-| The analysis sees enough of a real codebase to be worth gating | Corpus median `unknown` materially below 52.9% — enough that an external pilot is credible. **This is a pre-adoption heuristic with no target number, not a Phase 1 criterion** | 52.9% — [`docs/status.md`](docs/status.md) |
-| The gate does not block honest work | An adopter's approval ledger stays under a handful of lines per pull request in steady state | Measured only on this repository: five lines for the change that introduced it |
+| The analysis sees enough of a real codebase to be worth reviewing | Corpus median `unknown` materially below 52.9% | 52.9% — [`docs/status.md`](docs/status.md) |
+| The gate does not block honest work | Where a pilot gates, its approval ledger stays under a handful of lines per pull request in steady state | Measured only on this repository: five lines for the change that introduced it |
 | Contracts survive a real build | An adopter's bundled, minified production build enforces what its source declared | Verified in `test/e2e.*` only; no external build |
 | The cost of backing out is real | An adopter removes Ambit and their code still type-checks and runs | `test/e2e.install.test.ts` proves it for a scratch project, not for an application |
 
-The corpus figure is a pre-adoption heuristic and **not a Phase 1 criterion.**
-The corpus is five repositories with no dependencies installed, measured by
-whoever is working on Ambit; an adopting team's code, with its own
-`node_modules`, is a different population, and its `unknown` rate is set largely
-by which dependencies it uses. [`docs/status.md`](docs/status.md) says the same
-thing beside the numbers themselves.
+The corpus row is a pre-adoption heuristic with no target number, **not a Phase 1
+criterion**. The corpus is five repositories with no dependencies installed; a
+pilot's own `unknown` rate is set largely by the dependencies it uses.
 
 ## Phase 1 exit criterion
 
-**An external pilot team keeps `ambit diff` on its production-bound pull
-requests, its reports change what reviewers do, and the team moves it to a
-gating check and keeps it there.** Support for other languages is considered
-only after that. Speeding up analysis alone does not count.
+Phase 1 is met when an external pilot team:
 
-The halves test different things. Reviewers acting on reports is the evidence
-of product value, and it can be collected while the step is still advisory.
-Moving to gating, and staying there, tests whether that value survives
-continuous operation — contracts, approval lines, a check that blocks — which an
-advisory step never pays for.
+- keeps `ambit diff` on its production-bound pull requests,
+- changes reviewer decisions because of its reports, and
+- does not remove it over operational cost.
 
-The adoption path a pilot is expected to take today is README's Quick start:
-**See** (an advisory `diff`, no contracts), **Shape** (contracts where authority
-enters, with `check`), **Enforce** (blocking, the approval ledger, `CODEOWNERS`).
-It describes the current tooling, not a requirement on the pilot, and the stage
-a pilot stops at is itself evidence.
+**Gating is not required.** A team that keeps Ambit as an advisory check has met
+Phase 1. A team that voluntarily gates, and stays gated, is stronger evidence,
+and the only test of the approval ledger. Support for other languages is
+considered only after Phase 1. Speeding up analysis alone does not count.
 
-Every item below is observable within one pilot — from its pull requests, its
-approval ledger, and its reviewers. These are **candidate metrics**: none has a
-numeric target, because there is no pilot baseline to set one against, and a
-number chosen before one exists would be a guess.
+README documents the current adoption path as See, Shape and Enforce. The stage
+a pilot stops at is recorded, not judged.
+
+The items below are candidate metrics, each observable within one pilot. None
+has a numeric target, because there is no pilot baseline to set one against.
 
 ### Evidence of product value
 
-What Phase 1 has to show.
-
 | Evidence | What would show it |
 |---|---|
-| Sustained use | `ambit diff` stays on as a CI signal for production-bound pull requests, rather than being switched off or routinely ignored |
+| Sustained use | `ambit diff` stays on for production-bound pull requests, rather than being switched off or routinely ignored |
 | Authority increases detected | `ambit diff` reports increases on the pilot's own pull requests |
 | Reviewer action | A report leads a reviewer to reject a change, narrow its scope, correct a contract, or write down why an increase is correct |
 | A catch reviewers credit | A reviewer judges a reported increase as one they might have missed without Ambit |
+| Voluntary gating (stronger, not required) | The pilot makes `diff` a required check on its own initiative, and keeps it |
 
 ### Adoption guardrails
 
-Not evidence of value on their own. They are the conditions under which the
-evidence above counts: value shown by a pilot that finds the gate too slow,
-too noisy, or impossible to remove is not Phase 1 met.
+The evidence above counts only while these hold. Value shown by a pilot that
+finds Ambit too slow, too noisy, or impossible to remove is not Phase 1 met.
 
 | Guardrail | What would show it holds |
 |---|---|
 | Review cost stays acceptable | The pilot does not find the added review time unacceptable; lead time is compared with its pull requests before adoption |
-| `unknown` and noise do not stop use | No standing report on an unchanged tree, and no `unknown`, leads the pilot to stop using `diff` or to back out of gating |
+| `unknown` and noise do not stop use | No standing report on an unchanged tree, and no `unknown`, leads the pilot to stop using `diff` |
 | Cost of backing out | The removal procedure is tested automatically |
 | Initial-check and re-check latency | Measured separately on a representative project, against the allowances in [ADR-0001](docs/adr/0001-analysis-backend.md) |
 
-**`unknown` is tracked relative to the pilot's own repository, not against an
-absolute rate.** The rate is set largely by a repository's dependencies, so a
-single threshold would say more about the dependency tree than about Ambit. On
-three third-party backends, what the gate was worth tracked standing noise on
-an unchanged tree and whether a real increase was reported at all, not the
-absolute rate ([`docs/status.md`](docs/status.md)). What a pilot reports, with
-the denominator, boundary trust categories, and engine version:
+**`unknown` is a risk to observe during the pilot, measured against the pilot's
+own first run.** An absolute threshold would say more about a dependency tree
+than about Ambit. On three third-party backends, the gate's usefulness tracked
+standing noise and whether real increases were reported, not the rate
+([`docs/status.md`](docs/status.md)). The pilot reports, with the denominator,
+boundary trust categories, and engine version:
 
 - the change in its `unknown` rate from its first run
 - whether any `unknown` blocks continued use, and which
