@@ -226,6 +226,9 @@ Non-obvious constraints:
   installed by default, so they cannot be type-checked, and nothing there
   is shipped or run by `ambit check`. `bench-corpus.ts` fetches from the
   network, so `pnpm test` does not run it.
+  The one exception to the type-checking gap is `bench-resident.ts` and
+  `scripts/bench-resident/`, which `tsconfig.bench-resident.json` checks
+  (`pnpm typecheck:bench-resident`, also run in CI).
 
 ## Verification
 

@@ -34,6 +34,7 @@
  *
  * Outside `pnpm test` and outside `tsconfig.json`'s `include`, like every
  * other script: the corpus copies come from `scripts/corpus.ts`, which fetches.
+ * Type-checked on its own by `pnpm typecheck:bench-resident`.
  *
  * @effects fs_read, fs_write, process
  */
@@ -51,7 +52,7 @@ import {
 } from "../src/checker/backend/legacy-ts.ts";
 import { ResidentSession, type ResidentStore, type UpdateResult } from "../src/checker/resident.ts";
 import { analyze } from "../src/cli/analyze.ts";
-import type { TsBackend } from "../src/core/index.ts";
+import type { SymbolId, TsBackend } from "../src/core/index.ts";
 import { renderAnalysis } from "../test/support/render-analysis.ts";
 import {
   applyMutation,
@@ -282,7 +283,7 @@ async function selectChild(subject: SubjectSpec, copyDir: string): Promise<Mutat
     // has callers to propagate into. Verified by applying it and reading the
     // summary back, because a line the comment does not attach to would
     // measure a no-op.
-    const candidates: { file: string; line: number; id: string; score: number }[] = [];
+    const candidates: { file: string; line: number; id: SymbolId; score: number }[] = [];
     for (const file of withFunctions) {
       for (const fn of store.files.get(file)?.extracted?.functions ?? []) {
         if (fn.jsDoc !== undefined || fn.configOnly || fn.bodies !== undefined) continue;
@@ -343,7 +344,7 @@ async function selectChild(subject: SubjectSpec, copyDir: string): Promise<Mutat
 }
 
 /** The committed summary's `declared.kind` for `id`. */
-function declaredKind(session: ResidentSession, id: string): string | undefined {
+function declaredKind(session: ResidentSession, id: SymbolId): string | undefined {
   return session.committed().store.state.get(id)?.summary.declared.kind;
 }
 
