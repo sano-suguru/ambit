@@ -266,9 +266,9 @@ describe("@budget", () => {
 
 describe("contract-to-handler agreement", () => {
   /**
-   * Contracts reach handlers by explicit registration, which leaves the
-   * capability set written twice — in the JSDoc and in the `spec`. The
-   * duplication does not go away, so the source-level agreement check has to
+   * Contracts reach handlers by explicit registration. A literal `spec` can be
+   * the handler's only capability declaration, but where the JSDoc also writes
+   * one, the two can drift. The source-level agreement check therefore has to
    * reach the adapter's registrations as well as a hand-written `withAmbit`,
    * or choosing that approach would have quietly dropped a check.
    */

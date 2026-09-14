@@ -188,7 +188,7 @@ If a symbol has both JSDoc and config, JSDoc wins and the difference is warned a
 
 An overload set is **one declaration site, and that site is the implementation.** A signature is a type, not code that runs. Therefore a signature, an `abstract` member, and a `declare function` inside a `.ts` file are none of them declaration sites: `--coverage` counts them as `bodyless-declaration`, a contract tag written there is reported as AMB-E003 and not adopted, and a call into a set with no implementation is `unknown` (`overload-without-body`).
 
-This rule is a termination requirement as well as a notation: the declaration path and the function the backend returns must be one to one, or §4.2 rule 7's fixed-point iteration does not converge.
+This rule is a termination requirement as well as a notation: the declaration path and the function the backend returns must be one to one, or the fixed-point iteration that §4.2 runs over cycles in the call graph does not converge — two functions behind one path overwrite each other's result on every pass.
 
 **(a) Notation of the `symbol` part, and which declaration sites can be named**
 
