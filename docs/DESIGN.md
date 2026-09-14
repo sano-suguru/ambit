@@ -1,7 +1,7 @@
 # Ambit Design Specification
 
 - Status: Draft
-- Revision: 5 (Draft) — the chapters that were not specification were moved out: the backend gates to [ADR-0001](adr/0001-analysis-backend.md), the RFC procedure to [`CONTRIBUTING.md`](../CONTRIBUTING.md), the open questions to [`docs/open-questions.md`](open-questions.md). Chapter numbers are unchanged
+- Revision: 5 (Draft) — the chapters that were not specification were moved out: the M0.5 backend comparison — its allowances, reasons and rejected alternatives — to [ADR-0001](adr/0001-analysis-backend.md), while the five gates any backend is judged by stay in §3.5 because every re-evaluation runs against them; the RFC procedure to [`CONTRIBUTING.md`](../CONTRIBUTING.md), the open questions to [`docs/open-questions.md`](open-questions.md). Chapter numbers are unchanged
 - Intended readers: developers of Ambit itself, contributors, design reviewers
 - Change procedure: direct edit plus a record in `docs/adr/` until the trigger in §9.1; RFC from there on
 - What this file is: **the current design, and the limits of what it guarantees** — nothing else. **Why** a design is the one written here is in [`docs/adr/`](adr/README.md); what is implemented today, with measured numbers, is [`docs/status.md`](status.md); what is still undecided is [`docs/open-questions.md`](open-questions.md); where the project is going is [`ROADMAP.md`](../ROADMAP.md)
@@ -10,7 +10,9 @@
 
 ## 1. Purpose
 
-Ambit detects when a change **expands the authority that executable code can exercise**, and makes that expansion reviewable in CI — for AI-generated changes above all, because they arrive faster than they can be read.
+Ambit is authority-aware review for TypeScript. It detects when a change **expands the authority that executable code can exercise**, and makes that expansion reviewable in CI, whoever wrote the change.
+
+The value is highest in AI-assisted and agent-generated development, where changes arrive in greater volume and faster than they can be read. That is a use case, not the definition.
 
 It does this through four things:
 
@@ -202,9 +204,9 @@ These last two have a declaration path, but **writing JSDoc on them is still not
 
 This is a third tier beside the two above: **analyzed and compared, declarable by nobody.** A contract comment on one of the callbacks is inert and reported as `AMB-E003`, exactly as on an accessor; a config key naming the owner declares nothing either, and is reported as a key that matched no symbol. Both refusals are the same rule — one sentence must not stand for several functions at once, which would widen the guarantee surface by notation alone (P4). `ambit init` proposes nothing for it, in JSDoc or in config, because there is no edit that would attach the inferred set to what produced it.
 
-Why one entry per file and not one per callback: an anonymous sibling has no name to be told apart by, and every synthetic name that would tell two apart is either a position (which §6.4 forbids a key from holding) or an ordinal (which renames every sibling below an inserted one). What replaces the name is arithmetic — §6.3 compares the owner's authority as a multiset over the bodies it owns — so a body gaining authority is visible without the body ever being named. `ambit init --config` and `ambit.approvals.md` therefore see a single, position-free id that survives re-indenting, moving the registration, and adding or deleting a neighbouring one.
+There is one owner per file and no name per callback. The owner's id holds no position and no ordinal, so it survives re-indenting, moving a registration, and adding or deleting a neighbouring one; `ambit init --config` and `ambit.approvals.md` see only that id. A body gaining authority is still visible, because §6.3 compares the owner's authority as a multiset over the bodies it owns. Why no per-callback name was adopted is [ADR-0013](adr/0013-the-inline-callback-owner.md).
 
-**What this does not buy is per-handler identity, and the limit is not an implementation gap.** Two anonymous bodies swapping authority and two anonymous bodies being reordered are the same pair of sequences; nothing in the source separates them. So the owner answers "did this file's inline handlers gain authority" and not "which of them holds it". The second question is not answered wrongly — §6.4's third shape reports that it cannot be answered — but it is not answered.
+**Per-handler identity is not guaranteed, and the limit is not an implementation gap.** Two anonymous bodies swapping authority and two being reordered are the same pair of sequences, so the owner answers "did this file's inline handlers gain authority" and not "which of them holds it". The second question is not answered wrongly — §6.4's third shape reports that it cannot be answered — but it is not answered.
 
 The owner's own `location` is the start of the file, because the bodies it stands for are scattered through it. What locates an increase is the authority path's `operation` (§5.1), which is the position of the call itself.
 
@@ -225,7 +227,7 @@ The `file` part interprets `*` (any string not crossing `/`) and `**` (zero or m
 
 `effects: { payments: ["network", "db_write"] }` is **expanded into standard effects at parse time**. Only expanded standard effect names appear in a diagnostic's `contract.declared` / `contract.observed`; user-defined names exist only on the input side. The value of a definition may only be standard effect names, defined names are not expanded recursively, and a collision with a standard effect name exits 2.
 
-**Adoption via `ambit init`**
+**Contract inference and proposal (`ambit init`)**
 
 `ambit init` infers the effects of existing code from the evidence in §4.2 and emits JSDoc additions as fix candidates (§5, `fixes[].edits`). Functions it cannot infer remain `unknown` and appear in `--coverage`.
 
@@ -338,8 +340,6 @@ A contract reaches the runtime as a **value inside the module**: `withAmbit(spec
 
 The third parameter `decode` builds the handler's arguments from the framework's `Context`. It is separate so that framework-dependent calls stay inside the registration expression and the handler stays statically analyzable. `decode` runs **inside** the context: reading the request body counts toward `timeMs`.
 
-The runtime overhead — one context and one `decode` — is **unmeasured**.
-
 **Removing the double declaration**
 
 When a `spec` fixes `capabilities` / `budget` as literals and `handler` is an identifier naming a declaration in the same file, that value **is read as that handler's own `@capabilities` / `@budget` declaration**. There is no need to write the same content again in JSDoc. `@effects` and `@entrypoint` stay in JSDoc.
@@ -370,7 +370,7 @@ The rationale for each choice is [ADR-0006](adr/0006-runtime-hook-approach.md); 
 | `pg` | client wrapping (`installPgHook(pg)`) | yes |
 | `mysql2`, `@prisma/client`, `drizzle-orm`, `mongodb`, LLM SDKs (`openai`, `@anthropic-ai/sdk`, `ai`) | no hook | no |
 
-A row marked "no hook" has static effects but nothing intercepting it at run time: calling it is neither blocked nor recorded. The performance impact of going through a replaced function is **unmeasured**.
+A row marked "no hook" has static effects but nothing intercepting it at run time: calling it is neither blocked nor recorded.
 
 Denial follows the shape of the API: synchronous APIs `throw`, callback APIs use `process.nextTick(callback, error)`, Promise APIs reject. `existsSync` throws rather than returning `false` — "does not exist" and "must not look" are different answers.
 
@@ -673,12 +673,10 @@ reported as nothing. §6.4's first shape is counted the same way, over the
 bodies the analysis stopped reaching the end of.
 
 What the count cannot see is authority **moving** between two of those bodies:
-one handler losing `network` and another gaining it leaves the total at one,
-and the two sequences are the same two sequences a plain reorder produces. Two
-named functions would report that as one increase and one decrease; anonymous
-bodies have nothing to report it against. §6.4's third shape is where it goes
-instead — not as an increase, because nothing was granted, but never as
-silence. The same applies to what §6.4's first two shapes count.
+one handler losing `network` and another gaining it leaves the total at one.
+That is not an increase, because nothing was granted; §6.4's third shape reports
+it instead, never silence. The same applies to what §6.4's first two shapes
+count.
 
 The count decides *that* something grew; it is not carried into what the
 increase is. `added` names the authority once however many bodies gained it, so
@@ -825,17 +823,15 @@ fails as one. What is left is the three shapes above, written out:
    bodies did not move; it was added or removed, and `added` / `removed` /
    shapes 1 and 2 report it, so this does not repeat them.
 
-   Per fact rather than per body because authority moves without bodies
-   moving: `[{network}, {db_write}]` becoming `[{network, db_write}, {}]`
-   leaves both counts at one and leaves no body unchanged, yet `db_write`
-   changed hands. Two bodies that are both `unknown` are likewise told apart by
-   their own operations and not by the boolean. A capability's presence is
-   §4.4's containment and not string equality, the same rule `added` and
-   `removed` use: a body granted `http:get:*` holds `http:get:api.example.com`,
-   so `admin: http:get:*` becoming `public: http:get:api.example.com` is a
-   narrowing that also changed hands, and both halves are reported. A plain
-   reorder fires too, and must — it is the other reading of the same
-   evidence.
+   So `[{network}, {db_write}]` becoming `[{network, db_write}, {}]` fires:
+   `db_write` changed hands though no count moved. Two bodies that are both
+   `unknown` are told apart by their own operations, not by the boolean. A
+   capability's presence is §4.4's containment, the same rule `added` and
+   `removed` use, so `admin: http:get:*` becoming
+   `public: http:get:api.example.com` is a narrowing that also changed hands,
+   and both halves are reported. A plain reorder fires too — it is the other
+   reading of the same evidence. Why the comparison is per fact and not per
+   body is [ADR-0013](adr/0013-the-inline-callback-owner.md).
 
    What closes this shape is in the checked repository, like the other two:
    binding the handler to a name gives it a symbol, and a symbol is compared
@@ -857,14 +853,11 @@ operation. A symbol compared under a renamed path is compared against its own
 base record (§6), so moving a file reports nothing either.
 
 **The exit code is opt-in.** All three shapes are reported at exit 0 by default
-and fail with exit 1 under `ambit diff --strict`, together. The default is 0 because
-the alternative is incoherent: shape 1 is the strictly worse event — analysis
-that used to reach a symbol no longer does — and a default that failed on shape 2
-while shape 1 passed would read as a classification rather than a rule. The flag
-is opt-in because closing a shape is not something every repository can do
-on demand; §4.3 gives three ways — a verifiable declaration, a stub, or
-explicit isolation behind `@boundary` — and all three are in-code, reviewable,
-and not always available to the repository that hit the report.
+and fail with exit 1 under `ambit diff --strict`, together. §4.3's three ways of
+closing a report — a verifiable declaration, a stub, or explicit isolation
+behind `@boundary` — are all in-code and reviewable, and not always available to
+the repository that hit the report. Why the default is 0 and
+the flag opt-in is [ADR-0012](adr/0012-reporting-an-unresolvable-gain.md).
 
 `diff --strict` is defined here and not by `check --strict`, which promotes only
 §4.2 rule 3's warning about a *declared* function containing `unknown`. `diff

@@ -10,10 +10,12 @@ findable.
 
 ## When to write one
 
-**Write an ADR when the decision is irreversible, changes the guaranteed surface
-(`docs/DESIGN.md` §9.2), or has a security consequence.**
+**Write an ADR when the decision is costly to reverse, establishes an
+architectural invariant that would be dangerous to overturn without knowing why
+it holds, changes the guaranteed surface (`docs/DESIGN.md` §9.2), or has a
+security consequence.**
 
-**If the decision is easily reversible and has neither of those consequences, do
+**If the decision is easily reversible and has none of those consequences, do
 not write one.** Git history already holds it. A record for a choice that can be
 undone in an afternoon costs more to read, for everyone who reads the directory
 afterwards, than it ever saved.
@@ -39,11 +41,15 @@ alternative is enough.
 An ADR records a decision as it was made, and is not rewritten to say something
 else. Two rules follow, and they are the whole procedure:
 
-- **A later reconsideration gets its own record**, whatever it concludes. One
-  that changes nothing links back as `Confirms: ADR-XXXX`; one that changes
-  something links back as `Supersedes: ADR-XXXX`, and the superseded record
-  gains a `Superseded by:` line. Never append the reconsideration to the
-  original.
+- **A later reconsideration never rewrites the original's decision or
+  reasons.** When a `Revisit when` condition fires, the original is not amended
+  to record the outcome. The one edit it may receive is the `Superseded by:`
+  status line below. A
+  reconsideration that changes the decision gets its own record, linking back as
+  `Supersedes: ADR-XXXX`, and the superseded record gains a `Superseded by:`
+  line. One that leaves the decision standing is recorded in
+  `docs/measurements/`, and gets a `Confirms: ADR-XXXX` record only if it meets
+  "When to write one" on its own.
 - **A record with a `Superseded by:` line is history**, not the specification.
   `docs/DESIGN.md` points at the record that is current.
 

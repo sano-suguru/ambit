@@ -337,9 +337,10 @@ Write in English: `README.md`, `docs/DESIGN.md`, `docs/adr/`,
 `docs/integrations/`, `docs/limitations.md`, `docs/analysis-limitations.md`,
 `docs/open-questions.md`, `ROADMAP.md`, `CONTRIBUTING.md`, diagnostic message
 text, `docs/diagnostics/`, source comments and test names in `src/`, `test/`
-and `scripts/`, this file. Write in Japanese: `docs/goals/`, RFCs,
-commit messages, issues. Keep `effects`, `capabilities`,
-`budget`, `boundary`, and `unknown` in English in both.
+and `scripts/`, this file, RFCs, commit messages, pull request descriptions, and
+issues — everything intended for an external contributor. Only `docs/goals/`,
+which is working notes, may be written in Japanese. Keep `effects`, `capabilities`, `budget`, `boundary`, and
+`unknown` in English there too.
 
 A fixture whose subject *is* non-ASCII text
 (`test/fixtures/backend-conformance/unicode.ts`) keeps its non-ASCII

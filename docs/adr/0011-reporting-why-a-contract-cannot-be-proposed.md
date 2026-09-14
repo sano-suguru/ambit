@@ -1,7 +1,7 @@
 # ADR-0011: `ambit init` reports why it cannot propose a contract, and proposes no `@boundary`
 
 - Status: Accepted (2026-09-11)
-- Decides: `docs/DESIGN.md` §4.1 "Adoption via `ambit init`"
+- Decides: `docs/DESIGN.md` §4.1 "Contract inference and proposal (`ambit init`)"
 - Evidence: [`docs/measurements/2026-09-11-coverage-and-latency.md`](../measurements/2026-09-11-coverage-and-latency.md),
   "How much of the `unknown` a reader can be told about"
 

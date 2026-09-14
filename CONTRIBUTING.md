@@ -40,8 +40,8 @@ first external adopter, whichever comes first**
 
 1. Edit `docs/DESIGN.md` directly.
 2. Write the record in [`docs/adr/`](docs/adr/README.md) — but only if the
-   decision needs one. A decision that is easily reversible and carries no
-   compatibility or security consequence gets no ADR; git history is enough.
+   decision needs one ([`docs/adr/README.md`](docs/adr/README.md), When to write
+   one). A decision that is easily reversible gets no ADR; git history is enough.
 3. If the change touches `docs/DESIGN.md` §9.2's guaranteed surface, add a
    `CHANGELOG.md` entry in the same change. This obligation holds at every
    version, before and after the trigger.
@@ -77,12 +77,11 @@ holds it.
 
 ## Language
 
-English: `README.md`, `docs/DESIGN.md`, `docs/adr/`, `docs/integrations/`,
-`docs/limitations.md`, `docs/analysis-limitations.md`, `docs/open-questions.md`,
-`ROADMAP.md`, diagnostic message text, `docs/diagnostics/`, and all comments and
-test names in `src/`, `test/`, `scripts/`.
+Everything contributor-facing is in English: every document in the repository,
+diagnostic message text, all comments and test names in `src/`, `test/`,
+`scripts/`, RFCs, commit messages, pull request descriptions, and issues. An
+external contributor has to be able to read and join any of them.
 
-Japanese: `docs/goals/`, RFCs, commit messages, issues.
-
-`effects`, `capabilities`, `budget`, `boundary`, and `unknown` stay in English
-in both.
+`docs/goals/` is working notes rather than contributor-facing, and may be in
+Japanese. `effects`, `capabilities`, `budget`, `boundary`, and `unknown` stay in
+English there too.
