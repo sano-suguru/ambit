@@ -1019,7 +1019,7 @@ function loadProjectConfig(absoluteRoot: string): {
           .join("; ")}`,
       );
     }
-    return { rootNames: parsed.fileNames, options: parsed.options };
+    return { rootNames: parsed.fileNames, options: withTypeScript5TypesDefault(parsed.options) };
   }
 
   // No tsconfig.json found: fall back to every .ts file under the root with
@@ -1033,7 +1033,21 @@ function loadProjectConfig(absoluteRoot: string): {
     strict: true,
     skipLibCheck: true,
   };
-  return { rootNames, options };
+  return { rootNames, options: withTypeScript5TypesDefault(options) };
+}
+
+/**
+ * A tsconfig that names no `types` meant "every `node_modules/@types/*`" to
+ * the compiler it was written for — TypeScript 5 and earlier — and means none
+ * of them to the 6.0.3 this backend runs. Taken literally, an existing
+ * project's `node:fs` / `node:child_process` imports stop resolving: a `pure`
+ * function that gains `writeFileSync` checks and diffs green, with the call
+ * only warned as `unknown` (DESIGN.md §3.5 gate 2 — TS 5.x tsconfigs are the
+ * compatibility target). `["*"]` is TypeScript 6's own spelling of the old
+ * default. An explicit `types`, including `[]`, is left as written.
+ */
+function withTypeScript5TypesDefault(options: ts.CompilerOptions): ts.CompilerOptions {
+  return options.types === undefined ? { ...options, types: ["*"] } : options;
 }
 
 /** @effects fs_read */
