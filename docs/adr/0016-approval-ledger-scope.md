@@ -34,8 +34,7 @@ checked directory and the root is reported as not read.
 ## Why
 
 - **What can grant an approval must be fixed before the pull request exists.**
-  Any rule a reviewer can hold — an owners file on GitLab, a `CODEOWNERS` entry,
-  a team's habit of reading one file — protects a path. A search lets the pull
+  Review rules such as `CODEOWNERS` protect a path; a search lets the pull
   request pick the path.
 - **The directory argument is not a trust input.** It narrows what is analyzed.
   A security record whose meaning changes with how the command was invoked is
@@ -43,9 +42,9 @@ checked directory and the root is reported as not read.
 - **A ledger's scope and its keys' scope have to be the same.** One file for the
   repository needs names unique across the repository; `diff <ref> .` already
   prints ids of exactly that shape.
-- **Config and ledger are different properties.** A config decides what is
-  checked, and a change to it shows up in the comparison. The ledger decides what
-  passes, and a change to it shows up as nothing.
+- **Config and ledger are different properties.** A change to a config shows up
+  in the comparison; a change to the ledger decides what passes and shows up as
+  nothing.
 
 ## Alternatives rejected
 

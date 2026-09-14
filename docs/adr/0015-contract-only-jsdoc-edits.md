@@ -8,9 +8,9 @@
 
 Phase 4 re-extracts the reverse-import closure of every edit, because a change to
 what a module exports changes how its importers' calls resolve. Phase 5 measured
-the cost of that on a contract edit in a high-fan-out file: 432 of 448 files on
-drizzle-orm and 419 of 557 on immich re-extracted for one `@effects` line, at
-the same total cost as a cold run.
+the cost of that on a contract edit in a high-fan-out file: on both large
+subjects, one `@effects` line re-extracted nearly the whole project, at about
+the cost of a cold run.
 
 The shortcut that suggests itself — "the file's JSDoc changed and nothing else,
 so re-extract that file" — rests on a claim about the compiler, not about Ambit.
