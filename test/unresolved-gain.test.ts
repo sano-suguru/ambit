@@ -54,8 +54,9 @@ function result(base: readonly AuthorityRecord[], head: readonly AuthorityRecord
   const empty = parseApprovals("");
   return {
     diff,
-    review: reviewIncreases(diff, empty.approvals, empty.approvals),
+    review: reviewIncreases(diff, empty.approvals, empty.approvals, "src"),
     malformedApprovals: [],
+    ignoredApprovalsFiles: [],
     ref: "main",
     baseCommit: "0123456789abcdef0123456789abcdef01234567",
     subdir: "src",

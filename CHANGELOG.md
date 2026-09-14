@@ -14,6 +14,26 @@ report.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking: `ambit diff` reads only the `ambit.approvals.md` at the repository
+  root.** It used to take the nearest one found walking up from the checked
+  directory, stopping at a `package.json` or `.git`. A pull request could add
+  `src/ambit.approvals.md` and approve its own increase under `diff <ref> src`
+  while the root ledger went unread, and a package with its own `package.json`
+  never read the root ledger at all. A ledger between the checked directory and
+  the root is now reported as not read, and grants nothing; an increase it was
+  meant to approve fails (exit 1). Move its lines to the root ledger, named as
+  below.
+- **Breaking: an approval line names its symbol from the repository root.**
+  Under `diff <ref> packages/a`, the line for `src/client.ts#fetch` is
+  `` - `packages/a/src/client.ts#fetch` `effect:network` — … ``, the same text
+  `diff <ref> .` prints. A line relative to the checked directory named every
+  package's `src/client.ts#fetch` at once, so a line written for one package
+  approved the other; it now matches nothing and is reported as granting
+  nothing. Lines already merged need no rewriting — a line in the base grants
+  nothing whatever it names — and new lines use the form `diff` prints.
+
 ### Fixed
 
 - **`ambit diff` accepted an `ambit.approvals.md` line with no reason.** The

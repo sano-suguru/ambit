@@ -7,6 +7,7 @@ import type {
   MalformedApprovalLine,
 } from "../core/index.ts";
 import {
+  approvalSymbolId,
   attributionUnmatched,
   authorityDecreases,
   deletedSymbols,
@@ -23,7 +24,7 @@ import {
   unresolvedGains,
 } from "../core/index.ts";
 import { analyze } from "./analyze.ts";
-import { loadApprovals } from "./approvals.ts";
+import { ignoredApprovalsFiles, loadApprovals } from "./approvals.ts";
 import { githubAnnotation, workspacePath } from "./github.ts";
 import { addWorktree, git, removeWorktree, renamedFiles, repositoryRoot } from "./worktree.ts";
 
@@ -39,10 +40,15 @@ export interface DiffResult {
   readonly malformedApprovals: readonly MalformedApprovalLine[];
   /** The ledger that governed the head side, relative to the checked directory's repository. */
   readonly approvalsFile?: string;
+  /**
+   * Ledgers between the checked directory and the repository root. Not read;
+   * reported, because they grant nothing. Relative to the repository root.
+   */
+  readonly ignoredApprovalsFiles: readonly string[];
   /** The ref as given, and the commit it resolved to — a branch name moves, a sha does not. */
   readonly ref: string;
   readonly baseCommit: string;
-  /** The directory that was compared, relative to the repository root. */
+  /** The directory that was compared, relative to the repository root, with `/` separators. */
   readonly subdir: string;
   /** That same directory as the caller gave it — what a `location.file` is relative to. */
   readonly dir: string;
@@ -67,6 +73,7 @@ export async function runDiff(ref: string, dir: string): Promise<DiffResult> {
   // rather than as a half-made worktree.
   const baseCommit = await git(repoRoot, "rev-parse", ref);
   const subdir = path.relative(repoRoot, path.resolve(dir));
+  const approvalScope = subdir.split(path.sep).join("/");
 
   // Asked of the working tree, before the base checkout exists: `git diff`
   // compares the index and the working tree against `baseCommit`, and the
@@ -83,21 +90,28 @@ export async function runDiff(ref: string, dir: string): Promise<DiffResult> {
     const base = await analyze(baseDir);
     const head = await analyze(headDir);
     // The ledger is read on both sides, because an approval counts only in
-    // the comparison that adds it.
-    const baseApprovals = loadApprovals(baseDir);
-    const headApprovals = loadApprovals(headDir);
+    // the comparison that adds it — and on both sides from the root, whatever
+    // directory was compared, so the two counts are of the same file.
+    const baseApprovals = loadApprovals(worktree.root);
+    const headApprovals = loadApprovals(repoRoot);
 
     const diff = diffAuthority(base.authority, head.authority, renames);
     return {
       diff,
-      review: reviewIncreases(diff, baseApprovals.parsed.approvals, headApprovals.parsed.approvals),
+      review: reviewIncreases(
+        diff,
+        baseApprovals.parsed.approvals,
+        headApprovals.parsed.approvals,
+        approvalScope,
+      ),
       malformedApprovals: headApprovals.parsed.malformed,
       ...(headApprovals.filePath
         ? { approvalsFile: path.relative(repoRoot, headApprovals.filePath) }
         : {}),
+      ignoredApprovalsFiles: ignoredApprovalsFiles(repoRoot, subdir),
       ref,
       baseCommit,
-      subdir,
+      subdir: approvalScope,
       dir: headDir,
     };
   } finally {
@@ -166,9 +180,10 @@ export function formatDiffText(result: DiffResult, options: DiffOptions = {}): s
     lines.push(
       `${count(review.unapproved.length, "authority")} increased without approval:`,
       "",
-      ...review.unapproved.flatMap((item) => renderIncrease(item)),
-      `Add each line above to ${result.approvalsFile ?? APPROVALS_HINT}, with the reason, and`,
-      "commit it in the same change. An approval already in the base grants nothing.",
+      ...review.unapproved.flatMap((item) => renderIncrease(result, item)),
+      `Add each line above to ${result.approvalsFile ?? APPROVALS_HINT} at the repository root,`,
+      "with the reason, and commit it in the same change. An approval already in the base",
+      "grants nothing.",
       "",
     );
   }
@@ -181,7 +196,7 @@ export function formatDiffText(result: DiffResult, options: DiffOptions = {}): s
       `${count(review.approved.length, "authority")} increased, approved in this change:`,
       "",
       ...review.approved.flatMap((item) => [
-        ...renderIncrease(item, { suggestApproval: false }),
+        ...renderIncrease(result, item, { suggestApproval: false }),
         `      approved: ${item.approval.reason} (${result.approvalsFile ?? APPROVALS_HINT}:${item.approval.line})`,
         "",
       ]),
@@ -203,6 +218,19 @@ export function formatDiffText(result: DiffResult, options: DiffOptions = {}): s
     lines.push(
       `${count(result.malformedApprovals.length, "line")} in ${result.approvalsFile ?? APPROVALS_HINT} did not parse as an approval and granted nothing:`,
       ...result.malformedApprovals.map((entry) => `  line ${entry.line}: ${entry.text}`),
+      "",
+    );
+  }
+
+  // After everything the ledger did say, so it never sits between an increase
+  // and the line to copy for it. Someone who kept a ledger here is relying on
+  // it; letting their approvals turn into nothing without a word would leave
+  // them reading a failure with no reason beside it.
+  if (result.ignoredApprovalsFiles.length > 0) {
+    lines.push(
+      `${count(result.ignoredApprovalsFiles.length, "ledger")} below the repository root ${result.ignoredApprovalsFiles.length === 1 ? "was" : "were"} not read and granted nothing.`,
+      "Only ambit.approvals.md at the repository root approves an increase:",
+      ...result.ignoredApprovalsFiles.map((file) => `  ${file}`),
       "",
     );
   }
@@ -309,7 +337,7 @@ export function formatDiffText(result: DiffResult, options: DiffOptions = {}): s
   return lines.join("\n");
 }
 
-/** Where to write an approval when the repository has no ledger yet. */
+/** Where to write an approval when the repository has no ledger yet — at its root. */
 const APPROVALS_HINT = "ambit.approvals.md";
 
 /**
@@ -323,6 +351,7 @@ const APPROVALS_HINT = "ambit.approvals.md";
  * ready to copy — the ledger's line grammar is a thing to paste, not to recall.
  */
 function renderIncrease(
+  result: DiffResult,
   item: IncreaseItem,
   options: { readonly suggestApproval?: boolean } = {},
 ): readonly string[] {
@@ -342,7 +371,7 @@ function renderIncrease(
     );
   }
   if (options.suggestApproval !== false) {
-    lines.push(`    ${formatApprovalLine(entry.symbol, ref)}`, "");
+    lines.push(`    ${formatApprovalLine(approvalSymbolId(result.subdir, entry.symbol), ref)}`, "");
   }
   return lines;
 }
@@ -387,13 +416,28 @@ export function formatDiffGithub(result: DiffResult, options: DiffOptions = {}):
   let out = "";
   for (const item of result.review.unapproved) {
     out += increaseAnnotation(result, item, "error", [
-      `add to ${result.approvalsFile ?? APPROVALS_HINT}: ${formatApprovalLine(item.entry.symbol, item.ref)}`,
+      `add to ${result.approvalsFile ?? APPROVALS_HINT}: ${formatApprovalLine(approvalSymbolId(result.subdir, item.entry.symbol), item.ref)}`,
     ]);
   }
   for (const item of result.review.approved) {
     out += increaseAnnotation(result, item, "notice", [
       `approved in this change: ${item.approval.reason}`,
     ]);
+  }
+  // A warning, not an error: the file grants nothing, and an increase it was
+  // meant to approve already fails on its own annotation above.
+  for (const file of result.ignoredApprovalsFiles) {
+    out += githubAnnotation({
+      severity: "warning",
+      file: workspacePath(result.dir, path.posix.relative(result.subdir, file)),
+      line: 1,
+      col: 1,
+      title: "ambit diff",
+      body: [
+        "this ledger is not read and grants nothing",
+        "only ambit.approvals.md at the repository root approves an increase",
+      ],
+    });
   }
   if (options.strict === true) out += wideningAnnotations(result);
   return out;

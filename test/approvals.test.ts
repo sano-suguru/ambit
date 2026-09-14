@@ -172,14 +172,14 @@ describe("parseApprovals", () => {
 
 describe("reviewIncreases", () => {
   it("fails an increase with an empty ledger on both sides", () => {
-    const review = reviewIncreases(gainedNetwork(), [], []);
+    const review = reviewIncreases(gainedNetwork(), [], [], "");
     expect(review.unapproved).toHaveLength(1);
     expect(review.approved).toHaveLength(0);
   });
 
   it("passes an increase whose approval was added in this comparison", () => {
     const head = parseApprovals(APPROVES_NETWORK).approvals;
-    const review = reviewIncreases(gainedNetwork(), [], head);
+    const review = reviewIncreases(gainedNetwork(), [], head, "");
     expect(review.unapproved).toHaveLength(0);
     expect(review.approved).toHaveLength(1);
     expect(review.approved[0]?.approval.reason).toBe("the rate table moved behind an HTTP API");
@@ -189,7 +189,7 @@ describe("reviewIncreases", () => {
     // The whole of the design: an approval is valid only in the comparison
     // that adds it, so a merged line cannot cover a later reintroduction.
     const both = parseApprovals(APPROVES_NETWORK).approvals;
-    const review = reviewIncreases(gainedNetwork(), both, both);
+    const review = reviewIncreases(gainedNetwork(), both, both, "");
     expect(review.approved).toHaveLength(0);
     expect(review.unapproved).toHaveLength(1);
   });
@@ -197,7 +197,7 @@ describe("reviewIncreases", () => {
   it("re-approves the same pair when a second identical line is appended", () => {
     const base = parseApprovals(APPROVES_NETWORK).approvals;
     const head = parseApprovals(`${APPROVES_NETWORK}\n${APPROVES_NETWORK}`).approvals;
-    const review = reviewIncreases(gainedNetwork(), base, head);
+    const review = reviewIncreases(gainedNetwork(), base, head, "");
     expect(review.approved).toHaveLength(1);
     // The line that counts is the appended one, not the one already merged.
     expect(review.approved[0]?.approval.line).toBe(2);
@@ -207,7 +207,7 @@ describe("reviewIncreases", () => {
   it("cannot be made to grant by deleting a line", () => {
     const base = parseApprovals(`${APPROVES_NETWORK}\n${APPROVES_NETWORK}`).approvals;
     const head = parseApprovals(APPROVES_NETWORK).approvals;
-    const review = reviewIncreases(gainedNetwork(), base, head);
+    const review = reviewIncreases(gainedNetwork(), base, head, "");
     expect(review.approved).toHaveLength(0);
     expect(review.unapproved).toHaveLength(1);
   });
@@ -217,7 +217,7 @@ describe("reviewIncreases", () => {
       [record("a.ts#f", []), record("b.ts#g", [])],
       [record("a.ts#f", ["network"]), record("b.ts#g", ["network"])],
     );
-    const review = reviewIncreases(diff, [], parseApprovals(APPROVES_NETWORK).approvals);
+    const review = reviewIncreases(diff, [], parseApprovals(APPROVES_NETWORK).approvals, "");
     expect(review.approved.map((item) => item.entry.symbol)).toEqual(["a.ts#f"]);
     expect(review.unapproved.map((item) => item.entry.symbol)).toEqual(["b.ts#g"]);
   });
@@ -244,12 +244,12 @@ describe("reviewIncreases", () => {
       ],
     );
     const wide = parseApprovals("- `a.ts#f` `capability:http:get:*` — too wide").approvals;
-    expect(reviewIncreases(diff, [], wide).unapproved).toHaveLength(1);
+    expect(reviewIncreases(diff, [], wide, "").unapproved).toHaveLength(1);
 
     const exact = parseApprovals(
       "- `a.ts#f` `capability:http:get:api.example.com` — exact",
     ).approvals;
-    expect(reviewIncreases(diff, [], exact).approved).toHaveLength(1);
+    expect(reviewIncreases(diff, [], exact, "").approved).toHaveLength(1);
   });
 
   it("reports a new approval that matched no increase, without failing on it alone", () => {
@@ -258,6 +258,7 @@ describe("reviewIncreases", () => {
       diffAuthority([record("a.ts#f")], [record("a.ts#f")]),
       [],
       stray,
+      "",
     );
     expect(review.unused).toHaveLength(1);
     expect(review.unused[0]?.symbol).toBe("nowhere.ts#g");
@@ -272,13 +273,14 @@ describe("reviewIncreases", () => {
       diffAuthority([record("a.ts#f")], [record("a.ts#f")]),
       both,
       both,
+      "",
     );
     expect(review.unused).toHaveLength(0);
   });
 
   it("approves each authority of a symbol separately", () => {
     const diff = diffAuthority([record("a.ts#f", [])], [record("a.ts#f", ["network", "fs_write"])]);
-    const review = reviewIncreases(diff, [], parseApprovals(APPROVES_NETWORK).approvals);
+    const review = reviewIncreases(diff, [], parseApprovals(APPROVES_NETWORK).approvals, "");
     expect(review.approved.map((item) => item.ref.name)).toEqual(["network"]);
     expect(review.unapproved.map((item) => item.ref.name)).toEqual(["fs_write"]);
   });

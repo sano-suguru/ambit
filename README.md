@@ -83,14 +83,16 @@ base HEAD (79fead0) vs the working tree, over src
     + network
       -> applyTax (tax.ts:4)
       operation: fetch (tax.ts:5)
-    - `pricing.ts#priceOrder` `effect:network` — <why this increase is correct>
+    - `src/pricing.ts#priceOrder` `effect:network` — <why this increase is correct>
   ...
 exit=1
 ```
 
 **4. Approve it in the same change.** Put each `- ` line `diff` printed into
-`ambit.approvals.md` at the repository root, with the placeholder replaced by
-the reason, and commit it with the code. `diff` then exits 0 and still lists
+`ambit.approvals.md` at the repository root — the only ledger `diff` reads —
+with the placeholder replaced by the reason, and commit it with the code. The
+line names the symbol from the repository root (`src/pricing.ts#priceOrder`),
+whichever directory `diff` was given. `diff` then exits 0 and still lists
 each increase with the reason given.
 
 The contracts are JSDoc, so `npm remove ambit-ts` leaves ordinary TypeScript
@@ -163,7 +165,7 @@ contract is always a way to pass it. That is what the second gate reads:
 
 ```console
 $ node src/cli/main.ts diff HEAD test/fixtures/accident; echo "exit=$?"
-base HEAD (81ea225) vs the working tree, over test/fixtures/accident
+base HEAD (6d46282) vs the working tree, over test/fixtures/accident
 
 1 authority increased without approval:
 
@@ -172,10 +174,11 @@ base HEAD (81ea225) vs the working tree, over test/fixtures/accident
       -> applyTax (tax.ts:3)
       -> currentRate (rates.ts:3)
       operation: fetch (rates.ts:4)
-    - `pricing.ts#priceOrder` `effect:network` — <why this increase is correct>
+    - `test/fixtures/accident/pricing.ts#priceOrder` `effect:network` — <why this increase is correct>
 
-Add each line above to ambit.approvals.md, with the reason, and
-commit it in the same change. An approval already in the base grants nothing.
+Add each line above to ambit.approvals.md at the repository root,
+with the reason, and commit it in the same change. An approval already in the base
+grants nothing.
 
 2 symbols unchanged, out of 3 symbols compared.
 exit=1

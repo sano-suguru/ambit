@@ -27,6 +27,8 @@ interface Ledgers {
   readonly head?: string;
   readonly renames?: RenamedFiles;
   readonly over?: string;
+  /** Ledgers below the repository root that `ambit diff` found and did not read. */
+  readonly ignored?: readonly string[];
 }
 
 function result(
@@ -39,9 +41,15 @@ function result(
   const headLedger = parseApprovals(ledgers.head ?? "");
   return {
     diff,
-    review: reviewIncreases(diff, baseLedger.approvals, headLedger.approvals),
+    review: reviewIncreases(
+      diff,
+      baseLedger.approvals,
+      headLedger.approvals,
+      ledgers.over ?? "src",
+    ),
     malformedApprovals: headLedger.malformed,
     ...(ledgers.head === undefined ? {} : { approvalsFile: "ambit.approvals.md" }),
+    ignoredApprovalsFiles: ledgers.ignored ?? [],
     ref: "main",
     baseCommit: "0123456789abcdef0123456789abcdef01234567",
     subdir: ledgers.over ?? "src",
@@ -174,15 +182,53 @@ describe("formatDiffText", () => {
   it("prints the approval line to add for an increase nothing approves", () => {
     const output = render([WIDENED_BASE], [WIDENED_HEAD]);
     expect(output).toContain("1 authority increased without approval:");
-    expect(output).toContain("    - `pricing.ts#priceOrder` `effect:network` —");
-    expect(output).toContain("ambit.approvals.md");
+    // Named from the repository root, not from the directory compared.
+    expect(output).toContain("    - `src/pricing.ts#priceOrder` `effect:network` —");
+    expect(output).toContain("ambit.approvals.md at the repository root");
+  });
+
+  it("names the approval line from the repository root whatever directory was compared", () => {
+    const widened = record("a.ts#f", {
+      effects: { declared: ["network"], observed: [], unknown: false },
+    });
+    const over = (dir: string) => render([record("a.ts#f")], [widened], { over: dir });
+    expect(over("packages/a/src")).toContain("- `packages/a/src/a.ts#f` `effect:network` —");
+    expect(over("")).toContain("- `a.ts#f` `effect:network` —");
+  });
+
+  it("does not let a line naming the symbol relative to the compared directory approve it", () => {
+    // `a.ts#f` in `packages/b` is `packages/b/a.ts#f`; the same text relative
+    // to the directory would equally name `packages/a/a.ts#f`.
+    const output = render(
+      [record("a.ts#f")],
+      [record("a.ts#f", { effects: { declared: ["network"], observed: [], unknown: false } })],
+      { over: "packages/b", head: "- `a.ts#f` `effect:network` — written for another package" },
+    );
+    expect(output).toContain("1 authority increased without approval:");
+    expect(output).toContain("1 approval added here matched no increase and granted nothing:");
+  });
+
+  it("reports a ledger below the root after the line to copy, not between them", () => {
+    const output = render([WIDENED_BASE], [WIDENED_HEAD], { ignored: ["src/ambit.approvals.md"] });
+    expect(output).toContain(
+      "1 ledger below the repository root was not read and granted nothing.\nOnly ambit.approvals.md at the repository root approves an increase:\n  src/ambit.approvals.md\n",
+    );
+    const copy = output.indexOf("- `src/pricing.ts#priceOrder` `effect:network` —");
+    const hint = output.indexOf("Add each line above");
+    expect(copy).toBeGreaterThan(-1);
+    expect(hint).toBeGreaterThan(copy);
+    expect(output.indexOf("below the repository root was not read")).toBeGreaterThan(hint);
+  });
+
+  it("says nothing about ignored ledgers when there are none", () => {
+    expect(render([WIDENED_BASE], [WIDENED_HEAD])).not.toContain("not read");
   });
 
   it("still prints an approved increase in full, with the reason and where it came from", () => {
     // An increase nobody sees is what the ledger exists to prevent, so an
     // approval moves it out of the failing section, not out of the report.
     const output = render([WIDENED_BASE], [WIDENED_HEAD], {
-      head: "- `pricing.ts#priceOrder` `effect:network` — rates moved behind an HTTP API",
+      head: "- `src/pricing.ts#priceOrder` `effect:network` — rates moved behind an HTTP API",
     });
     expect(output).toContain("1 authority increased, approved in this change:");
     expect(output).not.toContain("without approval");
@@ -273,7 +319,7 @@ describe("formatDiffGithub", () => {
   it("annotates an approved increase as a notice carrying the reason, not as an error", () => {
     const output = formatDiffGithub(
       result([WIDENED_BASE], [WIDENED_HEAD], {
-        head: "- `pricing.ts#priceOrder` `effect:network` — rates moved behind an HTTP API",
+        head: "- `src/pricing.ts#priceOrder` `effect:network` — rates moved behind an HTTP API",
       }),
     );
     const annotations = output.split("\n").filter((line) => line.startsWith("::"));
@@ -285,7 +331,22 @@ describe("formatDiffGithub", () => {
   it("carries the ledger line to add in the annotation for an unapproved increase", () => {
     const output = formatDiffGithub(result([WIDENED_BASE], [WIDENED_HEAD]));
     expect(output).toContain("::error file=pricing.ts,");
-    expect(output).toContain("add to ambit.approvals.md: - `pricing.ts#priceOrder`");
+    expect(output).toContain("add to ambit.approvals.md: - `src/pricing.ts#priceOrder`");
+  });
+
+  it("warns on a ledger below the root, without displacing the increase's error", () => {
+    const output = formatDiffGithub(
+      result([WIDENED_BASE], [WIDENED_HEAD], { ignored: ["src/ambit.approvals.md"] }),
+    );
+    const annotations = output.split("\n").filter((line) => line.startsWith("::"));
+    expect(annotations).toHaveLength(2);
+    expect(annotations[0]).toContain("::error file=pricing.ts,");
+    expect(annotations[0]).toContain("add to ambit.approvals.md: - `src/pricing.ts#priceOrder`");
+    // `dir` stands for the checked `src` here, so the ledger at
+    // `src/ambit.approvals.md` sits beside the checked files.
+    expect(annotations[1]).toBe(
+      "::warning file=ambit.approvals.md,line=1,col=1,title=ambit diff::this ledger is not read and grants nothing%0Aonly ambit.approvals.md at the repository root approves an increase",
+    );
   });
 
   it("annotates nothing for a symbol that only moved", () => {

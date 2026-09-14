@@ -14,6 +14,12 @@ other line — this paragraph included — is prose and is ignored.
 `ambit diff` prints the line to add for every increase it fails on, so the way
 to fill this in is to copy what it printed and replace the reason.
 
+This is the only ledger: `ambit diff` reads `ambit.approvals.md` at the
+repository root and nowhere else, and a symbol id here is named from the root
+(`src/cli/diff.ts#runDiff`), whatever directory was compared. Lines above the
+first `src/`-prefixed one were written when ids were relative to `src`. They
+were spent when they merged and are kept as history, not rewritten.
+
 Two things about the rule that are easy to get wrong:
 
 - **A line counts only in the comparison that adds it.** The ledger is read on
@@ -58,3 +64,5 @@ entry naming this file.
 - `checker/backend/legacy-ts.ts#resolveProjectRoot` `effect:fs_read` — `existsSync` / `statSync` on the analysis root, so a missing or non-directory target fails loudly instead of producing zero files (§3.4). Not a new operation: it is `extractProject`'s own first check, lifted into a function so the resident session's `openProject` makes the same one
 - `checker/backend/legacy-ts.ts#openProject` `effect:fs_read` — inherited from `resolveProjectRoot`, and from `loadProjectConfig` on every update. Opening a resident session reads what a one-shot `extractProject` reads; what it adds is that it keeps the result, which is `ResidentSession.update`'s `state_write` and is approved there
 - `checker/backend/legacy-ts.ts#openProjectForMeasurement` `effect:fs_read` — the body `openProject` had, moved behind a measurement-only seam so the phase 5 benchmark can withhold `oldProgram` and read the `project-update` breakdown; inherited from `resolveProjectRoot` and `loadProjectConfig`, and `openProject` now reaches the same reads through it
+- `src/cli/approvals.ts#ignoredApprovalsFiles` `effect:fs_read` — stats each directory between the checked one and the root for a ledger it will not read, so it can be reported
+- `src/cli/approvals.ts#isFile` `effect:fs_read` — `existsSync` / `statSync` on one candidate ledger path
