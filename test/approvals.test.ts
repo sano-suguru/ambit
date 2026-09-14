@@ -123,9 +123,9 @@ describe("parseApprovals", () => {
         "- `a.ts#f` `effect:network` :",
         "- `a.ts#f` `effect:network` — —",
         "- `a.ts#f` `effect:network` — :-",
-        "- `a.ts#f` `effect:network`  \t",
-        "- `a.ts#f` `effect:network` — ​",
-        "- `a.ts#f` `effect:network` ﻿⁠",
+        "- `a.ts#f` `effect:network` \u00a0\t",
+        "- `a.ts#f` `effect:network` — \u200b",
+        "- `a.ts#f` `effect:network` \ufeff\u2060",
       ].join("\n"),
     );
     expect(approvals).toHaveLength(0);
