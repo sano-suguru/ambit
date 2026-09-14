@@ -189,8 +189,8 @@ Each of these was measured, and the run is archived.
   only difference between the two runs being `ambit.approvals.md`.
 - **The package installs and runs from the registry.** `ambit-ts@0.2.0`
   (npm `latest`) was installed with `npm i -D ambit-ts` into a scratch
-  TypeScript 5 project outside this repository, and README's Quick start ran
-  as written: `check` exits 1 on an added `fetch`, `diff HEAD` exits 1 on the
+  TypeScript 5 project outside this repository, and the Quick start in the
+  README shipped with 0.2.0 ran as written: `check` exits 1 on an added `fetch`, `diff HEAD` exits 1 on the
   widened contract, and an `ambit.approvals.md` line takes it to 0. README's
   pull-request workflow was reproduced on a local merge checkout — exit 2 at
   `fetch-depth` 1, exit 1 at 2 with no approval, 0 with one.
