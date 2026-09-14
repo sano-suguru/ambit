@@ -14,9 +14,7 @@ report.
 
 ## [Unreleased]
 
-## [0.2.0] — unreleased
-
-The date is stamped at publish.
+## [0.2.0] — 2026-09-14
 
 ### Added
 
