@@ -307,13 +307,15 @@ export interface ExtractedFunction {
  * `ambit-ts/runtime/hono`).
  *
  * Ambit reads it to check one thing only: that the capability list the runtime
- * would establish is the one the handler's JSDoc declares. Written twice, the
- * two drift, and nothing noticed before this existed.
+ * would establish is the one the handler's JSDoc declares. When both are
+ * written, the two can drift, and nothing noticed before this existed.
  *
- * The check is **on the source alone**. What a build does to the mapping —
- * stripping comments, a bundle moving the handler — is not
- * solved here, and `unmatchedReason` exists so a wrapper this comparison
- * cannot reach is reported rather than passed over.
+ * The mapping itself survives a build: the spec is a value inside the module,
+ * so stripping comments, bundling or minifying leaves what the runtime
+ * establishes intact (ADR-0005). What does not carry over is this comparison.
+ * It reads the JSDoc and the literal spec as the source writes them, and says
+ * nothing about built output. `unmatchedReason` exists so a wrapper this
+ * comparison cannot reach is reported rather than passed over.
  */
 export interface RuntimeWrapper {
   /** The call itself: where a mismatch is reported. */
