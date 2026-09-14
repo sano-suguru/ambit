@@ -14,12 +14,12 @@ behind these numbers are archived in [`docs/measurements/`](measurements/).
 
 ## Verdict
 
-**0.1.0 is published and not production-proven.** All five M0.5 backend gates
+**0.2.0 is published and not production-proven.** All five M0.5 backend gates
 ran and the default backend is decided ([ADR-0001](adr/0001-analysis-backend.md)).
 M1's incremental path exists and is not exposed: there is no CLI flag and no benchmark. M2–M4 are partial. M5 — the Phase 1 exit criterion —
 is untouched, and cannot be moved by technical work.
 
-What 0.1.0 asserts is `docs/DESIGN.md` §9.2's guaranteed surface under semver's
+What 0.2.0 asserts is `docs/DESIGN.md` §9.2's guaranteed surface under semver's
 0.x rule: a breaking change to it may land in a minor release (§9.3) and is
 announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 
@@ -185,10 +185,22 @@ Each of these was measured, and the run is archived.
   introduced the approval ledger was itself a legitimate authority increase:
   `diff HEAD src` exited 1 with no ledger and 0 with five approval lines, the
   only difference between the two runs being `ambit.approvals.md`.
-- **The package installs and runs from the registry.** `ambit-ts@0.1.0` was
-  installed from npm into a scratch project outside this repository and run
-  there: a file whose `pure` declaration breaks two calls away exits 1 and
-  prints the path (`priceOrder` → `applyTax` → `fetch`).
+- **The package installs and runs from the registry.** `ambit-ts@0.2.0`
+  (npm `latest`) was installed with `npm i -D ambit-ts` into a scratch
+  TypeScript 5 project outside this repository, and README's Quick start ran
+  as written: `check` exits 1 on an added `fetch`, `diff HEAD` exits 1 on the
+  widened contract, and an `ambit.approvals.md` line takes it to 0. README's
+  pull-request workflow was reproduced on a local merge checkout — exit 2 at
+  `fetch-depth` 1, exit 1 at 2 with no approval, 0 with one.
+- **0.1.0 has a known false negative; 0.2.0 fixes it.** On a tsconfig with no
+  `types` — the usual TypeScript 5 shape — 0.1.0 loaded no `@types/*`, so a
+  `pure` function gaining `writeFileSync` passed both `check` and `diff`, the
+  call only warned as `unknown`. 0.2.0 reads an absent `types` as TypeScript 5
+  did and reports `AMB-E001`, on the registry artifact as well as in
+  `test/stubs.node-builtins.test.ts`.
+- **Releases carry provenance.** 0.2.0 went out through
+  `.github/workflows/release.yml`'s first run, and its SLSA provenance
+  attestation verifies with `npm audit signatures`.
 - **Runtime enforcement blocks real operations.** `test/e2e.runtime.test.ts`
   drives a real socket, real files, a real child process, a real `pg@8` client
   and a real Hono server through the installed package; the Next.js denials each
@@ -228,9 +240,9 @@ Each of these was measured, and the run is archived.
   was not quiescent for all of them, and §3.5's performance gate has not been
   re-run. The runtime overhead of a context and a `decode` is unmeasured, as is
   the cost of going through a replaced function.
-- **Provenance.** 0.1.0 was published by hand and carries no attestation. The
-  trusted publisher is configured now, so 0.2.0 onward goes out through
-  `.github/workflows/release.yml` — **which has therefore never run.**
+- **README's CI workflow on GitHub itself.** It was reproduced with local git
+  merge checkouts, not run by GitHub Actions on an adopter's repository. 0.1.0
+  was published by hand and carries no provenance attestation.
 
 ## Current bottleneck
 
@@ -555,7 +567,7 @@ The snapshot-bound-state rule (§6.2, §3.4) is asserted two ways:
 | M1 — effects, unknown, coverage, diagnostics, init | **partial** | A resident session exists (`src/checker/resident.ts`) and is **incremental in extraction, summarization and propagation**: an update re-extracts the reverse-import closure of what the caller reported, re-summarizes that closure (or every file, when the config's value moved), and scopes the fixed point to the functions whose summaries moved plus their callers — phases 0–4 of [`docs/resident-check-path.md`](resident-check-path.md). Every other row of §6.2's invalidation table falls back to a whole re-extraction. Phase 5's benchmark ([2026-09-13](measurements/2026-09-13-resident-benchmark.md)) puts a leaf or config edit at 1.3×–5.9× faster than `analyze()` and a JSDoc-only edit in a deliberately high-fan-out file on a large subject at the same cost — since narrowed to the edited file for contract tags, measured 5.8× and 4.9× faster than `analyze()` on drizzle-orm and immich (high-fan-out targets only) ([2026-09-13](measurements/2026-09-13-resident-jsdoc-narrowing.md)); phase 6 (CLI exposure) is not built. No versioned JSON Schema for the diagnostic format (§5.2). `@budget costUsd` parses and is never priced. Config has no `stubs` key |
 | M2 — capabilities, budget, hooks, adapters, 50 stubs | **partial** | Four hooks, not more: `node:http`/`https`/`net`, `mysql2`, Prisma, Drizzle, MongoDB and every LLM SDK have none, so calling them is neither blocked nor recorded. `costUsd` and `llmCalls` are not enforced. Two adapters (Hono, Next.js App Router); Express, BullMQ, `worker_threads`, Server Actions, `middleware.ts`, the Pages Router and Edge have none. No `@budget` loop-pattern warnings. **Stubs are 5 client packages and 9 builtin namespaces, not 50 packages** |
 | M3 — fix patches, agent protocol | **partial** | `fixes[].edits` exists for `AMB-E001` only. **`ambit agent` does not exist** — no protocol, no iteration limit, no approval gate for loosening fixes |
-| M4 — editor, SBOM, npm | **partial** | Published as [`ambit-ts`](https://www.npmjs.com/package/ambit-ts) 0.1.0 on 2026-09-10, **without provenance**. No editor integration of any kind. **`ambit sbom` does not exist**, nor do stub trust levels in diagnostics (§8). No pilot team. The runtime ships with the CLI, so installing Ambit pulls in `typescript` ([ADR-0009](adr/0009-package-name-and-single-package.md)) |
+| M4 — editor, SBOM, npm | **partial** | Published as [`ambit-ts`](https://www.npmjs.com/package/ambit-ts): 0.1.0 on 2026-09-10 by hand, **without provenance**; 0.2.0 (`latest`) on 2026-09-14 through `release.yml`, with provenance. No editor integration of any kind. **`ambit sbom` does not exist**, nor do stub trust levels in diagnostics (§8). No pilot team. The runtime ships with the CLI, so installing Ambit pulls in `typescript` ([ADR-0009](adr/0009-package-name-and-single-package.md)) |
 | M5 — Phase 1 exit criteria | **untouched** | A real team showing a measured change in delivery speed and incident rate. No sample, self-test, or synthetic benchmark substitutes for it |
 
 What each milestone's acceptance criteria are is [`ROADMAP.md`](../ROADMAP.md).
