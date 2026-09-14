@@ -26,6 +26,7 @@ import { observedEffects } from "./support/summary.ts";
 
 const FIXTURE_ROOT = path.join(import.meta.dirname, "fixtures", "node-builtin-specifier");
 const HTTP_CLIENT_ROOT = path.join(import.meta.dirname, "fixtures", "http-clients");
+const TYPES_UNSET_ROOT = path.join(import.meta.dirname, "fixtures", "types-unset");
 const STUBS_DIR = path.join(import.meta.dirname, "..", "src", "stubs");
 const ENGINE = { name: "test", version: "0" };
 
@@ -186,6 +187,20 @@ describe("end to end on test/fixtures/node-builtin-specifier", () => {
     expect(forFunction(diagnostics, "readsEnvironmentThroughUnprefixedImport")?.id).toBe(
       "AMB-W001",
     );
+  });
+});
+
+describe("end to end on test/fixtures/types-unset", () => {
+  it("resolves a builtin in a project whose tsconfig names no `types`", async () => {
+    // TypeScript 5 read an absent `types` as every installed `@types/*`, and
+    // an existing project's tsconfig is written for that. Read with 6.0.3's
+    // own default the import does not resolve, and the `pure` function below
+    // is only warned as `unknown` — a green check on a file write.
+    const { files } = await extractFixture(TYPES_UNSET_ROOT);
+    const diagnostics = diagnose(propagate(summarizeExtractedFiles(files)), ENGINE);
+    const diagnostic = forFunction(diagnostics, "writesAuditLog");
+    expect(diagnostic?.id).toBe("AMB-E001");
+    expect(observedEffects(diagnostic)).toEqual(["fs_write"]);
   });
 });
 

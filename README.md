@@ -22,18 +22,79 @@ Experimental, `0.x`, and not a sandbox. Known blind spots are documented in
 
 ## Quick start
 
-Requires Node.js 24.
+Requires Node.js 24 and a git repository. Ambit reads the nearest
+`tsconfig.json` at or above the directory it is given, and analyzes with the
+TypeScript it installs rather than the project's; a tsconfig written for
+TypeScript 5 needs no change.
 
-```sh
-npm i -D ambit-ts
-npx ambit init src       # propose `@effects` for the functions that have none
-npx ambit check src      # check the code against what it now declares
-npx ambit diff HEAD src  # review the authority this change adds since HEAD
+**1. Declare what the code does today.** `init` writes nothing; it prints what
+each undeclared function was observed to do.
+
+```console
+$ npm i -D ambit-ts
+$ npx ambit init src
+info: priceOrder has no @effects; its observed effects are [none] (pricing.ts:3)
+info: applyTax has no @effects; its observed effects are [none] (tax.ts:3)
+info: loadRates has no @effects; its observed effects are [fs_read] (tax.ts:7)
+files=2 functions=3 declared=0
 ```
+
+Copy each set into a JSDoc tag above its function — `[none]` is written
+`pure` — then check and commit. Declaring a contract is not an increase, so this
+commit passes `ambit diff` too. The effect names are the table in
+[DESIGN.md §4.2](docs/DESIGN.md#42-effects).
+
+```ts
+/** @effects pure */
+export function applyTax(subtotal: number, region: string): number {
+```
+
+```console
+$ npx ambit check src; echo "exit=$?"
+files=2 functions=3 declared=3
+exit=0
+$ git commit -am "declare effects"
+```
+
+**2. Make a change that adds authority.** Add
+`` void fetch(`https://rates.example.com/${region}`); `` to `applyTax`. The
+check fails, because the code now exceeds its contract:
+
+```console
+$ npx ambit check src; echo "exit=$?"
+error: applyTax declares pure but performs [network] directly (tax.ts:4)
+  operation: fetch (tax.ts:5)
+files=2 functions=3 declared=3
+exit=1
+```
+
+**3. Widen the contract, and see what `diff` asks for.** Change both `pure`
+tags on the path — `applyTax` and its caller `priceOrder` — to
+`@effects network`. `check` is green again; `diff` is not:
+
+```console
+$ npx ambit diff HEAD src; echo "exit=$?"
+base HEAD (79fead0) vs the working tree, over src
+
+4 authorities increased without approval:
+
+  pricing.ts#priceOrder (pricing.ts:4)
+    + network
+      -> applyTax (tax.ts:4)
+      operation: fetch (tax.ts:5)
+    - `pricing.ts#priceOrder` `effect:network` — <why this increase is correct>
+  ...
+exit=1
+```
+
+**4. Approve it in the same change.** Put each `- ` line `diff` printed into
+`ambit.approvals.md` at the repository root, with the placeholder replaced by
+the reason, and commit it with the code. `diff` then exits 0 and still lists
+each increase with the reason given.
 
 The contracts are JSDoc, so `npm remove ambit-ts` leaves ordinary TypeScript
 that still type-checks and runs. The flags, the exit codes, and the GitHub
-Actions output are in **[CLI and CI](#cli-and-ci)**.
+Actions workflow are in **[CLI and CI](#cli-and-ci)**.
 
 ## The accident, and the fix that is not one
 
@@ -277,16 +338,42 @@ does not break code that has no contracts yet.
 
 Exit codes: **0** when nothing was reported, **1** on an error, **2** when the
 analysis itself could not run — never **0** for "could not tell". That exit code
-is the whole CI integration:
+is the whole CI integration. Both gates, as a pull-request workflow:
 
 ```yaml
-- run: npx ambit check src --strict
+# .github/workflows/ambit.yml
+name: Ambit
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  ambit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2 # `diff` needs the base commit; the default of 1 exits 2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npx ambit check src --format github
+      - run: npx ambit diff HEAD~1 src --format github
 ```
 
-Both gates run in this repository's own workflow —
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) has the `diff` step, and
-the comment above it on why the base ref it names is the right one only for a
-repository that merges each pull request as a single commit.
+On a `pull_request` event the checkout is GitHub's merge of the branch into its
+base, so `HEAD~1` is the base branch's tip and `diff` compares exactly the
+authority the pull request adds. That holds for the event, not for a push:
+running the same step on `push` compares only against the previous commit,
+which is the base only when each pull request lands as one commit — the comment
+above the `diff` step in this repository's own
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) spells that out.
+
+Leave `--strict` off both commands to begin with. It fails on any `unknown` —
+a `pure` function that calls a package no bundled table covers (`zod`, for
+one) is an error under it — and for a third-party package the only way to close
+that is `@boundary` ([limitations](docs/limitations.md#what-ambit-diff-can-and-cannot-see)).
+The warnings are printed at exit 0 either way.
 
 `--format github` turns each diagnostic into a GitHub Actions annotation on the
 declaration that broke, carrying the whole call path into the pull request:

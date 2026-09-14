@@ -291,7 +291,7 @@ writeFileSync } from "fs"` and `from "node:fs"` reach the same row, because
 Node resolves a bare builtin specifier to the builtin before it looks at
 `node_modules`, so the two cannot be different modules.
 
-Three consequences an adopter should count on:
+Four consequences an adopter should count on:
 
 - **Only the packages named above are covered.** Drizzle, MongoDB, Redis, an
   S3 client, a queue client, an HTTP client that is not `fetch`, `undici` or
@@ -304,6 +304,13 @@ Three consequences an adopter should count on:
   `unknown` is a receiver no *package* type describes: one whose type this
   project declares, one the compiler's own lib declares, and an anonymous
   object type.
+- **A builtin needs `@types/node` installed and not excluded by `types`.** A
+  tsconfig with no `types` is read as TypeScript 5 read it — every installed
+  `@types/*` — though the bundled compiler is 6.0.3. An explicit list is taken
+  as written: `"types": []`, which `tsc --init` on 5.9.3 emits, leaves
+  `node:fs` and the rest unresolved, so a call to one is
+  `unknown` — `AMB-W001`, not a violation — exactly as the project's own `tsc`
+  fails on that import. Add `"node"` to the list.
 - **An opaque SQL statement costs both directions.** A `query` whose leading
   keyword the source does not fix contributes **both** `db_read` and
   `db_write`, so a read-only function that builds its statement dynamically
