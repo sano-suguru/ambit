@@ -29,7 +29,6 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | Metric | Current | Target |
 |---|---:|---:|
 | **External pilot evidence** | **not yet collected** | the Phase 1 evidence in `ROADMAP.md` |
-| Reviewer actions an Ambit report caused on an external team's pull requests | not yet collected | > 0 |
 | `unknown` rate, real third-party code (corpus median, 4,200 functions) | 52.9% | lower — no target (see below) |
 | `unknown` rate, adopting-team-equivalent fixture (`realistic-api`) | 7.1% (4/56) | no target (see below) |
 | `unknown` rate, Ambit's own source (`check src`) | 40.0% (169/422) | — |
