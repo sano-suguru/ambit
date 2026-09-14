@@ -588,7 +588,7 @@ describe("approving an increase on the owner", () => {
 
     const ledger = parseApprovals(["# Approvals", "", ...printed].join("\n"));
     expect(ledger.malformed).toEqual([]);
-    const review = reviewIncreases(diff, [], ledger.approvals);
+    const review = reviewIncreases(diff, [], ledger.approvals, "");
     expect(review.unapproved).toEqual([]);
     expect(review.unused).toEqual([]);
     expect(review.approved).toHaveLength(printed.length);
@@ -622,7 +622,7 @@ describe("approving an increase on the owner", () => {
         formatApprovalLine(OWNER as never, networkIncreases[0]!, "reviewed"),
       ].join("\n"),
     );
-    const review = reviewIncreases(diff, [], ledger.approvals);
+    const review = reviewIncreases(diff, [], ledger.approvals, "");
     expect(review.unapproved.map((item) => item.ref.name)).not.toContain("network");
   });
 });

@@ -228,8 +228,9 @@ expect:
 
 ### What an approval means, and what it does not
 
-An increase passes when `ambit.approvals.md` gains a line naming it, in the
-same change (DESIGN.md §6.3). Three limits of that are worth stating plainly:
+An increase passes when `ambit.approvals.md` at the repository root gains a line
+naming it, in the same change (DESIGN.md §6.3). Four limits of that are worth
+stating plainly:
 
 - **Ambit does not know a person wrote the line.** An agent can write one as
   easily as a reviewer can. What the mechanism supplies is the record and its
@@ -238,6 +239,9 @@ same change (DESIGN.md §6.3). Three limits of that are worth stating plainly:
   that changing it needs an approver. Neither is something Ambit can check.
 - **An approval says nothing about whether the increase is safe.** It says one
   named increase was shown to whoever read the diff.
+- **There is one ledger per repository, so approvers cannot differ by package.**
+  A ledger in a subdirectory is not read. Whoever may change the root file may
+  approve an increase anywhere in the repository.
 - **A malformed line grants nothing and does not fail on its own.** A `- ` line
   under the `Approvals` heading that does not parse is reported with its line
   number; the increase it was meant to approve stays unapproved, and that is

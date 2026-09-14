@@ -583,7 +583,7 @@ Exit codes:
 | `unknown` increased (authority did not), without `--strict` | 0 (reported) |
 | A symbol gained an operation the analysis cannot resolve, without `--strict` (§6.4) | 0 (reported) |
 | Either of the two rows above, with `--strict` (§6.4) | 1 |
-| An approval that grants nothing, or a ledger line that did not parse | 0 (reported) |
+| An approval that grants nothing, a ledger line that did not parse, or a ledger below the repository root (not read) | 0 (reported) |
 | Analysis failed on either side | 2 |
 
 Reducing authority is not what this command watches for: failing on a decrease would give the writer a reason not to touch contracts at all. `unknown` is not authority (§4.3), so it does not count as an increase, but it is reported — and `--strict` decides whether a *widening* of it fails as well (§6.4).
@@ -698,9 +698,17 @@ reconsideration has something in the specification to test itself against:
 4. **The apparent guarantee surface does not grow** (P4). That an increase can
    be approved says nothing about whether the approver was right.
 
-**The approval ledger.** A file named `ambit.approvals.md`, found by walking up
-from the checked directory and stopping at the first directory holding a
-`package.json` or `.git` — the same search `ambit.config.ts` uses (§4.1 (c)).
+**The approval ledger.** Exactly one file: `ambit.approvals.md` at the root of
+the git repository, on each side of the comparison. It is not searched for, and
+a file of that name anywhere else is not read and grants nothing; `ambit diff`
+reports one that sits between the checked directory and the root, where it
+could be taken for the ledger that governs that directory. The set of files that can grant an
+approval is therefore fixed before a pull request exists, and depends neither on
+the directory `diff` is given nor on what the pull request adds. This is
+deliberately not §4.1 (c)'s search for `ambit.config.ts`: a config decides what
+is checked, and changing it shows up in the comparison; the ledger decides what
+passes, and a ledger nobody's review rules cover would show up as nothing
+([ADR-0016](adr/0016-approval-ledger-scope.md)).
 
 Approvals are the lines whose first non-space character is `-`, below a heading
 whose text is `Approvals`; every other line is prose and is ignored, so the file
@@ -711,7 +719,12 @@ throughout. An approval line is:
 - `<symbol id>` `<authority>` — <reason>
 ```
 
-The symbol id is as §5.3 defines it and as `ambit diff` prints it. The authority
+The symbol id is §5.3's, **named from the repository root** — the checked
+directory's path from the root, then the id — which is how `ambit diff` prints
+the line to add. The directory given to `diff` decides what is analyzed, not
+what a line names: `diff <ref> packages/a` and `diff <ref> .` write the same
+function's line identically, and `src/client.ts#fetch` in `packages/a` and in
+`packages/b` are two lines, never one. The authority
 is `effect:<name>` or `capability:<resource>:<action>:<target>`, matched as
 **exact text**: an approval of `capability:http:get:*` does not cover
 `capability:http:get:api.example.com`. Containment is how a *grant* relates to a

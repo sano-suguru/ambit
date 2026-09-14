@@ -33,7 +33,10 @@ export interface ParsedApprovals {
   readonly malformed: readonly MalformedApprovalLine[];
 }
 
-/** The file name looked for, beside `ambit.config.ts` and found the same way (§6.3). */
+/**
+ * The ledger's name. Exactly one file with it is read: the one at the
+ * repository root. A copy anywhere below grants nothing.
+ */
 export const APPROVALS_FILENAME = "ambit.approvals.md";
 
 /**
@@ -118,6 +121,29 @@ function parseAuthorityRef(token: string): AuthorityRef | undefined {
   return { kind, name };
 }
 
+/**
+ * The identity an approval line names: the analysis's symbol id, which is
+ * relative to the directory that was checked, re-rooted at the repository root.
+ *
+ * The ledger is one file for the whole repository, so what a line names has to
+ * be unique across the whole repository too. Left relative to the checked
+ * directory, `src/client.ts#fetch` in `packages/a` and in `packages/b` would be
+ * one key, and a line written for one package would approve the other. The
+ * directory decides what is analyzed; it must not decide which symbol a line
+ * approves, so `diff <ref> packages/a` and `diff <ref> .` name the same function
+ * the same way.
+ *
+ * `subdir` is the checked directory relative to the repository root, with `/`
+ * separators; `""` is the root itself.
+ */
+export function approvalSymbolId(subdir: string, symbol: SymbolId): SymbolId {
+  const prefix = subdir
+    .split("/")
+    .filter((part) => part !== "" && part !== ".")
+    .join("/");
+  return (prefix === "" ? symbol : `${prefix}/${symbol}`) as SymbolId;
+}
+
 /** The line to add to the ledger for one increase — what `ambit diff` prints to be copied. */
 export function formatApprovalLine(
   symbol: SymbolId,
@@ -174,12 +200,15 @@ export interface ApprovalReview {
  * what is approved (DESIGN.md §6.3).
  *
  * Both sides' lines are read from the same ledger file, one in the working
- * tree and one in the base checkout.
+ * tree and one in the base checkout. `subdir` is where `diff` was checked,
+ * relative to the repository root: an increase is matched under
+ * {@link approvalSymbolId}, and a line is taken as written.
  */
 export function reviewIncreases(
   diff: AuthorityDiff,
   base: readonly Approval[],
   head: readonly Approval[],
+  subdir: string,
 ): ApprovalReview {
   const baseCount = new Map<string, number>();
   for (const approval of base) {
@@ -209,7 +238,7 @@ export function reviewIncreases(
   const unapproved: IncreaseItem[] = [];
   for (const entry of authorityIncreases(diff)) {
     for (const ref of entry.added) {
-      const key = approvalKey(entry.symbol, ref);
+      const key = approvalKey(approvalSymbolId(subdir, entry.symbol), ref);
       const used = taken.get(key) ?? 0;
       const approval = inForce.get(key)?.[used];
       if (approval) {
