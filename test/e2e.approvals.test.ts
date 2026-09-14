@@ -11,8 +11,7 @@ const execFileAsync = promisify(execFile);
 const CLI = path.join(import.meta.dirname, "..", "src", "cli", "main.ts");
 
 /**
- * The approval ledger and rename detection against a real repository
- * (DESIGN.md §6.3).
+ * The approval ledger and rename detection against a real repository.
  *
  * `e2e.diff.test.ts` runs against this repository's own history, which cannot
  * be made to contain a controlled case — a file renamed between two specific
@@ -190,7 +189,7 @@ describe("ambit diff and renamed files", () => {
   it("does not see a move whose destination is untracked", async () => {
     // Rename detection compares tracked paths against the base commit, so a
     // file that has not been `git add`ed has nothing to be similar to. This
-    // over-reports, which is the direction §3.4 requires — CI always has a
+    // over-reports, never under-reports, the safe direction — CI always has a
     // tracked tree.
     const root = await makeRepo();
     fs.renameSync(path.join(root, "src", "rates.ts"), path.join(root, "src", "rate-table.ts"));

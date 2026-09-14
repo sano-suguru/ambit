@@ -38,8 +38,8 @@ async function runCli(
 
 describe("ambit check --strict", () => {
   it("promotes the unknown warning to an error and exits 1", async () => {
-    // DESIGN.md §4.2 rule 3: "Ambit's `strict: true` can promote it to an
-    // error".
+    // A declared function containing `unknown` is a warning, which `strict`
+    // can promote to an error.
     const plain = await runCli(["check", WARNINGS_ONLY_FIXTURES]);
     expect(plain.exitCode).toBe(0);
     expect(plain.stdout).toContain("warning:");
@@ -288,7 +288,7 @@ describe("ambit check (CLI)", () => {
   });
 
   it("prints every via hop with its own file:line, and no path line where there is no path", async () => {
-    // DESIGN.md §5: the text output is a rendering of the structured
+    // The text output is a rendering of the structured
     // diagnostic, so the hops it prints are exactly `contract.via` — expected
     // values come from the CLI's own JSON run, not from written-out strings.
     const json = await runCli(["check", PROPAGATION_FIXTURES, "--format", "json"]);
@@ -326,7 +326,7 @@ describe("ambit check (CLI)", () => {
   });
 
   it("reports the operation site itself, on the line the source performs it", async () => {
-    // DESIGN.md §5.2 `contract.operation`: `via` ends at a function's
+    // `contract.operation`: `via` ends at a function's
     // declaration; the operation line is what a reader actually needs.
     const json = await runCli(["check", PROPAGATION_FIXTURES, "--format", "json"]);
     const text = await runCli(["check", PROPAGATION_FIXTURES]);
@@ -355,7 +355,7 @@ describe("ambit check (CLI)", () => {
   });
 
   it("--format github emits one workflow command per diagnostic, carrying the whole path", async () => {
-    // DESIGN.md §6: CI integrates through the exit code and structured output,
+    // CI integrates through the exit code and structured output,
     // with no dedicated plugin. Expected values come from the CLI's own JSON
     // run, not from written-out strings.
     const json = await runCli(["check", PROPAGATION_FIXTURES, "--format", "json"]);

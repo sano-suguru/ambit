@@ -3,11 +3,11 @@ import type { AmbitSpec } from "./index.ts";
 import { withAmbit } from "./index.ts";
 
 /**
- * The Hono adapter (DESIGN.md §4.4, "Mapping contracts to handlers").
+ * The Hono adapter.
  *
  * `hono` is imported for **types only** and is a devDependency here, never a
  * dependency of the published package — the same reason `installPgHook(pg)`
- * takes the module from the caller instead of importing `pg` (§4.4 (c)).
+ * takes the module from the caller instead of importing `pg`.
  * Nothing in this file imports `typescript` or anything under `src/checker/`.
  */
 
@@ -23,7 +23,7 @@ import { withAmbit } from "./index.ts";
  * ));
  * ```
  *
- * The three arguments are the decision §4.4 records, not a convenience:
+ * The three arguments are a design decision, not a convenience:
  *
  * - `spec` sits in the same call as `handler`, so a literal one *is* that
  *   handler's `@capabilities` and `@budget`: the tags need not repeat what the
@@ -47,7 +47,7 @@ import { withAmbit } from "./index.ts";
  * `AmbitCapabilityError` and `AmbitBudgetError` are **not** translated into
  * HTTP statuses. A denied capability is this server's own code exceeding its
  * grant, which is not what 403 says, and the message names the granted set —
- * so it goes to the framework's error handler, not to the client (§4.4).
+ * so it goes to the framework's error handler, not to the client.
  *
  * A handler registered without this adapter establishes no context at all;
  * what its operations do then is `setUnscopedPolicy`'s decision (`allow` by

@@ -32,7 +32,7 @@ export interface PropagatedFunction {
   /** The immediate callee `unknown` was inherited through, if not direct. */
   readonly unknownWitness?: SymbolId;
   /**
-   * The capabilities this function's body needs (DESIGN.md §4.4). A second
+   * The capabilities this function's body needs. A second
    * lattice over the same call graph, with the same trust rule as effects: a
    * callee that declares `@capabilities` contributes what it declared, and an
    * undeclared one contributes what its own body was inferred to need — so a
@@ -41,9 +41,10 @@ export interface PropagatedFunction {
    * A requirement arises in two ways. It is inherited from a callee's
    * declaration — the narrowing rule between a caller's grant and a callee's
    * declaration — or it is produced directly, by a bundled operation whose
-   * target the source fixes: a literal URL's host (§4.4's static half,
-   * `src/stubs/http-capabilities.ts`). The same operation with a target the
-   * source does not fix contributes `unknown` instead, never nothing.
+   * target the source fixes: a literal URL's host (the half the checker
+   * matches statically, `src/stubs/http-capabilities.ts`). The same operation
+   * with a target the source does not fix contributes `unknown` instead, never
+   * nothing.
    */
   readonly required: CapabilitySet;
   /** For a required capability this function does not declare itself, the immediate callee it came through. */
@@ -61,16 +62,16 @@ export interface PropagatedFunction {
   /**
    * The same two lattices computed over each owned body on its own, for a
    * symbol that owns more than one (`FunctionSummary.bodies` — today the
-   * inline-callback owner, DESIGN.md §4.1 (a)). Absent wherever one body
+   * inline-callback owner). Absent wherever one body
    * holds the whole symbol, which includes an owner of exactly one: there the
    * symbol's own sets already say what that body holds, and a one-element
    * split would be the same statement written twice.
    *
    * Their union is {@link observed} / {@link required}, so nothing here
    * changes what the symbol holds. What it carries is *how many* of the
-   * bodies hold each authority, which is what `ambit diff` compares (§6.3):
+   * bodies hold each authority, which is what `ambit diff` compares:
    * without it, a second body gaining an effect a first already had would be
-   * a merge into silence — the one outcome §6.4 forbids.
+   * a merge into silence, where an increase must always be reported.
    */
   readonly bodies?: readonly BodyAuthority[];
 }
@@ -83,12 +84,10 @@ export interface BodyAuthority {
 
 /**
  * Compute each function's transitive effect set by a worklist fixed point
- * over the call graph (DESIGN.md §4.2: "Cycles in the call graph are
- * propagated to a fixed point using strongly connected components or the
- * like"). Handles cycles by iterating to a stable state — no
- * strongly-connected-component precomputation, since `EffectSet` only grows
- * (union is monotonic) and the id space is finite, so this always
- * terminates.
+ * over the call graph, so cycles in it reach a fixed point. Handles cycles by
+ * iterating to a stable state — no strongly-connected-component
+ * precomputation, since `EffectSet` only grows (union is monotonic) and the id
+ * space is finite, so this always terminates.
  */
 export function propagate(
   summaries: readonly FunctionSummary[],
@@ -163,8 +162,8 @@ export function propagate(
  * its previous value. Starting from the previous value and unioning upward
  * would be monotone in the wrong dimension: authority that a change *removed*
  * would survive as a value nothing can now lower, which is the one direction
- * §6.2's equivalence law cannot tolerate and the reason the differential
- * suite's revert rows exist.
+ * a resident result that must equal a cold run cannot tolerate, and the reason
+ * the differential suite's revert rows exist.
  *
  * **Termination** is `propagate`'s own argument, restricted: values outside
  * `impacted` are fixed, values inside only grow under union, the effect set is
@@ -202,7 +201,7 @@ export function propagateScoped(input: {
       // A symbol with no committed value and no place in the impact set has no
       // value at all. Falling back to an initial one here would put an
       // un-propagated function into the output as though it had been analyzed
-      // — "unknown" reported as "nothing found" (§3.4). The caller's impact set
+      // — "unknown" reported as "nothing found". The caller's impact set
       // is wrong, and the generation must not commit.
       throw new Error(
         `scoped propagation has no committed value for ${summary.id}, and it is not in the impact set`,
@@ -285,7 +284,7 @@ function directEffects(summary: FunctionSummary): EffectSet {
     .flatMap((call) => call.effects);
   let set = effectSetOf(...stubEffects);
   // A mutation whose receiver is reachable from outside the function is a
-  // direct `state_write` (DESIGN.md §4.2, "Local mutation and `pure`"); a local
+  // direct `state_write`; a local
   // one is recorded as a site but contributes nothing.
   if (summary.calls.some((call) => call.kind === "mutation" && call.escaping)) {
     set = unionEffectSets(set, effectSetOf("state_write"));
@@ -305,15 +304,15 @@ function directEffects(summary: FunctionSummary): EffectSet {
  * callee's inferred one. This is the usual modular-typing shape (a
  * function's signature, not its body, is what callers see) and is also
  * what makes "undeclared = unknown" workable as a coverage concept rather
- * than a propagation rule — DESIGN.md §4.2 states it directly: "Undeclared"
- * and "`unknown`" are not the same thing.
+ * than a propagation rule: "undeclared" and "`unknown`" are not the same
+ * thing.
  * A declared tag never carries `unknown` itself, so trusting it means a
  * callee's own undeclared internal `unknown` does not leak to callers; it
  * stays that callee's own AMB-W001, not its callers'.
  *
  * An *undeclared* callee has no signature to trust, so its own
  * recursively-inferred `observed` set is used instead — this is what lets
- * inference cross undeclared code (§4.3, incremental adoption).
+ * inference cross undeclared code, and incremental adoption work.
  */
 function contributionOf(
   calleeSummary: FunctionSummary,
@@ -335,8 +334,8 @@ function capabilityContributionOf(
 
 /**
  * A `@boundary` function's contract is taken as written and its body is not
- * propagated through (DESIGN.md §4.6: "do not statically check inside this
- * function; trust the effects and capabilities it declares outward").
+ * propagated through: nothing inside it is statically checked, and the
+ * effects and capabilities it declares outward are trusted.
  *
  * What it declares is what it contributes. What it does *not* declare is
  * `unknown`, not empty: the body was excluded from analysis, so an
@@ -494,9 +493,7 @@ export function unknownWitnessChain(
 
 /**
  * A witness chain rendered as `contract.via` entries: each hop named by its
- * symbol id and located at its own declaration (DESIGN.md §5.1 — "`via` is a
- * sequence of functions, and each element's position is that function's
- * declaration position").
+ * symbol id and located at its own declaration, never at the call.
  *
  * Lives beside the chain walkers rather than beside either consumer, because
  * a diagnostic's path and an authority record's path must be the same path.

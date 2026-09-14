@@ -1,4 +1,4 @@
-// Recursion: §4.2 rule 7 fixes the propagation to a fixed point. The backend's
+// Recursion: a call-graph cycle propagates to a fixed point. The backend's
 // job is narrower — it must report the self-call and the cycle edges as
 // resolved call targets, so the checker has a graph to reach a fixed point on.
 

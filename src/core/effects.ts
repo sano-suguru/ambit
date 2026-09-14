@@ -1,8 +1,8 @@
 /**
- * Effects a function can have on the outside world (DESIGN.md §4.2).
+ * Effects a function can have on the outside world.
  *
  * `pure` is not a member of this list — it is the empty {@link EffectSet}
- * (§4.2 rule 2: "`pure` is another name for the empty set"). `unknown` is
+ * ("`pure` is another name for the empty set"). `unknown` is
  * likewise not a member; it is
  * a separate flag on {@link EffectSet}, because "this function might have
  * more effects than listed" and "this function definitely has these
@@ -14,9 +14,9 @@ export const KNOWN_EFFECTS = [
   "db_write",
   "fs_read",
   "fs_write",
-  // Mutation of a value reachable from outside the function (DESIGN.md
-  // §4.2, "Local mutation and `pure`"). Mutating a value the function itself
-  // allocated is not this effect — it is not observable to a caller.
+  // Mutation of a value reachable from outside the function. Mutating a value
+  // the function itself allocated is not this effect — it is not observable
+  // to a caller.
   "state_write",
   "llm",
   "env",
@@ -33,10 +33,10 @@ export function isKnownEffect(value: string): value is KnownEffect {
  * The effects a function has, plus whether the set might be incomplete.
  *
  * `unknown: true` means propagation reached a call that could not be
- * resolved (DESIGN.md §4.2 rule 6) — the function's true effect set could
+ * resolved — the function's true effect set could
  * include anything. It is tracked separately from `effects` so a diagnostic
- * can distinguish "declares pure but definitely does X" (§AMB-E001) from
- * "declares pure but calls something unanalyzable" (§AMB-W001).
+ * can distinguish "declares pure but definitely does X" (AMB-E001) from
+ * "declares pure but calls something unanalyzable" (AMB-W001).
  */
 export interface EffectSet {
   readonly effects: ReadonlySet<KnownEffect>;
@@ -56,7 +56,7 @@ export function effectSetOf(...effects: readonly KnownEffect[]): EffectSet {
 }
 
 /**
- * `llm` implies `network` (DESIGN.md §4.2: "`llm` ... Implies `network`"):
+ * `llm` implies `network`:
  * expand a raw effect set so the containment relation always holds, no
  * matter where the set was built.
  */
@@ -81,7 +81,7 @@ export function effectSetsEqual(a: EffectSet, b: EffectSet): boolean {
   return true;
 }
 
-/** Effects present in `observed` but not covered by `declared` (§4.2 rule 1). */
+/** Effects present in `observed` but not covered by `declared`. */
 export function excessEffects(declared: EffectSet, observed: EffectSet): ReadonlySet<KnownEffect> {
   const excess = new Set<KnownEffect>();
   for (const effect of observed.effects) {

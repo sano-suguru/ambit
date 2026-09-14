@@ -16,11 +16,11 @@ import {
 } from "../src/core/index.ts";
 
 /**
- * DESIGN.md §4.1 (a), "The inline-callback owner": a function expression
+ * The inline-callback owner (`<inline callbacks>`): a function expression
  * written directly as a call argument at module scope belongs to no
  * declaration, and before this existed nothing walked it at all — authority
- * added inside one was reported nowhere, which is the silence §6.4 names as
- * the outcome that must not happen.
+ * added inside one was reported nowhere — silence where a change in authority
+ * must always be reported.
  *
  * Measured on a real repository as E6 in
  * `docs/measurements/2026-09-11-third-third-party-validation-outline.md`: 226
@@ -31,7 +31,7 @@ import {
  *
  * - the owner's id holds no position and no ordinal, so re-indenting, editing
  *   a neighbour, or inserting a sibling leaves it alone;
- * - authority is compared as a **multiset over the owned bodies** (§6.3), so a
+ * - authority is compared as a **multiset over the owned bodies**, so a
  *   second callback gaining what a first already had is still an increase.
  *   Without that half, one symbol standing for many bodies would be a merge
  *   into silence — the same defect in a narrower place.
@@ -282,7 +282,7 @@ describe("several inline callbacks in one file", () => {
     );
     const symbols = await compare(twoQuiet, withOneMore);
     expect(increases(symbols)).toEqual([]);
-    // And no §6.4 attribution report either: the inserted body holds nothing,
+    // And no attribution report either: the inserted body holds nothing,
     // so every authority-bearing body is still where one already was.
     expect(attributionUnmatched({ symbols })).toEqual([]);
   });
@@ -343,11 +343,11 @@ ${twoQuiet.split("\n\n").slice(2).join("\n\n")}`;
 });
 
 /**
- * DESIGN.md §6.4's third shape. The owner's bodies are anonymous, so
+ * The unmatched-attribution shape. The owner's bodies are anonymous, so
  * "authority moved from one handler to another" and "the handlers were
  * reordered" reach the comparison as the same two sequences. One of them is a
  * public route that can now reach the network, and calling the pair unchanged
- * would be exactly the guess §3.4 forbids.
+ * would be a guess passed off as a clean result.
  */
 describe("authority moving between two anonymous handlers", () => {
   const withNetworkIn = (admin: boolean) =>
@@ -417,9 +417,9 @@ router.post("/b", async (ctx) => {
 });
 
 /**
- * §6.4's third shape is about attribution, not only about authority. An
+ * The unmatched-attribution report is not only about authority. An
  * operation the analysis could not read moving from one anonymous handler to
- * another is §6.4's own sentence about a different place, and every count
+ * another is the same fact moving to a different place, and every count
  * stays where it was.
  */
 describe("an unresolvable operation moving between anonymous handlers", () => {
@@ -445,7 +445,7 @@ router.post("/public", async (ctx) => {
     const symbols = await compare(withOpaqueIn(true), withOpaqueIn(false));
     const diff = { symbols };
     // The owner's own `unresolved` multiset is identical — one opaque call
-    // before, one after — so §6.4's second shape says nothing, correctly.
+    // before, one after — so the widened-unresolved report is silent, correctly.
     expect(increases(symbols)).toEqual([]);
     expect(unresolvedGains(diff)).toEqual([]);
     expect(attributionUnmatched(diff).map((entry) => entry.symbol)).toEqual([OWNER]);
@@ -477,8 +477,8 @@ router.post("/public", async (ctx) => {
   });
 
   it("says nothing when the opaque call is added rather than moved", async () => {
-    // §6.4's second shape names it, so the third does not repeat it: the two
-    // ambiguous windows have no body in common.
+    // The widened-unresolved report names it, so attribution does not repeat
+    // it: the two ambiguous windows have no body in common.
     const symbols = await compare(
       withOpaqueIn(true),
       withOpaqueIn(true).replace(
@@ -493,7 +493,7 @@ router.post("/public", async (ctx) => {
 });
 
 describe("what the owner does not change", () => {
-  it("keeps an unresolvable operation unresolvable — §6.4, not an increase", async () => {
+  it("keeps an unresolvable operation unresolvable — a report, not an increase", async () => {
     const base = file(`router.post("a", async (ctx) => {
   void ctx;
 });`);
@@ -502,7 +502,7 @@ describe("what the owner does not change", () => {
   await client.send("somewhere");
 });`);
     const symbols = await compare(base, head);
-    // §4.3: what the analysis could not read is not authority, and §6.4 is
+    // What the analysis could not read is not authority; an unresolved gain is
     // what reports it — at exit 0 by default, exit 1 only under --strict.
     expect(increases(symbols)).toEqual([]);
     expect(unresolvedGains({ symbols }).map((entry) => entry.symbol)).toEqual([OWNER]);
@@ -564,7 +564,7 @@ describe("what the owner does not change", () => {
 });
 
 /**
- * DESIGN.md §6.3: the identity exists so that an approval line written for it
+ * The identity exists so that an approval line written for it
  * matches. The owner's id is the first to contain characters no declaration
  * path had — angle brackets and a space — so the round trip is asserted, not
  * assumed.

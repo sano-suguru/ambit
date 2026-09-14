@@ -7,7 +7,7 @@ const requireBuiltin = createRequire(import.meta.url);
 const childProcess = requireBuiltin("node:child_process") as typeof nodeChildProcess;
 
 /**
- * Runtime enforcement for `node:child_process` (DESIGN.md §4.4 (a), (b)).
+ * Runtime enforcement for `node:child_process`.
  *
  * Same monkeypatch mechanism and the same install-order caveat as
  * {@link installFsHook}: installed from a preload it covers named ESM imports
@@ -21,8 +21,8 @@ const DEFAULT_SHELL = process.platform === "win32" ? "cmd.exe" : "/bin/sh";
 
 /**
  * Why a shell spawn cannot name the program that runs. Carried into the
- * exception text because DESIGN.md §4.4 requires an operation Ambit cannot
- * decide to say so where the user reads it, not only in the docs.
+ * exception text because an operation Ambit cannot decide has to say so where
+ * the user reads it, not only in the docs (P4).
  */
 const SHELL_DETAIL =
   "this spawns a shell, and the granted shell can run any program: the capability names the shell, not the program in the command string";
@@ -42,8 +42,8 @@ export interface SpawnRequirement {
  *
  * `exec`, `execSync`, and any form with `shell: true` run a shell. Which
  * program the shell then runs is inside a shell command string, and naming it
- * would need a shell parser — the same claim §4.4 forbids for table names
- * inside arbitrary SQL. So the capability names the shell, and the exception
+ * would need a shell parser — for the same reason table names are not read
+ * out of arbitrary SQL to derive a capability. So the capability names the shell, and the exception
  * says exactly that.
  */
 export function spawnCapability(
@@ -107,7 +107,7 @@ type AnyFunction = (...args: unknown[]) => unknown;
  * `spawn` and `fork` have no callback to hand an error to and return a
  * `ChildProcess` rather than a result, so a denial throws; `exec` and
  * `execFile` deliver through their callback when one is present, which is
- * §4.4 (a)'s rule for the callback family.
+ * how every callback-style API delivers a denial.
  */
 export function installChildProcessHook(): () => void {
   const host = childProcess as unknown as Record<string, unknown>;

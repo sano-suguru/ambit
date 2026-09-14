@@ -1,5 +1,5 @@
 /**
- * DESIGN.md §3.5 gate 4 — the native (TypeScript 7 / Go engine) side of the
+ * M0.5 gate 4 (ADR-0001) — the native (TypeScript 7 / Go engine) side of the
  * comparison. Run by `scripts/m05-backend-compare.ts`, one process per
  * measurement; prints one JSON object on stdout.
  *

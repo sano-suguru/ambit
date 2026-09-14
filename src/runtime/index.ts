@@ -19,7 +19,7 @@ export { fsCapabilities, installFsHook } from "./fs.ts";
 export { installPgHook, pgCapabilities } from "./pg.ts";
 
 /**
- * Runtime enforcement for an entrypoint (DESIGN.md §4.4, §4.5).
+ * Runtime enforcement for an entrypoint.
  *
  * Deliberately narrow, and the narrowness is the point: this enforces what it
  * can actually check and says nothing about the rest. What is enforced today:
@@ -58,8 +58,7 @@ export class AmbitBudgetError extends Error {
 
 /**
  * Run `handler` with the entrypoint's capability set and budget established
- * (DESIGN.md §4.4: "Where there is no adapter, insert
- * `withAmbit(spec, handler)` by hand").
+ * — what to insert by hand where there is no framework adapter.
  *
  * A malformed capability string throws at wrap time rather than being
  * dropped: a grant that does not parse would silently become "grants nothing",
@@ -105,7 +104,7 @@ export function withAmbit<Args extends readonly unknown[], Result>(
       const elapsed = Date.now() - context.startedAt;
       if (timeMs !== undefined && elapsed > timeMs) {
         // Checked after the fact, and that is all this can honestly be:
-        // §4.5 says a budget does not undo spend already incurred or stop
+        // a budget does not undo spend already incurred or stop
         // work that cannot be cancelled.
         if (onExceed === "throw") throw new AmbitBudgetError(exceeded(timeMs, elapsed));
         if (onExceed === "warn") process.emitWarning(exceeded(timeMs, elapsed), "AmbitBudget");
@@ -128,7 +127,7 @@ function exceeded(timeMs: number, elapsed?: number): string {
  *
  * One of four hooks; see {@link installFsHook},
  * {@link installChildProcessHook} and {@link installPgHook} for the rest.
- * DESIGN.md §4.4's remaining targets — `mysql2`, `@prisma/client`,
+ * The remaining targets DESIGN.md lists — `mysql2`, `@prisma/client`,
  * `drizzle-orm`, `mongodb`, and the LLM SDKs — are not hooked, and calling
  * them is neither checked nor recorded.
  *

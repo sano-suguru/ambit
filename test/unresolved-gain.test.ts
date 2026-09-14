@@ -16,7 +16,7 @@ import {
 } from "../src/core/index.ts";
 
 /**
- * DESIGN.md §6.4: what `ambit diff` says when a symbol gains an operation the
+ * What `ambit diff` says when a symbol gains an operation the
  * analysis cannot resolve.
  *
  * The near neighbour is deliberately re-asserted here as well: a *known*
@@ -63,10 +63,10 @@ function result(base: readonly AuthorityRecord[], head: readonly AuthorityRecord
   };
 }
 
-describe("an unresolvable gain, compared (DESIGN.md §6.4)", () => {
+describe("an unresolvable gain, compared", () => {
   it("names the operation a symbol gained while `unknown` on both sides", () => {
     // The measured miss: `axios.get` added to a function that was already
-    // `unknown`. Before §6.4 this compared equal to itself.
+    // `unknown`. Before unresolvable gains were compared, it equalled itself.
     const diff = diffAuthority(
       [record("a.ts#f")],
       [record("a.ts#f", { unresolved: opaque("axios.get") })],
@@ -78,7 +78,7 @@ describe("an unresolvable gain, compared (DESIGN.md §6.4)", () => {
       { reason: "external-module", operation: "axios.get", count: 1 },
     ]);
     // Not authority, and not an increase: nothing to approve, nothing to fail
-    // on without `--strict` (§4.3).
+    // on without `--strict`: `unknown` is not a permission.
     expect(gained[0]?.added).toEqual([]);
     expect(gained[0]?.unknownGained).toBe(false);
   });
@@ -104,7 +104,7 @@ describe("an unresolvable gain, compared (DESIGN.md §6.4)", () => {
   });
 
   it("says nothing when the analysis resolved more than it did", () => {
-    // A stub landing is the analysis reaching further. §6 does not watch the
+    // A stub landing is the analysis reaching further. `ambit diff` ignores the
     // decreasing direction, here for the same reason it does not for authority.
     const diff = diffAuthority(
       [record("a.ts#f", { unresolved: opaque("ky.post", 2) })],
@@ -161,7 +161,7 @@ describe("an unresolvable gain, compared (DESIGN.md §6.4)", () => {
   });
 
   it("leaves a new symbol to the shape that already covers it", () => {
-    // A new `unknown` symbol is `unknownGained` — §6.4's first shape. Naming
+    // A new `unknown` symbol is `unknownGained` — it became unresolved. Naming
     // its whole body as "gained" as well would report one event twice.
     const diff = diffAuthority([], [record("a.ts#f", { unresolved: opaque("axios.get") })]);
     expect(unresolvedGains(diff)).toEqual([]);
@@ -186,7 +186,7 @@ describe("an unresolvable gain, compared (DESIGN.md §6.4)", () => {
 
   it("keeps a known effect added inside an `unknown` symbol an authority increase", () => {
     // ADR-0012's context, asserted rather than described: E4's `del()`. This
-    // fails as an increase and is not reclassified into §6.4.
+    // fails as an increase and is not reclassified as an unresolvable gain.
     const diff = diffAuthority(
       [record("a.ts#f", { effects: { declared: null, observed: ["db_read"], unknown: true } })],
       [
@@ -201,7 +201,7 @@ describe("an unresolvable gain, compared (DESIGN.md §6.4)", () => {
   });
 });
 
-describe("--strict (DESIGN.md §6.4)", () => {
+describe("--strict on an unresolvable gain", () => {
   const WIDENED = result(
     [record("a.ts#f")],
     [record("a.ts#f", { unresolved: opaque("axios.get") })],
@@ -268,7 +268,7 @@ describe("--strict (DESIGN.md §6.4)", () => {
  * fixture that already holds one function per unresolvable reason
  * (`AMB-I002`'s) is what pins it.
  */
-describe("the `unresolved` field of an authority record (DESIGN.md §5.1)", () => {
+describe("the `unresolved` field of an authority record", () => {
   async function records(): Promise<ReadonlyMap<string, AuthorityRecord>> {
     const { stdout } = await execFileAsync("node", [
       CLI_PATH,
@@ -293,7 +293,7 @@ describe("the `unresolved` field of an authority record (DESIGN.md §5.1)", () =
       { reason: "external-module", operation: "node:path.resolve", count: 1 },
     ]);
     // A call with no qualified name carries the reason alone — no placeholder
-    // stands in for a name that does not exist (§5.3).
+    // stands in for a name that does not exist.
     expect(byName.get("callsAnyTyped")?.unresolved).toEqual([{ reason: "any-typed", count: 1 }]);
     expect(byName.get("sortsWithCallbackByReference")?.unresolved).toEqual([
       { reason: "callback-by-reference", operation: "Array.sort", count: 1 },
@@ -309,7 +309,7 @@ describe("the `unresolved` field of an authority record (DESIGN.md §5.1)", () =
   });
 
   it("is empty for a `@boundary` function", async () => {
-    // §4.6 excludes the body from analysis by declaration, so a call inside it
+    // `@boundary` excludes the body from analysis by declaration, so a call in it
     // is isolated rather than unresolved. Listing it would price an explicit
     // decision as an analysis failure.
     const byName = await records();

@@ -47,7 +47,7 @@ export async function repositoryRoot(dir: string): Promise<string> {
 /**
  * Check `ref` out into a temporary `git worktree` and hand the caller its
  * root. The caller must call {@link removeWorktree}, whether or not its own
- * work succeeded (DESIGN.md §6's `diff` entry).
+ * work succeeded: the base checkout is cleaned up unconditionally.
  *
  * The checkout goes under the OS temporary directory, never inside the
  * repository, so a run that is killed outright leaves nothing in the tree
@@ -154,8 +154,9 @@ export async function removeWorktree(worktree: BaseWorktree): Promise<void> {
  * path to head path, each relative to `subdir` and separated by `"/"`.
  *
  * This is the only identity evidence `ambit diff` uses to carry a symbol
- * across a move (DESIGN.md §6.3). Two properties of `git diff` shape what it
- * can see, and both were measured rather than assumed:
+ * across a move; no other guess about identity is made. Two properties of
+ * `git diff` shape what it can see, and both were measured rather than
+ * assumed:
  *
  * - The `-- <subdir>` pathspec restricts renames to the checked directory, and
  *   a file renamed *into* it from outside comes out as an addition, not a
@@ -214,7 +215,7 @@ export async function renamedFiles(
 
 /**
  * A repository-relative path re-expressed relative to the checked directory —
- * the form a symbol id carries (DESIGN.md §5.3) — or `undefined` when it is
+ * the form a symbol id carries — or `undefined` when it is
  * outside that directory.
  */
 function relativeToSubdir(repoPath: string, subdir: string): string | undefined {

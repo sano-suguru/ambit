@@ -50,7 +50,7 @@ function forFunction(diagnostics: readonly Diagnostic[], name: string): readonly
   return diagnostics.filter((d) => d.message.startsWith(`${name} `));
 }
 
-describe("capability parsing (DESIGN.md §4.4)", () => {
+describe("capability parsing", () => {
   it("parses <resource>:<action>:<target>", () => {
     expect(parseCapability("db:read:users")).toEqual({
       resource: "db",
@@ -72,7 +72,7 @@ describe("capability parsing (DESIGN.md §4.4)", () => {
 
   it("rejects a glob outside the target segment", () => {
     // A `*` in resource or action reads as a restriction while meaning the
-    // opposite; §4.4 makes only the target globbable.
+    // opposite; only the target segment may be globbed.
     expect(parseCapability("*:read:users")).toBeUndefined();
     expect(parseCapability("db:*:users")).toBeUndefined();
     expect(parseCapability("db:read:*")).toBeDefined();
@@ -83,7 +83,7 @@ describe("capability parsing (DESIGN.md §4.4)", () => {
   });
 });
 
-describe("budget parsing (DESIGN.md §4.5)", () => {
+describe("budget parsing", () => {
   it("parses limits and defaults onExceed to throw", () => {
     expect(parseBudgetTag("timeMs=500 costUsd=0.01 llmCalls=2")).toEqual({
       timeMs: 500,
@@ -114,7 +114,7 @@ describe("budget parsing (DESIGN.md §4.5)", () => {
   });
 });
 
-describe("@capabilities narrowing (DESIGN.md §4.4)", () => {
+describe("@capabilities narrowing", () => {
   it("reports a callee requiring a capability the caller does not grant", async () => {
     const { diagnostics } = await analyze(FIXTURE_ROOT);
     const [diagnostic] = forFunction(diagnostics, "readsThenWrites");
@@ -154,7 +154,7 @@ describe("@capabilities narrowing (DESIGN.md §4.4)", () => {
   });
 });
 
-describe("@entrypoint (DESIGN.md §4.4)", () => {
+describe("@entrypoint", () => {
   it("warns when an entrypoint declares no capabilities", async () => {
     const { diagnostics } = await analyze(FIXTURE_ROOT);
     const [diagnostic] = forFunction(diagnostics, "entrypointWithoutCapabilities");
@@ -174,11 +174,11 @@ describe("@entrypoint (DESIGN.md §4.4)", () => {
   });
 });
 
-describe("@boundary (DESIGN.md §4.6)", () => {
+describe("@boundary", () => {
   it("takes the declared contract instead of analyzing the body", async () => {
     const { state, diagnostics } = await analyze(FIXTURE_ROOT);
     // The body performs `fetch`, and `understatedBoundary` declares `pure`.
-    // §4.6 says the body is not checked — that is what the tag buys and what
+    // A boundary's body is not checked — that is what the tag buys and what
     // it costs. It must not produce AMB-E001.
     expect(forFunction(diagnostics, "understatedBoundary")).toEqual([]);
     const understated = state.get("sample.ts#understatedBoundary" as never);
@@ -229,7 +229,7 @@ describe("@boundary (DESIGN.md §4.6)", () => {
   });
 
   it("reports the boundary rate beside the unknown rate", async () => {
-    // §4.3: tagging a function @boundary takes it out of the unknown
+    // Tagging a function @boundary takes it out of the unknown
     // numerator without its body ever being checked. Reported together so
     // that move cannot read as an improving KPI.
     const { coverage } = await analyze(FIXTURE_ROOT);
@@ -240,14 +240,14 @@ describe("@boundary (DESIGN.md §4.6)", () => {
   });
 
   it("counts boundaries apart from analysis successes", async () => {
-    // §4.3: "Moving something to a boundary is tallied separately from
-    // succeeding at analysis".
+    // Moving something to a boundary is tallied separately from succeeding at
+    // analysis.
     const { coverage } = await analyze(FIXTURE_ROOT);
     expect(coverage.functionsBoundary).toBe(5);
   });
 });
 
-describe("@budget (DESIGN.md §4.5)", () => {
+describe("@budget", () => {
   it("rejects a malformed budget", async () => {
     const { diagnostics } = await analyze(FIXTURE_ROOT);
     expect(forFunction(diagnostics, "malformedBudget")[0]?.id).toBe("AMB-E008");
@@ -264,13 +264,13 @@ describe("@budget (DESIGN.md §4.5)", () => {
   });
 });
 
-describe('contract-to-handler agreement (DESIGN.md §4.4, "Mapping contracts to handlers")', () => {
+describe("contract-to-handler agreement", () => {
   /**
-   * §4.4 chose explicit registration, which leaves the capability set written
-   * twice — in the JSDoc and in the `spec`. The duplication does not go away,
-   * so the source-level agreement check has to reach the adapter's
-   * registrations as well as a hand-written `withAmbit`, or choosing that
-   * approach would have quietly dropped a check.
+   * Contracts reach handlers by explicit registration, which leaves the
+   * capability set written twice — in the JSDoc and in the `spec`. The
+   * duplication does not go away, so the source-level agreement check has to
+   * reach the adapter's registrations as well as a hand-written `withAmbit`,
+   * or choosing that approach would have quietly dropped a check.
    */
   it("catches a hand-written withAmbit that drifts from the handler's @capabilities", async () => {
     const { diagnostics } = await analyze(WRAPPER_ROOT);
@@ -295,7 +295,7 @@ describe('contract-to-handler agreement (DESIGN.md §4.4, "Mapping contracts to 
   });
 
   /**
-   * DESIGN.md §4.4: with the spec read as the declaration, the JSDoc tag is
+   * With a literal spec read as the handler's declaration, the JSDoc tag is
    * optional where the spec can supply it. `specOnly` writes `@entrypoint` and
    * `@effects` and nothing else; the three diagnostics that answered a missing
    * `@capabilities` / `@budget` beside a registration — AMB-W002, AMB-E010,
@@ -356,7 +356,7 @@ describe('contract-to-handler agreement (DESIGN.md §4.4, "Mapping contracts to 
   });
 
   /**
-   * §4.4's duplication is not only the capability set: `spec.budget` and
+   * The duplication is not only the capability set: `spec.budget` and
    * `@budget` are the same contract written twice, and an agent that widens
    * one of them moves the limit the runtime actually applies away from the
    * one the source declares. Its own id, AMB-E011 — AMB-E010's `contract`

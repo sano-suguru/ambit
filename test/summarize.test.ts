@@ -307,12 +307,12 @@ describe("summarizeExtractedFiles", () => {
 });
 
 /**
- * DESIGN.md §4.4: a literal `withAmbit` / `ambitHandler` spec beside a handler
+ * A literal `withAmbit` / `ambitHandler` spec beside a handler
  * declared in the same file *is* that handler's `@capabilities` / `@budget`.
  * The tags stay legal, and stay in force when written — the spec is the last
  * side consulted, never an override.
  */
-describe("summarizeExtractedFiles: a spec as the declaration (DESIGN.md §4.4)", () => {
+describe("summarizeExtractedFiles: a spec as the declaration", () => {
   function fileWith(
     jsDocTags: readonly (readonly [string, string])[] | undefined,
     wrapper: ExtractedFile["runtimeWrappers"][number],

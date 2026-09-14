@@ -1,6 +1,5 @@
 /**
- * Finding and reading the approval ledger `ambit.approvals.md`
- * (DESIGN.md §6.3).
+ * Finding and reading the approval ledger `ambit.approvals.md`.
  *
  * The reading of it — what the lines mean, and which of them are in force —
  * is `src/core/approvals.ts`, which touches no file. This module is only the
@@ -24,7 +23,7 @@ const EMPTY: ParsedApprovals = { approvals: [], malformed: [] };
  * Walk up from `startDir` looking for the ledger, stopping after the first
  * directory that holds a `package.json` or `.git`.
  *
- * The same walk `ambit.config.ts` uses (DESIGN.md §4.1 (c)), so the two files
+ * The same walk `ambit.config.ts` uses, so the two files
  * agree on where the project starts — a ledger picked up from outside the
  * project would approve increases in a tree nobody reviewed.
  */
@@ -51,7 +50,8 @@ function isProjectBoundary(dir: string): boolean {
  *
  * A file that exists and cannot be read *is* an error. Treating it as an empty
  * ledger would silently withdraw every approval in it, which reads as "these
- * increases were never approved" (DESIGN.md §3.4).
+ * increases were never approved" instead of reporting that the ledger could
+ * not be read.
  *
  * @effects fs_read
  */

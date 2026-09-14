@@ -32,7 +32,7 @@ export interface DiffResult {
   readonly diff: AuthorityDiff;
   /**
    * Which increases the approval ledger lets through, which it does not, and
-   * which lines granted nothing (DESIGN.md §6.3).
+   * which lines granted nothing.
    */
   readonly review: ApprovalReview;
   /** `-` lines in the head side's ledger that did not parse. Reported; they grant nothing. */
@@ -76,14 +76,14 @@ export async function runDiff(ref: string, dir: string): Promise<DiffResult> {
   const worktree = await addWorktree(repoRoot, baseCommit, subdir);
   try {
     // The same subpath on both sides: a symbol id is relative to the
-    // directory that was checked (DESIGN.md §5.3), so comparing `src` against
+    // directory that was checked, so comparing `src` against
     // a whole repository would make every id look new.
     const baseDir = path.join(worktree.root, subdir);
     const headDir = path.resolve(dir);
     const base = await analyze(baseDir);
     const head = await analyze(headDir);
     // The ledger is read on both sides, because an approval counts only in
-    // the comparison that adds it (DESIGN.md §6.3).
+    // the comparison that adds it.
     const baseApprovals = loadApprovals(baseDir);
     const headApprovals = loadApprovals(headDir);
 
@@ -105,7 +105,7 @@ export async function runDiff(ref: string, dir: string): Promise<DiffResult> {
   }
 }
 
-/** Whether the comparison fails: an increase with no approval in force (DESIGN.md §6.3). */
+/** Whether the comparison fails: an increase with no approval in force. */
 export function hasUnapprovedIncrease(result: DiffResult): boolean {
   return result.review.unapproved.length > 0;
 }
@@ -114,9 +114,9 @@ export function hasUnapprovedIncrease(result: DiffResult): boolean {
  * How the comparison was invoked, for the parts of the output that depend on
  * it rather than on what was compared.
  *
- * Only `--strict` is here, and only because §6.4's two shapes are reported
- * either way and fail only under it: the reader has to be told which of the
- * two runs they are looking at, or a green exit reads as "nothing to see".
+ * Only `--strict` is here, and only because the analysis reaching less than
+ * it did is reported either way and fails only under it: the reader has to be
+ * told which of the two runs they are looking at, or a green exit reads as "nothing to see".
  */
 export interface DiffOptions {
   readonly strict?: boolean;
@@ -125,7 +125,7 @@ export interface DiffOptions {
 /**
  * Whether `--strict` fails this comparison: the analysis stopped reaching a
  * symbol, or a symbol's body gained an operation it cannot resolve
- * (DESIGN.md §6.4). Always `false` without the flag — both shapes are reported
+ * Always `false` without the flag — both shapes are reported
  * at exit 0 by default.
  */
 export function failsStrict(result: DiffResult, options: DiffOptions = {}): boolean {
@@ -168,8 +168,7 @@ export function formatDiffText(result: DiffResult, options: DiffOptions = {}): s
       "",
       ...review.unapproved.flatMap((item) => renderIncrease(item)),
       `Add each line above to ${result.approvalsFile ?? APPROVALS_HINT}, with the reason, and`,
-      "commit it in the same change (DESIGN.md §6.3). An approval already in the base",
-      "grants nothing.",
+      "commit it in the same change. An approval already in the base grants nothing.",
       "",
     );
   }
@@ -216,7 +215,7 @@ export function formatDiffText(result: DiffResult, options: DiffOptions = {}): s
     );
   }
 
-  // Not an increase — `unknown` is not authority (DESIGN.md §4.3) — but never
+  // Not an increase — `unknown` is not authority — but never
   // silent either: a range that stopped being analyzable is exactly what must
   // not be reported as "nothing increased here".
   if (unknown.length > 0) {
@@ -228,9 +227,9 @@ export function formatDiffText(result: DiffResult, options: DiffOptions = {}): s
     );
   }
 
-  // §6.4's second shape. The symbol was already unresolved, so nothing about
-  // it "increased" — what changed is that there is now more of it the analysis
-  // did not read, and the operations that made it so are named.
+  // The unresolved extent widened. The symbol was already unresolved, so
+  // nothing about it "increased" — what changed is that there is now more of
+  // it the analysis did not read, and the operations that made it so are named.
   if (unresolved.length > 0) {
     lines.push(
       `${count(unresolved.length, "symbol")} gained an operation the analysis could not resolve:`,
@@ -242,18 +241,19 @@ export function formatDiffText(result: DiffResult, options: DiffOptions = {}): s
         ),
       ]),
       "",
-      "This is not authority (DESIGN.md §4.3), so no approval covers it and none is",
-      "asked for. What closes it is a stub, a verifiable declaration, or explicit",
-      "isolation behind @boundary (§4.3, §6.4).",
+      "This is not authority, so no approval covers it and none is asked for. What",
+      "closes it is a stub, a verifiable declaration, or explicit isolation behind",
+      "@boundary.",
       "",
     );
   }
 
-  // §6.4's third shape. The symbol owns several bodies and they have no names,
-  // so a handler that gained something and a handler that merely moved are the
-  // same two sequences. Nothing increased; what the analysis cannot do is say
-  // where what it sees now sits — authority, or an operation it could not read
-  // — and saying nothing here would be the silence §3.4 forbids.
+  // What anonymous bodies hold moved. The symbol owns several bodies and they
+  // have no names, so a handler that gained something and a handler that
+  // merely moved are the same two sequences. Nothing increased; what the
+  // analysis cannot do is say where what it sees now sits — authority, or an
+  // operation it could not read — and saying nothing here would pass an
+  // unanalyzed change off as clean.
   if (unmatched.length > 0) {
     lines.push(
       `${count(unmatched.length, "symbol")} holds several anonymous bodies, and what each of them holds moved:`,
@@ -266,14 +266,13 @@ export function formatDiffText(result: DiffResult, options: DiffOptions = {}): s
       "Nothing grew, so this is not an increase and no approval covers it. What it",
       "means is that an authority, or an operation the analysis could not read, may",
       "now sit in a different handler — read the file's diff. Binding a handler to a",
-      "name gives it a symbol of its own, which is compared against itself",
-      "(§4.1 (a), §6.4).",
+      "name gives it a symbol of its own, which is compared against itself.",
       "",
     );
   }
 
   if (strict && (unknown.length > 0 || unresolved.length > 0 || unmatched.length > 0)) {
-    // Named for what is actually above it. Only one of §6.4's three shapes
+    // Named for what is actually above it. Only one of the three sections
     // firing is the common case, and "the sections above" would send the
     // reader looking for a section that is not there.
     const firing = [unknown.length, unresolved.length, unmatched.length].filter(
@@ -281,7 +280,7 @@ export function formatDiffText(result: DiffResult, options: DiffOptions = {}): s
     ).length;
     const sections = firing === 1 ? "section" : firing === 2 ? "two sections" : "three sections";
     lines.push(
-      `--strict: the ${sections} above ${firing === 1 ? "fails" : "fail"} this comparison (DESIGN.md §6.4).`,
+      `--strict: the ${sections} above ${firing === 1 ? "fails" : "fail"} this comparison.`,
       "Without --strict they are reported and the comparison passes.",
       "",
     );
@@ -310,7 +309,7 @@ export function formatDiffText(result: DiffResult, options: DiffOptions = {}): s
   return lines.join("\n");
 }
 
-/** Where to write an approval when the repository has no ledger yet (DESIGN.md §6.3). */
+/** Where to write an approval when the repository has no ledger yet. */
 const APPROVALS_HINT = "ambit.approvals.md";
 
 /**
@@ -318,11 +317,10 @@ const APPROVALS_HINT = "ambit.approvals.md";
  * authority, and the path that carries it.
  *
  * A path is shown only where the record has one. An authority a function
- * declares but does not reach has no path, and none is invented
- * (DESIGN.md §5.3).
+ * declares but does not reach has no path, and none is invented.
  *
  * For an increase with nothing approving it, the ledger line to add follows,
- * ready to copy — the grammar of §6.3 is a thing to paste, not to recall.
+ * ready to copy — the ledger's line grammar is a thing to paste, not to recall.
  */
 function renderIncrease(
   item: IncreaseItem,
@@ -376,14 +374,14 @@ function count(n: number, noun: string): string {
  * Annotated at the symbol's own declaration, with the call path folded into
  * the body, so the annotation lands on the function whose contract changed
  * and carries the reason without the reader opening the job log — the same
- * shape `check --format github` uses (DESIGN.md §5.1 / §6).
+ * shape `check --format github` uses.
  *
  * An unapproved increase is an `error`, and carries the ledger line to add.
  * An **approved** one is a `notice`, carrying the reason that was given: it
  * does not fail the build, and it must still be visible on the diff, because
- * an increase nobody sees is the thing the ledger exists to prevent (§6.3).
+ * an increase nobody sees is the thing the ledger exists to prevent.
  * A decrease and a deletion are reported by the text output and do not fail a
- * build (§6), so an annotation on them would be noise on a diff.
+ * build, so an annotation on them would be noise on a diff.
  */
 export function formatDiffGithub(result: DiffResult, options: DiffOptions = {}): string {
   let out = "";
@@ -402,11 +400,13 @@ export function formatDiffGithub(result: DiffResult, options: DiffOptions = {}):
 }
 
 /**
- * §6.4's three shapes as annotations, under `--strict` only.
+ * The analysis reaching less than it did — a symbol that became unresolved,
+ * a widened unresolved extent, and anonymous bodies whose holdings moved — as
+ * annotations, under `--strict` only.
  *
  * Withheld without the flag deliberately, and the default output is
- * byte-identical to what it was before §6.4 existed. Both shapes are common on
- * a codebase that declares nothing, and a `notice` on every pull request that
+ * byte-identical to what it was before these reports existed. Both shapes are
+ * common on a codebase that declares nothing, and a `notice` on every pull request that
  * touched an `unknown` function is how an annotation source gets muted — which
  * would cost the increases too, since they share the channel. A repository that
  * wants the signal asks for it, and then it is an `error`, because under
@@ -425,7 +425,7 @@ function wideningAnnotations(result: DiffResult): string {
       title: "ambit diff",
       body: [
         `${displayName(head.symbol)} is no longer resolved by the analysis since ${result.ref}`,
-        "this is not authority (DESIGN.md §4.3); --strict fails on it (§6.4)",
+        "this is not authority; --strict fails on it",
       ],
     });
   }
@@ -441,7 +441,7 @@ function wideningAnnotations(result: DiffResult): string {
       body: [
         `${displayName(head.symbol)} gained ${count(entry.unresolvedGained.length, "operation")} the analysis could not resolve since ${result.ref}`,
         ...entry.unresolvedGained.map((operation) => `? ${formatUnresolvedOperation(operation)}`),
-        "a stub, a verifiable declaration, or @boundary closes it (§4.3, §6.4)",
+        "a stub, a verifiable declaration, or @boundary closes it",
       ],
     });
   }
@@ -456,7 +456,7 @@ function wideningAnnotations(result: DiffResult): string {
       title: "ambit diff",
       body: [
         `what this file's anonymous bodies hold moved between them since ${result.ref}, and they cannot be matched`,
-        "nothing grew, so this is not an increase; naming a handler closes it (§4.1 (a), §6.4)",
+        "nothing grew, so this is not an increase; naming a handler closes it",
       ],
     });
   }

@@ -1,11 +1,11 @@
 /**
- * DESIGN.md §3.5 gate 3, native side.
+ * M0.5 gate 3 (ADR-0001), native side.
  *
  *     node scripts/m05-probe/update-native.ts <corpusRoot> <mutationId>
  *
  * Observes, mutates, then observes twice more from the *same* API session: once
  * after telling the engine which file changed, and once without telling it. The
- * second is the case that matters for §3.4 — an engine that answers from a
+ * second is the case that matters most — an engine that answers from a
  * stale snapshot as though it were current turns a contract violation into a
  * clean run, and nothing downstream can tell.
  */

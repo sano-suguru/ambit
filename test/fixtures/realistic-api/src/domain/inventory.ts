@@ -48,7 +48,7 @@ export function shortfall(level: StockLevel, wanted: number): number {
 
 /**
  * A class with an accessor. The getter's body is analyzed and propagates like
- * any method's, but a contract *comment* on it is inert (DESIGN.md §4.1 (a)):
+ * any method's, but a contract *comment* on it is inert:
  * `ambit.config.ts` is the only place its contract can be written, which is
  * what `ambit init --config` proposes and what the round-trip test applies.
  */

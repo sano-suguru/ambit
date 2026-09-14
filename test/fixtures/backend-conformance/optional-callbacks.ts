@@ -1,4 +1,4 @@
-// §3.5 gate 1, §4.2 rule 4: a callback slot declared *optional* —
+// M0.5 gate 1, callback inference: a callback slot declared *optional* —
 // `cb?: (v: T) => R`, which `Promise.then`, `Array.map` and most callback APIs
 // use — gives both the declared parameter and the argument the union type
 // `((v: T) => R) | null | undefined`. A union has no call signatures of its

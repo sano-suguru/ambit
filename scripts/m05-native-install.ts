@@ -1,5 +1,5 @@
 /**
- * Installs the native TypeScript compiler for the DESIGN.md §3.5 gate probes.
+ * Installs the native TypeScript compiler for the M0.5 gate probes (ADR-0001).
  *
  *     node scripts/m05-native-install.ts [version]
  *

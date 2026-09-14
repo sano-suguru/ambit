@@ -123,14 +123,14 @@ describe("ambit diff against this repository's history", () => {
 
   it("exits 2 rather than silently ignoring a flag it does not act on", async () => {
     // A flag accepted and dropped would make a green diff read as "that
-    // option found nothing" (DESIGN.md §3.4).
+    // option found nothing".
     for (const flag of [["--coverage"], ["--config"], ["--format", "json"]]) {
       const { exitCode } = await runCli(["diff", "HEAD", "src", ...flag]);
       expect(exitCode, `diff should reject ${flag.join(" ")}`).toBe(2);
     }
     // The flags `diff` does support are accepted, whatever the working tree
     // then reports: 0 or 1 is an answer, 2 is the usage error being tested
-    // for. `--strict` is one of them since §6.4 — it is that section's gate,
+    // for. `--strict` is one of them — it fails on an unresolvable gain,
     // not an inert option.
     for (const flag of [["--format", "github"], ["--strict"], ["--strict", "--format", "github"]]) {
       const supported = await runCli(["diff", "HEAD", "src", ...flag]);

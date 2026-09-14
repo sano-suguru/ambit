@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import type { Diagnostic } from "../src/core/index.ts";
 
 /**
- * `ambit.config.ts` end to end (DESIGN.md §4.1, "Out-of-code declarations").
+ * `ambit.config.ts` end to end: contracts declared by naming the symbol.
  *
  * Every case is a scratch project built in a temp directory, checked through
  * the CLI as a subprocess: a config is loaded by *importing* it, and the only
@@ -83,7 +83,7 @@ async function project(files: Readonly<Record<string, string>>): Promise<string>
   await fs.mkdir(path.join(dir, "src"), { recursive: true });
   await fs.writeFile(path.join(dir, "tsconfig.json"), TSCONFIG);
   // A package.json is what stops the config search from walking out of the
-  // scratch directory into whatever is above the temp dir (§4.1 (c)).
+  // scratch directory into whatever is above the temp dir.
   await fs.writeFile(
     path.join(dir, "package.json"),
     `${JSON.stringify({ name: "scratch", private: true, type: "module" }, null, 2)}\n`,
@@ -98,7 +98,7 @@ async function project(files: Readonly<Record<string, string>>): Promise<string>
 describe("ambit.config.ts: contracts declared outside the code", () => {
   it("(a) treats a config-only contract as a contract: the violation is AMB-E001", async () => {
     // `charge` carries no JSDoc at all. Without the config it is simply
-    // undeclared — a coverage figure, not a violation (§4.2). With it, the
+    // undeclared — a coverage figure, not a violation. With it, the
     // declaration is `pure`, and the `fetch` in the body breaks it.
     const dir = await project({
       "src/billing.ts": `export async function charge(id: string): Promise<number> {
@@ -235,7 +235,7 @@ export async function GET(): Promise<number> {
     expect(result.stderr).toContain("analysis failed");
     expect(result.stderr).toContain("ambit.config.ts");
     // The run must not also print a summary line: a config that could not be
-    // read has to stop the check, not produce a partial one (§3.4).
+    // read has to stop the check, not produce a partial one.
     expect(result.stdout).toBe("");
   });
 
@@ -273,7 +273,7 @@ export async function GET(): Promise<number> {
   });
 
   it("(c) expands a user-defined effect and catches the violation it makes visible", async () => {
-    // DESIGN.md §4.2: "User-defined effects can be declared in
+    // docs/DESIGN.md: "User-defined effects can be declared in
     // `ambit.config.ts` as combinations of standard effects". `payments` stands
     // for
     // network + db_write, so a function declaring it may do both — and a
@@ -317,7 +317,7 @@ export async function refund(id: string): Promise<number> {
     expect(result.diagnostics.map((d) => d.id)).not.toContain("AMB-E002");
 
     // The config side: the same name, used from a `contracts` entry, and the
-    // diagnostics only ever name standard effects (§4.1 (d)) — `payments`
+    // diagnostics only name standard effects, expanded at parse time — `payments`
     // appears nowhere in the output.
     expect(result.stdout).not.toContain("payments");
 
@@ -352,7 +352,7 @@ export async function refund(id: string): Promise<number> {
   });
 
   it("(d) promotes AMB-W003 to an error inside a strict directory and leaves it outside", async () => {
-    // DESIGN.md §4.3: "`strict` can be set per directory in `ambit.config.ts`.
+    // docs/DESIGN.md: "`strict` can be set per directory in `ambit.config.ts`.
     // Tighten new code while leaving legacy code at warnings". Both
     // files below make the same unresolvable-target call, so the only thing
     // separating them is which directory they are in.
@@ -479,7 +479,8 @@ export async function fetchRate(): Promise<number> {
   });
 
   it("resolves keys against the config file's directory, not the checked directory", async () => {
-    // §4.1 (c): the same config has to name the same symbol whether the run
+    // Keys resolve from the config's directory: the same config has to name
+    // the same symbol whether the run
     // is `check src` or `check src/billing`.
     const dir = await project({
       "src/billing/charge.ts": `export async function charge(): Promise<number> {

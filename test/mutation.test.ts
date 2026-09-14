@@ -41,7 +41,7 @@ function observedOf(
   throw new Error(`no function named ${name} in the fixture`);
 }
 
-describe("local mutation and `pure` (DESIGN.md §4.2)", () => {
+describe("local mutation and `pure`", () => {
   it("allows mutating a value the function itself allocated", async () => {
     const { diagnostics, state } = await analyze();
     expect(forFunction(diagnostics, "localArrayPush")).toEqual([]);
@@ -81,7 +81,7 @@ describe("local mutation and `pure` (DESIGN.md §4.2)", () => {
   });
 
   it("over-approximates a `let`-bound local to `state_write`", async () => {
-    // §4.2, "The rule for deciding locality": only a `const` bound to a fresh
+    // The locality rule: only a `const` bound to a fresh
     // allocation is
     // local. A `let` can be reassigned to something the caller holds, and the
     // undecidable side is deliberately the effect, not silence.
@@ -96,7 +96,7 @@ describe("local mutation and `pure` (DESIGN.md §4.2)", () => {
   });
 
   it("keeps a mutator with a by-reference callback unknown, not silently pure", async () => {
-    // §4.2 rule 4: the callback's body is never walked, so its effects are not
+    // A by-reference callback's body is never walked, so its effects are not
     // known — a local mutation cannot make that go away.
     const { diagnostics, state } = await analyze();
     const [diagnostic] = forFunction(diagnostics, "sortsLocalWithOpaqueComparator");
@@ -110,7 +110,7 @@ describe("local mutation and `pure` (DESIGN.md §4.2)", () => {
 
   it("allows a base-class constructor to write its own fields", async () => {
     // With `erasableSyntaxOnly` there are no parameter properties, so
-    // `this.x = x` is the only way to write a field. §4.2 treats the `this` of
+    // `this.x = x` is the only way to write a field. Ambit treats the `this` of
     // an `extends`-less constructor as the object it just allocated.
     const { diagnostics, state } = await analyze();
     expect(forFunction(diagnostics, "Point.constructor")).toEqual([]);

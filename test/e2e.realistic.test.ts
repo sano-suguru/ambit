@@ -324,7 +324,7 @@ export async function formatCents(cents: number): Promise<string> {
       ],
       (result) => {
         const diagnostic = at(result, "AMB-E001", "src/domain/money.ts", 4);
-        // `llm` implies `network` (DESIGN.md §4.2), so both are excess here.
+        // `llm` implies `network`, so both are excess here.
         expect(diagnostic?.message).toContain("llm");
         expect(diagnostic?.message).toContain("network");
         expect(result.exitCode).toBe(1);
@@ -373,7 +373,7 @@ export async function formatCents(cents: number): Promise<string> {
       (result) => {
         const diagnostic = at(result, "AMB-E009", "src/routes/users.ts", 17);
         expect(diagnostic?.message).toContain("http:get:elsewhere.example");
-        // §5.3: no fabricated patch — widening the grant and changing the URL
+        // No fabricated patch — widening the grant and changing the URL
         // are both plausible and Ambit cannot tell which was meant.
         expect(diagnostic?.fixes).toEqual([]);
         expect(result.exitCode).toBe(1);
@@ -416,7 +416,7 @@ export async function formatCents(cents: number): Promise<string> {
         );
         expect(warning?.message).toContain("not a literal in the source");
         expect(warning?.message).toContain("only the runtime can match");
-        // A dynamic URL is the runtime's job (§4.4), so the static check must
+        // A dynamic URL is matched by the runtime hook, so the static check must
         // not fail the build over it.
         expect(errors(result)).toEqual([]);
         expect(result.exitCode).toBe(0);
@@ -426,7 +426,7 @@ export async function formatCents(cents: number): Promise<string> {
 
   it("accident 6: an ambitHandler list that disagrees with the handler's @capabilities is AMB-E010", async () => {
     // The pair only exists when both halves are written — a literal spec on its
-    // own *is* the declaration (DESIGN.md §4.4), so the first patch puts the
+    // own *is* the declaration, so the first patch puts the
     // tag back and the second drifts the spec away from it.
     await withVariant(
       [
@@ -500,7 +500,7 @@ export const GET = ambitHandler(`,
   }, 60_000);
 
   it("accident 7: a spec.budget widened away from the handler's @budget is AMB-E011", async () => {
-    // The half of §4.4's duplication that is not the capability set. Widening
+    // The half of the spec/JSDoc duplication that is not the capability set. Widening
     // `timeMs` in the spec alone moves the limit the runtime applies without
     // touching the limit the source declares.
     await withVariant(
@@ -659,7 +659,7 @@ import { fetchElsewhere } from "../lib/rates.ts";`,
 
       // Every proposal that carried a patch is consumed; the ones that did not
       // are the functions whose effects stayed `unknown`, where proposing
-      // `pure` would manufacture a guarantee (§4.3).
+      // `pure` would turn "could not tell" into a declaration.
       const remaining = await run("init", dir);
       expect(remaining.diagnostics.filter((d) => d.fixes.length > 0)).toEqual([]);
     } finally {
@@ -668,7 +668,7 @@ import { fetchElsewhere } from "../lib/rates.ts";`,
   }, 120_000);
 
   it("round-trips `ambit init --config`: the accessor's contract lands in ambit.config.ts", async () => {
-    // DESIGN.md §4.1 (a): `StockSummary.get shortfall` propagates like any
+    // An accessor: `StockSummary.get shortfall` propagates like any
     // method, but no comment on it is adopted — so the only way to declare it
     // is the config file, and `--config` is what proposes that. The class also
     // writes an explicit constructor, so the round trip covers both halves at

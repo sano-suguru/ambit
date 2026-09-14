@@ -1,5 +1,5 @@
 /**
- * The controlled changes DESIGN.md §3.5 gate 3 asks for, and the question each
+ * The controlled changes M0.5 gate 3 asks for, and the question each
  * one poses to a backend. Shared by both update probes so that the two are
  * asked literally the same thing.
  */

@@ -928,7 +928,7 @@ Semantic versioning, with 0.x read as semver defines it: **while the major versi
 
 ## 10. Success Metrics
 
-The Phase 1 exit criterion, the metrics, and their targets are in [`ROADMAP.md`](../ROADMAP.md).
+The Phase 1 exit criterion and the evidence that would meet it are in [`ROADMAP.md`](../ROADMAP.md).
 
 ## 11. Milestones
 

@@ -1,11 +1,11 @@
 // The function-like nodes here are the ones `collectFunctionLikeDeclarations`
 // treats specially — used to verify both `collectSkippedFunctionKinds`'
 // classification and the two shapes only `ambit.config.ts` can declare
-// (DESIGN.md §4.1 (a)).
+// (an accessor and an anonymous default export).
 
 export class WithAccessors {
   // Extracted as `WithAccessors.get value`, but the contract comment on it is
-  // still inert: §4.1 (a) does not open JSDoc for accessors, so this is
+  // still inert: JSDoc on an accessor is not adopted, so this is
   // AMB-E003 with the config key that would work.
   /** @effects fs_read */
   get value(): number {

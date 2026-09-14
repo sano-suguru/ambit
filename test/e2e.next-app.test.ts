@@ -44,7 +44,7 @@ async function check(dir: string): Promise<CheckResult> {
     exitCode = e.code ?? 1;
   }
   // A real diagnostic carries no `kind`; the trailing `summary` record and
-  // the per-function `authority` records (DESIGN.md §5.1) do, and both have
+  // the per-function `authority` records do, and both have
   // to be left out before anything reads these as diagnostics.
   const diagnostics = stdout
     .trim()
@@ -65,7 +65,7 @@ function errors(result: CheckResult): readonly Diagnostic[] {
   return result.diagnostics.filter((d) => d.severity === "error");
 }
 
-describe("the Next.js App Router fixture (DESIGN.md §4.4)", () => {
+describe("the Next.js App Router fixture", () => {
   it("type-checks as a scratch copy with nothing installed (P5)", async () => {
     const dir = await scratchCopy();
     try {
@@ -87,8 +87,7 @@ describe("the Next.js App Router fixture (DESIGN.md §4.4)", () => {
 
   it("reads each ambitRoute spec as the handler's own @capabilities", async () => {
     // None of the four handlers writes `@capabilities` or `@budget`; the
-    // literal spec is the declaration (§4.4, "Removing the double
-    // declaration"). If the checker
+    // literal spec is the declaration, so no JSDoc copy is needed. If the checker
     // did not read `ambitRoute`, every one of them would be an @entrypoint
     // with no capability set — AMB-W002 — and this would fail.
     const result = await check(FIXTURE_ROOT);
@@ -96,7 +95,7 @@ describe("the Next.js App Router fixture (DESIGN.md §4.4)", () => {
   }, 60_000);
 
   it("catches a route whose spec does not cover the host its handler reaches", async () => {
-    // The static half of §4.4's dual enforcement, reached entirely through the
+    // The static half of capability enforcement, reached entirely through the
     // spec:
     // `currentRate` writes no `@capabilities`, so the grant this narrowing
     // check compares against is the literal `ambitRoute` spec. It is AMB-E005

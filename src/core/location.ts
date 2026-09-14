@@ -1,7 +1,6 @@
 /**
  * A source position, always relative to the project root that was passed to
- * `ambit check`. Never a compiler-internal position or snapshot offset
- * (DESIGN.md §5.3).
+ * `ambit check`. Never a compiler-internal position or snapshot offset.
  *
  * `line`/`col` are 1-based (human-facing position); `endLine`/`endCol` mark
  * the end of the range, exclusive, also 1-based to match `line`/`col`.

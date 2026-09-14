@@ -44,7 +44,7 @@ async function scratchCopy(): Promise<string> {
   return dir;
 }
 
-describe("fixes[].edits are applicable patches (DESIGN.md §5.3)", () => {
+describe("fixes[].edits are applicable patches", () => {
   it("emits one concrete widen patch for AMB-E001, marked as loosening the contract", async () => {
     const { diagnostics, exitCode } = await check(FIXTURE_ROOT);
     expect(exitCode).toBe(1);
@@ -52,7 +52,7 @@ describe("fixes[].edits are applicable patches (DESIGN.md §5.3)", () => {
     expect(violation?.fixes).toHaveLength(1);
     const fix = violation?.fixes[0];
     expect(fix?.kind).toBe("widen");
-    // §5.3: a fix that loosens the contract must say so, and must not be
+    // A fix that loosens the contract must say so, and must not be
     // ranked above a contract-preserving one that does not exist.
     expect(fix?.consistentWithContract).toBe(false);
     expect(fix?.edits).toHaveLength(1);

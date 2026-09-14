@@ -1,5 +1,5 @@
 // A function expression written directly as a call argument, with no
-// enclosing declaration whose body contains it. DESIGN.md §4.1 (a) gives
+// enclosing declaration whose body contains it. Ambit gives
 // every such function in a file one entry, `<inline callbacks>`.
 
 declare const router: {

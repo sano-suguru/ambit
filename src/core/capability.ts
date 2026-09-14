@@ -1,12 +1,12 @@
 /**
  * A capability: what a function is allowed to act on, as opposed to what it
- * does (DESIGN.md §4.4). Written `<resource>:<action>:<target>` —
+ * does. Written `<resource>:<action>:<target>` —
  * `db:read:users`, `http:get:api.example.com`.
  *
  * Only `target` may be a glob (`http:get:*.example.com`); `resource` and
- * `action` match literally. §4.4 says exactly that ("`target` may be globbed")
- * and nothing more, and widening the glob to the other segments would let
- * `*:*:*` be written as a contract that reads like a restriction.
+ * `action` match literally. The design says exactly that ("`target` may be
+ * globbed") and nothing more, and widening the glob to the other segments would
+ * let `*:*:*` be written as a contract that reads like a restriction.
  */
 export interface Capability {
   readonly resource: string;
@@ -18,7 +18,7 @@ export interface Capability {
 export interface CapabilitySet {
   readonly capabilities: readonly Capability[];
   /**
-   * Set when a call could not be resolved (DESIGN.md §4.2 rule 6), so the
+   * Set when a call could not be resolved, so the
    * true requirement could include anything. Tracked separately for the same
    * reason `EffectSet.unknown` is: "requires nothing more" and "we could not
    * tell" are different claims.
@@ -41,7 +41,7 @@ export function formatCapability(capability: Capability): string {
 const SEGMENT = /^[A-Za-z0-9_.*?[\]{}@/-]+$/;
 /**
  * `target` names a host, a filesystem path, or a command, so it is defined by
- * exclusion rather than by an allowlist (DESIGN.md §4.4 (b)): anything but a
+ * exclusion rather than by an allowlist: anything but a
  * comma — the `@capabilities` list separator — and control characters. That
  * admits the colon of `http:get:localhost:8080` and the spaces, `+`, `~` and
  * `%` that real paths contain.
@@ -96,7 +96,7 @@ export function parseCapabilitiesTag(text: string): CapabilitySet | undefined {
 }
 
 /**
- * Whether `granted` permits `required` (DESIGN.md §4.4: capabilities may only
+ * Whether `granted` permits `required` (capabilities may only
  * narrow from caller to callee). `resource` and `action` must match exactly;
  * `granted.target` is matched as a glob against `required.target`.
  */
@@ -139,7 +139,7 @@ export function capabilitySetsEqual(a: CapabilitySet, b: CapabilitySet): boolean
 
 /**
  * `*` matches any run of characters, `?` exactly one — the shell-glob subset
- * §4.4's `http:get:*.example.com` example needs. Everything else is literal,
+ * a `http:get:*.example.com` grant needs. Everything else is literal,
  * so a target containing regex metacharacters (`api.example.com`'s dots) is
  * matched as written rather than as a pattern.
  */

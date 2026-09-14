@@ -73,8 +73,8 @@ function double(n: number): number {
 
 // Same allowlisted method ("Array.map"), with the callback passed by
 // reference. `double` is a declaration in this same tree, so the reference is
-// followed and recorded as a callbackTargets edge — DESIGN.md §4.2 rule 4's
-// "inferred from the actual argument at the call site". The opaque case is
+// followed and recorded as a callbackTargets edge — the callback's effects are
+// inferred from the actual argument at the call site. The opaque case is
 // `callsPureBuiltinByReferenceAnyTyped` below.
 export function callsPureBuiltinByReference(): number[] {
   return [1, 2, 3].map(double);

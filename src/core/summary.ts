@@ -19,8 +19,8 @@ export interface ResolvedCall {
  * `effects` is a set, not one effect, because an operation's direction is not
  * always decidable from the source: `pool.query(sql)` with a non-literal
  * statement may read or write, and the stub table answers with both rather
- * than picking one (DESIGN.md §4.2, "Operations whose read/write direction is
- * not statically determined"). One call site produces one
+ * than picking one, so a dynamically built write cannot pass as a read.
+ * One call site produces one
  * `StubCall` whatever the size of that set — never one per effect, which
  * would double-count it in `--coverage`.
  */
@@ -31,8 +31,9 @@ export interface StubCall {
   readonly qualifiedName: string;
   /**
    * The capability this call requires, when the stub tables know of a target
-   * and the source fixes it — a literal URL's host (DESIGN.md §4.4's static
-   * half). Absent when the operation has no target this layer claims to know.
+   * and the source fixes it — a literal URL's host, the part of a capability
+   * the checker matches statically. Absent when the operation has no target
+   * this layer claims to know.
    */
   readonly requiredCapability?: Capability;
   /**
@@ -58,10 +59,10 @@ export interface KnownPureCall {
 }
 
 /**
- * A call whose target or effects could not be determined (DESIGN.md §4.2
- * rule 6). `qualifiedName` is carried through from a stub-lookup miss (see
- * `summarize.ts`'s `toCall`) so `src/checker/coverage.ts` can report which
- * unresolved names recur most — the signal for "what to stub next".
+ * A call whose target or effects could not be determined. `qualifiedName` is
+ * carried through from a stub-lookup miss (see `summarize.ts`'s `toCall`) so
+ * `src/checker/coverage.ts` can report which unresolved names recur most — the
+ * signal for "what to stub next".
  */
 export interface UnresolvedCall {
   readonly kind: "unresolved";
@@ -71,20 +72,21 @@ export interface UnresolvedCall {
 }
 
 /**
- * A site that changes a value in place (DESIGN.md §4.2, "Local mutation and
- * `pure`") — a mutating builtin method (`src/stubs/mutating-builtins.ts`)
- * or an assignment / `++` / `delete` targeting a property.
+ * A site that changes a value in place — a mutating builtin method
+ * (`src/stubs/mutating-builtins.ts`) or an assignment / `++` / `delete`
+ * targeting a property.
  *
  * `escaping` is the whole decision: `false` means the mutated value was
  * allocated inside the function, so no caller can observe the change and the
  * site carries no effect; `true` means the root is a parameter, `this`, a
  * module-scope binding, or something the analysis could not pin down, and the
  * site carries `state_write`. The undecidable case is over-approximated to
- * `true`, matching the `db_read`/`db_write` rule in §4.2.
+ * `true`, matching the rule that an undecidable SQL direction is both
+ * `db_read` and `db_write`.
  *
  * `unknownCallback` is a mutator handed a callback by reference
- * (`xs.sort(cmp)`): the mutation is known, the callback's own effects are not
- * (§4.2 rule 4), so the site is both `state_write` and `unknown`.
+ * (`xs.sort(cmp)`): the mutation is known, the callback's own effects are not,
+ * so the site is both `state_write` and `unknown`.
  */
 export interface MutationCall {
   readonly kind: "mutation";
@@ -145,14 +147,13 @@ export function isBlockingCall(call: Call): call is BlockingCall {
  * A mutator handed a callback by reference (`xs.sort(cmp)`) has no
  * `UnresolvedReason` of its own, but it makes the caller `unknown` for the
  * same reason `callback-parameter` does — the actual argument is what decides
- * (DESIGN.md §4.2 rule 4) — so it is labelled in the same namespace rather
- * than left out.
+ * — so it is labelled in the same namespace rather than left out.
  *
  * Lives here rather than beside either consumer because `ambit init`'s
- * `AMB-I002` and §5.1's `unresolved` field must name the same set: one reports
- * why a contract cannot be proposed, the other is what `ambit diff` compares
- * (§6.4), and a reason in one and not the other would be a hole in whichever
- * lacked it.
+ * `AMB-I002` and the authority record's `unresolved` field must name the same
+ * set: one reports why a contract cannot be proposed, the other is what
+ * `ambit diff` compares, and a reason in one and not the other would be a hole in
+ * whichever lacked it.
  */
 export type UnresolvedOperationReason = UnresolvedReason | "callback-by-reference";
 
@@ -165,8 +166,8 @@ export function unresolvedReasonOf(call: BlockingCall): UnresolvedOperationReaso
  *
  * `{ kind: "none" }` is distinct from a declared empty set: it means no tag
  * was present at all (undeclared), which this slice treats as a coverage
- * concern rather than as `unknown` in propagation (DESIGN.md §4.2:
- * "Undeclared" and "`unknown`" are not the same thing).
+ * concern rather than as `unknown` in propagation: "undeclared" and
+ * "`unknown`" are not the same thing.
  *
  * `{ kind: "invalid" }` means a tag was present but contained a token that is
  * neither `pure` nor a known effect (a typo, e.g. `@effects netwrok`) — see
@@ -197,11 +198,11 @@ export type DeclaredBudget =
   | { readonly kind: "declared"; readonly budget: Budget };
 
 /**
- * Whether a function declared `@boundary` (DESIGN.md §4.6) — an explicit
+ * Whether a function declared `@boundary` — an explicit
  * statement that its body is not statically checked and that the contract it
  * declares to the outside is to be trusted instead.
  *
- * `reason` is required by §4.6, so a tag without one is `"invalid"`: an
+ * `reason` is required, so a tag without one is `"invalid"`: an
  * unexplained hole in the analysis is the thing the tag exists to make
  * visible.
  */
@@ -212,8 +213,8 @@ export type DeclaredBoundary =
 
 /**
  * One tag where JSDoc and `ambit.config.ts` both declared something and the
- * two did not agree (DESIGN.md §4.1: "If a symbol has both JSDoc and config,
- * JSDoc wins and the difference is warned about"). Reported as `AMB-W005`.
+ * two did not agree (JSDoc wins, and the difference is warned about).
+ * Reported as `AMB-W005`.
  *
  * Both sides are held as their formatted text, not as parsed objects: the
  * comparison has already happened, and what the message needs is the two
@@ -231,7 +232,7 @@ export interface ContractDivergence {
  *
  * `"spec"` is a `withAmbit` / `ambitHandler` registration in the same file as
  * the handler it names, whose `capabilities` / `budget` the source fixes as
- * literals (DESIGN.md §4.4). It is a declaration, not an observation: the
+ * literals. It is a declaration, not an observation: the
  * runtime establishes exactly that set, so the source has already said what
  * the contract is and the JSDoc tag beside it would only repeat it.
  *
@@ -247,7 +248,7 @@ export type DeclarationOrigin = "jsdoc" | "config" | "spec";
  * Per tag rather than per function because the sides fill different tags: a
  * function can take `@effects` from its JSDoc and its capability set from the
  * registration beside it, and `--coverage`'s `declared-by` breakdown counts
- * the `effects` half (DESIGN.md §4.1, "Out-of-code declarations").
+ * the `effects` half.
  */
 export interface ContractOrigins {
   readonly effects?: DeclarationOrigin;
@@ -262,7 +263,7 @@ export interface FunctionSummary {
   /**
    * Where each contract tag was written, carried through from
    * {@link RawJsDoc.tagLocations} so a fix can rewrite the tag in place
-   * instead of guessing at a line (DESIGN.md §5.3).
+   * instead of guessing at a line.
    */
   readonly tagLocations: ReadonlyMap<string, SourceLocation>;
   /** Where a new contract comment would go (see {@link ExtractedFunction.declarationStart}). */
@@ -279,7 +280,7 @@ export interface FunctionSummary {
    * Which side supplied each declared tag, when anything did. Absent for a
    * function nothing declared anything for. `--coverage` counts the `effects`
    * half apart so a codebase can see how much of its contract surface lives
-   * outside the code (DESIGN.md §4.1, "Out-of-code declarations").
+   * outside the code.
    */
   readonly declaredBy?: ContractOrigins;
   /** Tags JSDoc and config both declared and disagreed on. JSDoc is what {@link FunctionSummary} carries. */
@@ -288,7 +289,7 @@ export interface FunctionSummary {
   readonly capabilities: DeclaredCapabilities;
   readonly budget: DeclaredBudget;
   readonly boundary: DeclaredBoundary;
-  /** `@entrypoint` (DESIGN.md §4.1): where the runtime establishes a context. */
+  /** `@entrypoint`: where the runtime establishes a context. */
   readonly entrypoint: boolean;
   readonly calls: readonly Call[];
   /**

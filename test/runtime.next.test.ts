@@ -17,8 +17,8 @@ import type { RouteContext } from "../src/runtime/next.ts";
 import { ambitRoute } from "../src/runtime/next.ts";
 
 /**
- * In-process tests for the Next.js App Router adapter (DESIGN.md §4.4,
- * "Mapping contracts to handlers").
+ * In-process tests for the Next.js App Router adapter, which carries each
+ * route's contract as a value beside its handler.
  *
  * A Route Handler is a plain function Next.js calls with `(request, context)`,
  * so calling the exported `GET` / `POST` directly is not a stand-in for the
@@ -138,7 +138,7 @@ describe("ambitRoute", () => {
     );
 
     try {
-      // Not a 403 response: §4.4 — the client asked for nothing forbidden,
+      // Not a 403 response: the client asked for nothing forbidden,
       // this server's own code exceeded its grant, so the error propagates out
       // of the Route Handler to Next.js instead of being answered with a body.
       await expect(GET(request(), noParams())).rejects.toBeInstanceOf(AmbitCapabilityError);

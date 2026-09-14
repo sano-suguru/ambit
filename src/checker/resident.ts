@@ -1,5 +1,5 @@
 /**
- * The resident check path (DESIGN.md §6.2) — a session that holds Ambit's own
+ * The resident check path — a session that holds Ambit's own
  * analysis state across updates, so a re-check after an edit does not cost
  * what the first check cost.
  *
@@ -11,7 +11,8 @@
  * (ADR-0015), and the impact range the fixed point is scoped to (phase 3).
  * Every reuse is checked against the differential equivalence suite
  * (`test/resident.differential.test.ts`), which compares each generation with a
- * cold run, so the first update that breaks §6.2's equivalence law names itself.
+ * cold run, so the first update whose result is not byte-identical to a cold
+ * run over the same tree names itself.
  *
  * Two rules this file exists to keep:
  *
@@ -23,7 +24,7 @@
  * - **A failed update is a failure, not an answer.** A generation is committed
  *   only once every phase completed; a throw anywhere leaves the previous
  *   generation exactly as it was, and {@link ResidentSession.current} refuses
- *   to serve it as a description of the tree that failed (§6.2, §3.4).
+ *   to serve it as a description of the tree that failed.
  */
 
 import { createHash } from "node:crypto";
@@ -69,13 +70,14 @@ export type FileChange =
 // ---- what a generation costs -----------------------------------------------
 
 /**
- * §6.2's phases, in milliseconds. The initial check reports the same shape as
- * a re-check, so the two are comparable without subtracting one schema from
- * another.
+ * The phases a resident update is measured in, in milliseconds. The initial
+ * check reports the same shape as a re-check, so the two are comparable
+ * without subtracting one schema from another.
  *
  * `undefined` is not zero. It means *this backend cannot separate this phase*,
- * and it is a distinct value for the reason §3.4 keeps "nothing was found" and
- * "nothing was looked for" distinct: a phase reported as 0 ms reads as free.
+ * and it is a distinct value for the reason "nothing was found" and "nothing
+ * was looked for" are never allowed to read alike: a phase reported as 0 ms
+ * reads as free.
  * `transfer` is genuinely 0 in-process and is reported as 0, so a
  * process-separated backend fills the same field with a real number.
  */
@@ -98,8 +100,8 @@ export interface PhaseTimings {
 // ---- the fingerprint -------------------------------------------------------
 
 /**
- * The cheap test for "can anything be reused at all" (§6.2's full-rebuild
- * rows).
+ * The cheap test for "can anything be reused at all" — the changes that
+ * require a whole rebuild.
  *
  * It is not trying to be a complete model of what a project depends on. It is
  * trying to be **never wrong in the permissive direction**: anything it cannot
@@ -119,11 +121,10 @@ export interface ProjectFingerprint {
    *
    * A config is a module, so its value is a function of its whole dependency
    * closure. Hashing the config file by itself reports an edit to a helper it
-   * imports as "nothing changed", which is the one direction §6.2 forbids this
-   * fingerprint from being wrong in. Only relative specifiers are followed: a
+   * imports as "nothing changed", which is the one direction this fingerprint
+   * must never be wrong in. Only relative specifiers are followed: a
    * bare one names a package, and a change there is a resolution change, which
-   * {@link resolutionHash} and §6.2's own table already answer with a whole
-   * rebuild.
+   * {@link resolutionHash} already answers with a whole rebuild.
    */
   readonly configHash: string;
   /** `package.json` and the lockfile beside it — the resolution inputs readable as text. */
@@ -151,8 +152,8 @@ export interface ProjectFingerprint {
    * dependency closure.
    *
    * Separate because a config cannot change how a call resolves — no contract
-   * reaches `extractProject`, which is why §6.2's table answers a config change
-   * with "re-summarize every file; extraction untouched". A closure this layer
+   * reaches `extractProject`, which is why a config change re-derives every
+   * contract from the extraction already held. A closure this layer
    * could not walk therefore says nothing about extraction, and folding it into
    * one flat verdict would turn a dynamic `import()` in a config into a whole
    * program rebuild on every keystroke.
@@ -168,7 +169,7 @@ export interface ProjectFingerprint {
  * Whether two fingerprints permit reuse.
  *
  * Undecidable on *either* side is false. An unknown is never turned into a
- * "nothing changed" (§3.4): the direction this function is allowed to be wrong
+ * "nothing changed": the direction this function is allowed to be wrong
  * in is "rebuilt something it need not have".
  *
  * This is the whole-fingerprint verdict, config included. What gates extraction
@@ -195,8 +196,8 @@ export function fingerprintPermitsReuse(a: ProjectFingerprint, b: ProjectFingerp
  * correction 5).
  *
  * `configHash` is deliberately not compared: no contract in `ambit.config.ts`
- * reaches `extractProject`, and §6.2's table says so — "re-summarize every
- * file; extraction untouched".
+ * reaches `extractProject`, so a config change re-summarizes every file and
+ * leaves extraction untouched.
  */
 export function fingerprintPermitsExtractionReuse(
   a: ProjectFingerprint,
@@ -354,7 +355,7 @@ function readOrUndefined(file: string): string | undefined {
 /**
  * Walk up from `startDir` applying `pick`, returning the first hit.
  *
- * `stopAtProjectBoundary` mirrors §4.1 (c)'s rule for `ambit.config.ts` — stop
+ * `stopAtProjectBoundary` mirrors the search rule for `ambit.config.ts` — stop
  * after the first directory holding a `package.json` or `.git`, so a config
  * outside the project is never picked up. A tsconfig has no such rule, because
  * `ts.findConfigFile` has none either, and the fingerprint has to look where
@@ -515,8 +516,7 @@ export interface TsProjectSession {
    * backend owns *whether* its own state permits one (a compiler option, an
    * installed dependency, a `.d.ts` rewritten in place). A backend that
    * answers `full: false` must have extracted exactly `reextract` — the caller
-   * checks, because a backend quietly extracting fewer files is a silent drop
-   * (§3.4).
+   * checks, because a backend quietly extracting fewer files is a silent drop.
    *
    * `narrowTo` is a second, smaller set the resident layer offers alongside
    * `reextract`: the reported edits alone, without their importers. A backend
@@ -539,9 +539,9 @@ export interface TsProjectSession {
  *
  * It re-extracts the whole project on every update — ADR-0014's architecture
  * A — and shares no code with the partial path, so a bug in one cannot hide in
- * the other. A backend that does implement `openProject` answers §6.2's
- * whole-rebuild rows (a tsconfig change, an added file, a `.d.ts`, an installed
- * dependency) with `full: true` itself, not through this adapter.
+ * the other. A backend that does implement `openProject` answers the changes
+ * that require a whole rebuild (a tsconfig change, an added file, a `.d.ts`,
+ * an installed dependency) with `full: true` itself, not through this adapter.
  */
 export function fullRebuildSession(backend: TsBackend, rootDir: string): TsProjectSession {
   return {
@@ -566,11 +566,11 @@ export function fullRebuildSession(backend: TsBackend, rootDir: string): TsProje
 // ---- the session -----------------------------------------------------------
 
 export interface ResidentSessionOptions {
-  /** `--strict`: promote the `unknown` warnings to errors (DESIGN.md §4.2 rule 3). */
+  /** `--strict`: promote the `unknown` warnings to errors. */
   readonly strict?: boolean;
   /**
    * The connection layer to extract with. Defaults to `legacyTsBackend`, the
-   * backend §3.5 adopted. Present for the same measurement reason
+   * adopted default backend (ADR-0001). Present for the same measurement reason
    * `AnalyzeOptions.backend` is, and with the same rule: passing one does not
    * make it authoritative.
    */
@@ -684,7 +684,7 @@ export class ResidentSession {
    *
    * Throws exactly where a cold `analyze()` would, and for the same reason: a
    * session that could not analyze the tree must not exist reporting no
-   * violations (§3.4).
+   * violations.
    *
    * @effects fs_read, process
    */
@@ -726,12 +726,12 @@ export class ResidentSession {
    * saying "nothing under the root moved", which is a claim a partial update
    * can be built on; omitting the argument is a caller that does not track
    * changes at all, and the only safe answer to that is to re-extract
-   * everything. The distinction is the one honest gap §6.2 leaves open — a
-   * change under the root that the caller never reports — made explicit at the
-   * one place a caller can see it.
+   * everything. The distinction is the one honest gap the resident path leaves
+   * open — a change under the root that the caller never reports — made
+   * explicit at the one place a caller can see it.
    *
-   * The fingerprint is recomputed from disk regardless, because §6.2 makes the
-   * session, not its caller, responsible for noticing a tsconfig, an
+   * The fingerprint is recomputed from disk regardless, because the session,
+   * not its caller, is responsible for noticing a tsconfig, an
    * `ambit.config.ts` or an installed dependency that changed.
    *
    * All-or-nothing: the new generation is built entirely in locals and assigned
@@ -805,9 +805,8 @@ export class ResidentSession {
    *
    * **Throws after a failed update.** The previous generation is still
    * committed — {@link ResidentSession.committed} is how a caller reaches it —
-   * but it describes an earlier tree, and §6.2 forbids re-serving it as though
-   * it described this one: "The previous generation's diagnostics are never
-   * re-served as though they described the current tree."
+   * but it describes an earlier tree, and a previous generation's diagnostics
+   * are never re-served as though they described the current one.
    */
   current(): AnalysisResult {
     if (this.#failure) {
@@ -881,7 +880,7 @@ interface GenerationInput {
 }
 
 /**
- * §6.2's lifecycle for one generation, in its phase order. Every value it
+ * The lifecycle of one generation, in its phase order. Every value it
  * produces is a local; the caller is what commits.
  *
  * `process` is `loadConfig`'s — see `analyze`'s contract for why a config that
@@ -893,7 +892,7 @@ async function runGeneration(input: GenerationInput): Promise<Generation> {
   const { rootDir, backend, strict, projectSession } = input;
 
   // 1. Fingerprint. Recomputed from disk every generation, whatever the caller
-  //    reported — §6.2 makes the session, not its caller, responsible for
+  //    reported — the session, not its caller, is responsible for
   //    noticing a tsconfig, a config file or an installed dependency that
   //    changed.
   const fingerprint = computeFingerprint(rootDir, backend);
@@ -905,9 +904,9 @@ async function runGeneration(input: GenerationInput): Promise<Generation> {
   //   lookup, so a carried one would report keys as unmatched that an earlier
   //   generation matched.
   // - The cold path loads it here too, so a broken config stops the run before
-  //   any work is reported (§3.4). A tree whose tsconfig *and* config are both
-  //   broken has to fail the same way on both paths, or §6.2's "the same
-  //   distinction a one-shot run would give it" is not met.
+  //   any work is reported. A tree whose tsconfig *and* config are both
+  //   broken has to fail the same way on both paths: a failed update gets the
+  //   same exit code and the same distinction a one-shot run would give it.
   const loaded = await loadConfig(rootDir);
   const config: ResolvedConfig | undefined = loaded ? resolveConfig(loaded, rootDir) : undefined;
   const configValueHash = hashConfigValue(loaded);
@@ -944,15 +943,15 @@ async function runGeneration(input: GenerationInput): Promise<Generation> {
   //    two paths cannot drift apart in what they report, only in what they
   //    recomputed.
   //
-  //    Timed under `summarize` rather than under a phase of its own: §6.2 names
-  //    the phases and this is not one of them, so it is folded into the phase
-  //    it precedes rather than reported as a phase §6.2 does not have.
+  //    Timed under `summarize` rather than under a phase of its own: the phases
+  //    are a fixed list and this is not one of them, so it is folded into the
+  //    phase it precedes rather than reported as a phase the list does not have.
   const summarizeStarted = now();
   const patched = update.full ? replaceStore(update) : patchStore(previous, plan, update);
 
   // The same refusal the cold path makes, in the same place and for the same
   // reason: "nothing analyzable was found" must not read as "checked, no
-  // violations" (§3.4). Counted over the whole store, not over what this
+  // violations". Counted over the whole store, not over what this
   // generation re-extracted: a closure with no function in it is ordinary.
   let functionsFound = 0;
   for (const file of patched.extracted) functionsFound += file.functions.length;
@@ -962,9 +961,10 @@ async function runGeneration(input: GenerationInput): Promise<Generation> {
 
   // 5. summarize. Every file when the config's value moved — a contract in it
   //    can change any summary and cannot change any resolution, which is
-  //    §6.2's "re-summarize every file; extraction untouched". Otherwise only
-  //    the files this generation re-extracted, with `matchedConfigKeys` per
-  //    file standing in for `ResolvedConfig`'s accumulated state.
+  //    why it re-summarizes every file and leaves extraction untouched.
+  //    Otherwise only the files this generation re-extracted, with
+  //    `matchedConfigKeys` per file standing in for `ResolvedConfig`'s
+  //    accumulated state.
   const resummarizeAll = update.full || plan.kind === "full" || plan.resummarizeAll;
   const files = summarizeInto(patched.entries, patched.extracted, resummarizeAll, config);
   const summaries = [...files.values()].flatMap((entry) => entry.summaries);
@@ -1054,7 +1054,7 @@ async function runGeneration(input: GenerationInput): Promise<Generation> {
       propagate: propagateMs,
       report: reportMs,
       // In-process. Zero, and reported as zero, so a process-separated backend
-      // fills the same field with a real number (§6.2).
+      // fills the same field with a real number.
       transfer: 0,
     },
     impact: {
@@ -1105,10 +1105,10 @@ type UpdatePlan =
  * The disk-side half of the reuse gate, and the closure a partial update would
  * cover. The backend decides the rest — see {@link TsProjectSession.update}.
  *
- * Every `full` below is a §6.2 invalidation-table row. None of them is an
+ * Every `full` below is a change that invalidates everything. None of them is an
  * optimization left undone: each is a case where no closure over the edges the
  * store holds can reach the files a change affects, and returning `partial`
- * anyway would leave a stale answer committed (§3.4).
+ * anyway would leave a stale answer committed.
  */
 function planUpdate(input: {
   readonly previous: ResidentStore | undefined;
@@ -1135,11 +1135,11 @@ function planUpdate(input: {
   const removed: string[] = [];
   for (const change of changes) {
     // A file *addition* — and a rename, which is a delete and an add — is the
-    // one row §6.2 forces rather than merely prefers. The edges the store holds
-    // are resolved import targets, so a specifier that resolved to nothing held
-    // no edge at all, and a new file can take a specifier away from an existing
-    // candidate that *is* still resolving. Neither importer is reachable from
-    // the old graph.
+    // one whole rebuild that is forced rather than merely preferred. The edges
+    // the store holds are resolved import targets, so a specifier that resolved
+    // to nothing held no edge at all, and a new file can take a specifier away
+    // from an existing candidate that *is* still resolving. Neither importer is
+    // reachable from the old graph.
     if (change.kind === "added") {
       return { kind: "full", reason: `${change.path} was added` };
     }
@@ -1232,7 +1232,7 @@ function importerClosure(
  *
  * `entries` is in the backend's file order and `extracted` is the same order
  * restricted to the files that contributed something — the two orders a cold
- * run produces, which is what §6.2's byte equivalence is over.
+ * run produces, which a resident result has to reproduce byte for byte.
  */
 interface PatchedFiles {
   readonly entries: ReadonlyMap<string, PatchedEntry>;
@@ -1274,7 +1274,7 @@ function replaceStore(update: ExtractedUpdate): PatchedFiles {
  * - **The backend's answer is cross-checked against what was asked.** A backend
  *   that re-extracted fewer files than the closure named would leave entries
  *   the caller believed were refreshed, and every one of them would be a stale
- *   answer served as a fresh one (§3.4). A mismatch throws, and a throw commits
+ *   answer served as a fresh one. A mismatch throws, and a throw commits
  *   nothing.
  * - **Entries are replaced in place, never removed and re-added.** `Map.set` on
  *   an existing key keeps its position, so the file order a partial update
@@ -1342,7 +1342,7 @@ function patchStore(
  * Attach each file's summaries and matched config keys.
  *
  * `all` re-summarizes every file in the store from the extraction it already
- * holds — §6.2's config row, where extraction is untouched and every contract
+ * holds — a config change, where extraction is untouched and every contract
  * is re-derived. Otherwise only the files this generation re-extracted move,
  * and the rest keep the summaries they committed.
  *
@@ -1411,7 +1411,8 @@ function scopeOf(
 
 /**
  * The config's exact keys that nothing matched, in the order the config
- * declares them — `AMB-W006` is emitted per key and §6.2 compares the order.
+ * declares them — `AMB-W006` is emitted per key, so the order is part of the
+ * bytes a cold run must match.
  */
 function unmatchedFrom(
   config: ResolvedConfig,
@@ -1469,8 +1470,8 @@ function buildReverseImports(
  * callee → the functions calling it.
  *
  * Decides which functions are **re-propagated**: effects and capabilities flow
- * backwards along calls, which is what §6.2's "walk the contract dependencies
- * backwards" names.
+ * backwards along calls, so the affected callers are found by walking the
+ * contract dependencies backwards.
  */
 function buildReverseCalls(
   summaries: readonly FunctionSummary[],

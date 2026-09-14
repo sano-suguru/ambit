@@ -30,7 +30,7 @@ function byFunction(diagnostics: readonly Diagnostic[], fnName: string): Diagnos
 }
 
 describe("diagnose (end-to-end: backend -> summarize -> propagate -> diagnose)", () => {
-  it("rule 2: flags a pure function that calls fetch directly (§5.1 shape)", async () => {
+  it("rule 2: flags a pure function that calls fetch directly (NDJSON shape)", async () => {
     const diagnostics = await diagnoseFixtures();
     const diag = byFunction(diagnostics, "pureCallsFetchDirectly");
     expect(diag).toBeDefined();
@@ -130,7 +130,7 @@ describe("diagnose (end-to-end: backend -> summarize -> propagate -> diagnose)",
     }
   });
 
-  it("every diagnostic carries the backend's engine identity (§3.4)", async () => {
+  it("every diagnostic carries the backend's engine identity", async () => {
     const diagnostics = await diagnoseFixtures();
     expect(diagnostics.length).toBeGreaterThan(0);
     for (const diag of diagnostics) {

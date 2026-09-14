@@ -53,7 +53,7 @@ describe("runtime enforcement against a real server, through the installed packa
       `${JSON.stringify({ name: "ambit-rt-consumer", version: "1.0.0", private: true, type: "module" }, null, 2)}\n`,
     );
 
-    // `pg` is installed for real: DESIGN.md §4.4 (c) chose it because
+    // `pg` is installed for real: ADR-0006 (c) chose it because
     // `Pool.prototype.query` is a stable patch point, and a hand-written
     // double would not prove that the real package still has that shape.
     // `hono` and `@hono/node-server` for the same reason as `pg`: the adapter
@@ -129,7 +129,7 @@ try {
 
   it("blocks an ungranted read of a real file, and leaves the file unread", async () => {
     // The inverse of what this file asserted before `installFsHook` existed:
-    // `node:fs` was on §4.4's plan and unhooked, so the honest test was that
+    // `node:fs` was planned but unhooked, so the honest test was that
     // it went through. It is hooked now, so the honest test is that it does
     // not.
     const secret = path.join(consumer, "secret.txt");
@@ -171,8 +171,8 @@ console.log("RESULT:" + (await handler()));
     await expect(fs.stat(target)).rejects.toThrow();
   }, 60_000);
 
-  it("covers named ESM imports when installed from a preload (§4.4 (a))", async () => {
-    // §4.4 (a) claims the covered set depends on install order, not on the
+  it("covers named ESM imports when installed from a preload", async () => {
+    // ADR-0006 (a) claims the covered set depends on install order, not on the
     // mechanism. This is the preload row: `import { readFileSync }` — a
     // binding a graph-internal install cannot reach — is checked here.
     const secret = path.join(consumer, "preload-secret.txt");
@@ -260,7 +260,7 @@ process.exit(0);
     }
   }, 60_000);
 
-  it("denies outside every entrypoint context when the policy is deny (§4.4)", async () => {
+  it("denies outside every entrypoint context when the policy is deny", async () => {
     // All imports happen first: with the fs hook installed, Node's own module
     // loader reads through `fs.readFileSync`, so a lazy `import()` under
     // `deny` would be denied too — which is the documented behaviour, not a
@@ -320,12 +320,12 @@ try {
   }, 60_000);
 
   /**
-   * The Hono adapter (DESIGN.md §4.4, "Mapping contracts to handlers"),
+   * The Hono adapter, which carries each route's contract as a `spec` value,
    * driven by real HTTP requests to a real server. `ambitHandler` registers
    * the route, so the context comes from the registration and not from a
    * hand-written `withAmbit` — which is the whole claim being tested.
    *
-   * The app installs `app.onError` and reports `error.name`: §4.4 decided the
+   * The app installs `app.onError` and reports `error.name`: by design the
    * adapter does not translate a denial into 403/504, so what a route returns
    * on denial is whatever the framework's error handler makes of the throw.
    */

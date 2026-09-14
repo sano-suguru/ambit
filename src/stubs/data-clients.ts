@@ -3,9 +3,9 @@ import { sqlStatementDirection } from "../core/index.ts";
 
 /**
  * Effect table for database and LLM client methods — the `db_read`,
- * `db_write`, and `llm` half of DESIGN.md §4.2's effect list, which nothing
+ * `db_write`, and `llm` half of the standard effect list, which nothing
  * bundled produced before this file existed. Same trust level as the other
- * bundled tables: bundled with Ambit, the highest in §8.
+ * bundled tables: bundled with Ambit, the highest stub trust level.
  *
  * Keyed on the `calleeQualifiedName` the connector layer builds for a method
  * reached through a client value: the module specifier the client's class was
@@ -19,9 +19,8 @@ import { sqlStatementDirection } from "../core/index.ts";
  * from the user's schema and cannot be enumerated here).
  *
  * What this table does **not** claim: that the target of the operation is
- * known. §4.4 is explicit — "the mere existence of a hook into a DB client is
- * not taken to mean that table-level permissions can be decided for arbitrary
- * SQL" — so no row here derives a
+ * known. Ambit does not assume that table-level permissions can be decided
+ * for arbitrary SQL, so no row here derives a
  * `db:read:<table>` capability. Effects only.
  */
 interface ClientMethodRule {
@@ -37,7 +36,7 @@ interface ClientMethodRule {
  * that only ever reads, but builds its statement dynamically, has to declare
  * `db_write` too. The alternative — picking `db_read` — would let a generated
  * `UPDATE` pass a `@effects db_read` contract, which is the failure this whole
- * layer exists to prevent (DESIGN.md §3.4).
+ * layer exists to prevent.
  */
 const READ_AND_WRITE: readonly KnownEffect[] = ["db_read", "db_write"];
 
@@ -167,7 +166,7 @@ export function lookupClientEffects(
 /**
  * The direction of one SQL statement, as effects. The keyword rule itself is
  * `src/core/sql.ts`, shared with the runtime `pg` hook so the checker and the
- * running process cannot disagree about the same statement (DESIGN.md §4.4).
+ * running process cannot disagree about the same statement.
  */
 function sqlStatementEffects(argument: LiteralArgument | undefined): readonly KnownEffect[] {
   switch (sqlStatementDirection(argument?.text)) {

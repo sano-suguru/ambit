@@ -24,7 +24,7 @@ import {
 
 /**
  * Every analyzed function's authority, in the order `ambit check --format
- * json` emits it and `ambit diff` compares it (DESIGN.md §5.1).
+ * json` emits it and `ambit diff` compares it.
  *
  * Built from the propagated state alone, so it says the same thing the
  * diagnostics say — a function's record and the diagnostic about it can never
@@ -97,7 +97,8 @@ function buildRecord(
 
 /**
  * The operations in this function's own body the analysis could not resolve,
- * as a multiset keyed by `(reason, qualified name)` (DESIGN.md §5.1, §6.4).
+ * as a multiset keyed by `(reason, qualified name)` — what lets `ambit diff`
+ * see an unresolved extent widen inside a symbol that was already `unknown`.
  *
  * The set of calls counted is `isBlockingCall`'s — exactly the set
  * `propagate` derives `unknown` from — so the field can never name a call that
@@ -105,7 +106,7 @@ function buildRecord(
  * here would read part of an unresolved surface as safe.
  *
  * A `@boundary` function contributes nothing. Its body is not analyzed by
- * declaration (§4.6), so what it calls is isolated, not unresolved; `propagate`
+ * declaration, so what it calls is isolated, not unresolved; `propagate`
  * takes the same exit at `boundaryState`, and reporting here what propagation
  * never looked at would make an explicit decision read as an analysis failure.
  */
@@ -159,7 +160,7 @@ function effectPaths(
  * The call path for each capability the function requires. No operation site:
  * a capability requirement is established by a declaration or by an
  * operation's target, and the latter is already the effect's operation — a
- * second, differently-derived site would be a guess (DESIGN.md §5.3).
+ * second, differently-derived site would be a guess.
  */
 function capabilityPaths(
   owner: SymbolId,

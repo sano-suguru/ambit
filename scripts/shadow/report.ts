@@ -7,8 +7,8 @@
  * needs looking at.
  *
  * Two things it must never do. It must not print a parity rate without the
- * counts behind it — a rate of 1.00 over nothing compared is the §3.4 failure
- * mode in a percentage. And it must not omit the high-risk count when it is
+ * counts behind it — a rate of 1.00 over nothing compared is "never ran" read
+ * as "clean", in a percentage. And it must not omit the high-risk count when it is
  * zero: an absent line reads as "not measured", and the whole point of
  * measuring the direction is to be able to say the dangerous one did not
  * happen.

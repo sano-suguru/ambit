@@ -4,7 +4,7 @@ import type { AuditEntry, UnscopedPolicy } from "./context.ts";
 import { currentContext } from "./context.ts";
 
 /**
- * The capability decision every hook shares (DESIGN.md §4.4).
+ * The capability decision every hook shares.
  *
  * Separate from `index.ts` so that `fs.ts`, `child-process.ts` and `pg.ts` can
  * import the decision without importing the module that installs them, and so
@@ -26,7 +26,7 @@ export class AmbitCapabilityError extends Error {
 let unscopedPolicy: UnscopedPolicy = "allow";
 
 /**
- * Set the process-wide `runtime.unscoped` policy (DESIGN.md §4.4).
+ * Set the process-wide `runtime.unscoped` policy.
  *
  * Process-wide and not per-entrypoint on purpose. The policy only applies
  * where there is *no* context, so a per-entrypoint override would be read
@@ -40,9 +40,9 @@ export function setUnscopedPolicy(policy: UnscopedPolicy): void {
 
 /**
  * Decide one capability without throwing, so a callback-style API can deliver
- * the denial the way its caller expects (DESIGN.md §4.4: "synchronous APIs
+ * the denial the way its caller expects: synchronous APIs
  * `throw`, callback APIs use `process.nextTick(callback, error)`, and Promise
- * APIs reject").
+ * APIs reject.
  *
  * Returns the error to deliver, or `undefined` when the operation is allowed.
  * Every decision inside a context — allowed or denied — is appended to the
@@ -83,7 +83,7 @@ export function checkCapability(
  * Decide several capabilities at once, all of which are required. Used where
  * one operation touches two resources (`fs.rename`) or where the source does
  * not fix the direction, so both directions are required (an opaque SQL
- * statement — DESIGN.md §4.4 (c)).
+ * statement).
  *
  * Every capability is checked, so the audit records all of them, and the
  * first denial is the one reported.
@@ -105,7 +105,7 @@ export function checkCapabilities(
  * {@link AmbitCapabilityError} when it is not granted. Exported so an adapter
  * for an unhooked client can perform the same check.
  *
- * With no active context the `runtime.unscoped` policy decides (§4.4).
+ * With no active context the `runtime.unscoped` policy decides.
  */
 export function requireCapability(required: string, detail?: string): void {
   const error = checkCapability(required, detail);

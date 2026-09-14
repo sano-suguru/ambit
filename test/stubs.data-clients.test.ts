@@ -3,7 +3,7 @@ import type { LiteralArgument } from "../src/core/index.ts";
 import { lookupClientEffects } from "../src/stubs/data-clients.ts";
 
 /**
- * The database/LLM effect table (DESIGN.md §4.2, `src/stubs/data-clients.ts`).
+ * The database/LLM effect table (`src/stubs/data-clients.ts`).
  *
  * Every row family in that table is exercised here rather than only the ones
  * `test/fixtures/realistic-api` happens to call: a row nothing checks is an
@@ -22,7 +22,7 @@ function templatePrefix(text: string): readonly (LiteralArgument | undefined)[] 
 describe("lookupClientEffects", () => {
   it("says nothing about a name it does not know", () => {
     // The whole safety property: a miss leaves the call `unknown`, never "no
-    // effect" (DESIGN.md §3.4).
+    // effect".
     expect(lookupClientEffects("pg.Pool.end", undefined)).toBeUndefined();
     expect(lookupClientEffects("mysql2.Pool.release", undefined)).toBeUndefined();
     expect(
@@ -112,7 +112,7 @@ describe("lookupClientEffects", () => {
     });
 
     it("returns both directions when the statement is not statically readable", () => {
-      // The recorded design decision (DESIGN.md §4.2): an operation whose
+      // The recorded design decision: an operation whose
       // direction the source does not fix contributes both, not the safer-
       // sounding read.
       expect(lookupClientEffects("pg.Pool.query", undefined)).toEqual(["db_read", "db_write"]);

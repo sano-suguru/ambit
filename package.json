@@ -1,7 +1,7 @@
 {
   "name": "ambit-ts",
   "version": "0.2.0",
-  "description": "Review changes in what AI-written TypeScript is allowed to do",
+  "description": "Authority-aware review for TypeScript: see what a change lets the code do",
   "keywords": [
     "typescript",
     "jsdoc",

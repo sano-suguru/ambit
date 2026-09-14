@@ -1,11 +1,11 @@
 /**
- * Generates the scale corpus for DESIGN.md §3.5 gate 4.
+ * Generates the scale corpus for M0.5 gate 4 (performance, ADR-0001).
  *
  *     node scripts/m05-corpus.ts <outDir> [fileCount]
  *
  * `src/` (35 files) and `test/fixtures/realistic-api` (16) are the corpora made
  * of code someone wrote, and they are the ones worth trusting about *shape*.
- * Neither reaches the 300-file size §3.5's allowance table sets a number for,
+ * Neither reaches the 300-file size ADR-0001's allowance table sets a number for,
  * so this generates a corpus that does — deterministically, so the measurement
  * can be repeated rather than described.
  *
@@ -14,7 +14,7 @@
  * `node:` builtin call, a default-lib method, a contract comment, and a call
  * into the previous module — because a corpus of isolated pure functions would
  * measure parsing and almost no type resolution, which is exactly the
- * comparison §3.5 forbids ("Do not compare parse-only speed against a check
+ * comparison gate 4 forbids ("Do not compare parse-only speed against a check
  * that includes type analysis").
  *
  * The tsconfig it writes names `"types": ["node"]` explicitly. That is not a

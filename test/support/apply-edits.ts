@@ -2,11 +2,11 @@ import type { FixEdit } from "../../src/core/index.ts";
 
 /**
  * Apply a diagnostic's `fixes[].edits` to a file's text, exactly as an agent
- * would. Ranges are 0-based, end-exclusive, in UTF-16 units (DESIGN.md §5.3);
+ * would. Ranges are 0-based, end-exclusive, in UTF-16 units;
  * applying them in reverse document order keeps earlier offsets valid.
  *
  * Deliberately dumb: if `fixes[].edits` needed anything cleverer than this to
- * apply, they would not be the "applicable, concrete patches" §5.3 requires.
+ * apply, they would not be the "applicable, concrete patches" Ambit promises.
  */
 export function applyEdits(source: string, edits: readonly FixEdit[]): string {
   const lines = source.split("\n");

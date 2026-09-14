@@ -80,7 +80,7 @@ export async function run(label: string, backend: TsBackend, dir: string): Promi
  * compiler, and it is the cheapest way to find one.
  *
  * Returns the errors rather than throwing on them: a side that did not run is
- * not a parity of zero divergences (DESIGN.md §3.4), and the caller decides
+ * not a parity of zero divergences, and the caller decides
  * how loudly to say so.
  */
 export async function compareRoot(

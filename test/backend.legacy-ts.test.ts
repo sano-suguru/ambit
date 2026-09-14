@@ -112,14 +112,14 @@ describe("legacyTsBackend.extractProject", () => {
     expect(skippedFunctions.get("object-literal-method")).toBeGreaterThanOrEqual(1);
     expect(skippedFunctions.get("callback-argument")).toBeGreaterThanOrEqual(1);
     expect(skippedFunctions.get("nested-function")).toBeGreaterThanOrEqual(1);
-    // Accessors and anonymous default exports are extracted now (DESIGN.md
-    // §4.1 (a)), so they are no longer skipped — they have declaration paths
+    // Accessors and anonymous default exports are extracted now, so they are
+    // no longer skipped — they have declaration paths
     // `ambit.config.ts` can name.
     expect(skippedFunctions.get("getter-setter")).toBeUndefined();
     expect(skippedFunctions.get("anonymous-default-export")).toBeUndefined();
   });
 
-  it("indexes accessors and an anonymous default export under §4.1 (a)'s paths", async () => {
+  it("indexes accessors and an anonymous default export under config-nameable paths", async () => {
     const { files } = await extractFixture(FIXTURE_ROOT);
     // `get value` / `set value` share a name, so the accessor's kind is part
     // of the segment; the default export has no name at all and exactly one
@@ -130,7 +130,7 @@ describe("legacyTsBackend.extractProject", () => {
   });
 
   it("still refuses a JSDoc contract on an accessor, naming the config key instead", async () => {
-    // §4.1 (a) keeps the config namespace a superset of the JSDoc one: the
+    // The config namespace is a superset of the JSDoc one: the
     // accessor propagates, but the comment on it is inert and must not be
     // adopted silently.
     const { files, uncarriedContracts } = await extractFixture(FIXTURE_ROOT);
@@ -161,7 +161,7 @@ describe("legacyTsBackend.extractProject", () => {
     expect(call?.callbackByReference).toBeUndefined();
   });
 
-  it("follows a by-reference callback that names a function in the same tree (DESIGN.md §4.2 rule 4)", async () => {
+  it("follows a by-reference callback that names a function in the same tree", async () => {
     const { files } = await extractFixture(FIXTURE_ROOT);
     const fn = findFn(files, "sample.ts#callsPureBuiltinByReference");
     const call = fn?.calls.find((c) => c.pureBuiltinName === "Array.map");
@@ -229,7 +229,7 @@ describe("legacyTsBackend.extractProject", () => {
     );
   });
 
-  it("resolves a class instance through its value, annotation or not (DESIGN.md §4.2 rule 7)", async () => {
+  it("resolves a class instance through its value, annotation or not", async () => {
     const { files } = await extractFixture(FIXTURE_ROOT);
     // `typedEngine: Runner` makes the checker resolve `.run` to Runner's
     // member signature, which no declaration path names. Following the value
@@ -337,8 +337,8 @@ describe("legacyTsBackend.extractProject (self-hosting)", () => {
 
   it("classifies Ambit's own `calls.push(...)` as a local, non-escaping mutation", async () => {
     // `collectCalls` builds `const calls: CallSite[] = []` and pushes into it
-    // from a nested `visit` closure — the exact shape DESIGN.md §4.2's
-    // locality rule is meant to accept, and one no fixture produced: the push
+    // from a nested `visit` closure — the exact shape `pure`'s local-mutation
+    // rule is meant to accept, and one no fixture produced: the push
     // is lexically inside a function nested in the summarized one. Before this
     // rule it was `Array.push`, the single most frequent unresolved name in
     // `check src --coverage`.
@@ -361,7 +361,7 @@ describe("legacyTsBackend.extractProject (self-hosting)", () => {
     // declaration inside a nested arrow, on a `ReadonlyArray` receiver: the
     // shape `test/fixtures/builtins` cannot produce, because there the
     // referenced function is not also the one doing the referencing. Before
-    // DESIGN.md §4.2 rule 4 was applied to the actual argument, this call was
+    // callback effects were inferred from the actual argument, this call was
     // the most frequent `ReadonlyArray.map` entry in `check src --coverage`.
     const { files } = await extractFixture(SRC_ROOT);
     const summarize = files
@@ -415,7 +415,7 @@ describe("legacyTsBackend.extractProject (self-hosting)", () => {
   it("owns Ambit's own top-level `.then(...)` / `.catch(...)` callbacks", async () => {
     // `cli/main.ts` ends with `main(...).then(cb).catch(cb)` at module scope —
     // two function expressions in argument position with no extracted
-    // ancestor, which is the shape DESIGN.md §4.1 (a)'s owner exists for.
+    // ancestor, which is the shape the `<inline callbacks>` owner exists for.
     // Real code rather than a fixture, so the rule is asserted where it
     // actually has to hold.
     const { files } = await extractFixture(SRC_ROOT);
@@ -769,7 +769,7 @@ describe("legacyTsBackend.extractProject (receivers a package type names)", () =
 
   it("names nothing for a receiver the project's own source declares", async () => {
     // A project-local interface has no package to key on, and its
-    // implementations are bodies DESIGN.md §4.2 rule 7 decides through the
+    // implementations are bodies property-call resolution decides through the
     // receiver's value instead.
     const { files } = await extractFixture(HELD_ROOT);
     expect(callsOf(files, "project-interface.ts#readsThroughProjectInterface")).toHaveLength(1);

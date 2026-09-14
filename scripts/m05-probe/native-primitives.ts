@@ -1,5 +1,5 @@
 /**
- * DESIGN.md §3.5 gate 1, native side — does the distributed TypeScript 7 API
+ * M0.5 gate 1 (ADR-0001), native side — does the distributed TypeScript 7 API
  * supply the primitives `src/checker/backend/legacy-ts.ts` is built from?
  *
  *     node scripts/m05-probe/native-primitives.ts test/fixtures/backend-smoke
@@ -12,7 +12,7 @@
  *
  * It answers questions, not benchmarks — gate 4 is `m05-backend-compare.ts`.
  * The questions are the ones whose answers would decide the gate: whether a
- * JSDoc tag can be located (§5.3 needs the tag's own range for `fixes[].edits`),
+ * JSDoc tag can be located (`fixes[].edits` needs the tag's own range),
  * whether positions are UTF-16 code units (`SourceLocation`'s promise), whether
  * an overload set looks the same from this side, and what stands in for
  * `getFullyQualifiedName`, which this API does not have.
@@ -66,7 +66,7 @@ say(
     : "method on Node only (legacy uses the module export)",
 );
 
-// --- JSDoc tag locations (§5.3) -------------------------------------------
+// --- JSDoc tag locations --------------------------------------------------
 for (const [file, fnName] of [
   ["sample.ts", "fetchRateDeclared"],
   ["recursion.ts", "leafReadsFile"],

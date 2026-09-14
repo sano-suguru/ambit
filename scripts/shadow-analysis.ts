@@ -13,9 +13,9 @@
  * compiler, and it is the cheapest way to find one.
  *
  * This is a measurement procedure (AGENTS.md, "scripts/"). It changes no
- * diagnostic, no exit code and no review outcome: DESIGN.md §3.5 and ADR-0001
+ * diagnostic, no exit code and no review outcome: ADR-0001
  * adopted `typescript-legacy`, the shadow side is never authoritative, and the
- * default backend changes by an RFC (§9), not by this script printing a good
+ * default backend changes by an RFC, not by this script printing a good
  * number.
  *
  * Exit codes are about the *run*, not about the parity: 0 when the comparison
@@ -29,8 +29,8 @@
  *
  * If it is missing the run stops. It does not fall back to comparing the
  * adopted backend against itself and reporting perfect parity — a report whose
- * zero divergences mean "the shadow backend never ran" is exactly the failure
- * DESIGN.md §3.4 forbids.
+ * zero divergences mean "the shadow backend never ran" would report a backend
+ * that did not run as a clean comparison.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";

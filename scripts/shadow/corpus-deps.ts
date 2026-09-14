@@ -102,7 +102,7 @@ export interface InstalledDeps {
  *
  * Throws rather than continuing on a failed install: a "with dependencies" run
  * whose dependencies are absent is a reading that means the opposite of what it
- * says, which is the failure DESIGN.md §3.4 names.
+ * says, which is a failure passed off as a result.
  */
 export function installCorpusDeps(target: CheckedOutTarget): InstalledDeps {
   const manifest = pinnedManifest(target);

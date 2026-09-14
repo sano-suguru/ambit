@@ -9,13 +9,12 @@ import type { AmbitSpec } from "./index.ts";
 import { withAmbit } from "./index.ts";
 
 /**
- * The Next.js App Router adapter (DESIGN.md §4.4, "Mapping contracts to
- * handlers").
+ * The Next.js App Router adapter.
  *
  * `next` is imported for **types only** and is a devDependency here, never a
  * dependency of the published package — the same treatment `hono` gets in
  * `./hono.ts`, and the same reason `installPgHook(pg)` takes the module from
- * the caller instead of importing `pg` (§4.4 (c)). Nothing in this file
+ * the caller instead of importing `pg`. Nothing in this file
  * imports `typescript` or anything under `src/checker/`.
  *
  * **What this adapter does not reach.** It covers one thing: a Route Handler
@@ -88,7 +87,7 @@ export type RouteHandler<
  * registered wrapper, so one extraction serves all of them. Changing the order
  * here would cost the check without saying so.
  *
- * Per §4.4, "Removing the double declaration", a literal `spec` beside a
+ * A literal `spec` beside a
  * handler declared in the same file *is* that handler's `@capabilities` and
  * `@budget`: the JSDoc tags need not repeat it. Writing both stays legal, and
  * a disagreement is still an error — the capability list against
@@ -105,7 +104,7 @@ export type RouteHandler<
  * HTTP statuses. A denied capability is this server's own code exceeding its
  * grant, which is not what 403 says, and the message names the granted set —
  * so it propagates out of the handler to Next.js's error handling, not to the
- * client (§4.4).
+ * client.
  *
  * The hooks this enforcement depends on are installed once per process, in
  * `instrumentation.ts`'s `register()` — see `docs/integrations/nextjs.md`.

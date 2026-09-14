@@ -3,7 +3,7 @@ import type { AnalysisResult } from "../../src/checker/index.ts";
 /**
  * The whole externally observable result of one analysis, as bytes.
  *
- * DESIGN.md §6.2's equivalence law is stated in bytes — "the same diagnostics,
+ * The resident path's equivalence law is in bytes — "the same diagnostics,
  * the same `kind: \"authority\"` records, the same coverage counts, in the same
  * order" — so the differential suite compares this string and never
  * `expect(a).toEqual(b)` on the objects. `toEqual` on a `Map` ignores insertion

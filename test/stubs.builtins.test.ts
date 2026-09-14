@@ -24,7 +24,7 @@ import { observedEffects } from "./support/summary.ts";
  * that must stay `unknown` or must carry an effect. The pairing is the
  * assertion. A table that grew until it answered both would have stopped
  * measuring what Ambit can see and started asserting that everything is fine
- * (DESIGN.md §3.4).
+ * — an unanalyzed call reported as clean.
  */
 
 const FIXTURE_ROOT = path.join(import.meta.dirname, "fixtures", "builtins");
@@ -116,7 +116,7 @@ describe("the bare-global table", () => {
   });
 
   it("refuses the ones that run code the analysis never sees", () => {
-    // `Function(source)` compiles a string — DESIGN.md §4.2 rule 6.
+    // `Function(source)` compiles a string, which is `unknown` by rule.
     expect(isKnownPureGlobalCall("Function")).toBe(false);
     expect(isKnownPureGlobalCall("eval")).toBe(false);
     expect(isKnownPureGlobalCall("setTimeout")).toBe(false);
@@ -172,7 +172,7 @@ describe("end to end on test/fixtures/builtins", () => {
     expect(await unknownOf("compilesAString")).toBe(true);
   });
 
-  it("infers a by-reference callback from the function it names (DESIGN.md §4.2 rule 4)", async () => {
+  it("infers a by-reference callback from the function it names", async () => {
     expect(isKnownPureBuiltin("ReadonlyArray.map")).toBe(true);
     expect(isHigherOrderBuiltin("ReadonlyArray.map")).toBe(true);
     // The referenced function is pure, so the whole call is.
@@ -201,8 +201,7 @@ describe("end to end on test/fixtures/builtins", () => {
   it("settles a destructive method's comparator by rule 4, not by the mutation verdict", async () => {
     // Regression: the mutation verdict covers the receiver only. A comparator
     // that names a function under analysis contributes that function's
-    // effects; an opaque one still leaves the call `unknown`
-    // (DESIGN.md §4.2, "Local mutation and `pure`").
+    // effects; an opaque one still leaves the call `unknown`.
     const { diagnostics } = await analyze();
     const referenced = diagnostics.find((d) =>
       d.message.startsWith("sortsItsOwnArrayWithAReferencedComparator "),
@@ -218,8 +217,8 @@ describe("end to end on test/fixtures/builtins", () => {
 
   it("reads a receiver-mutating WHATWG method through the locality rule", async () => {
     // The same call, twice: on an argument it is `state_write`, on a value the
-    // function allocated itself it carries nothing (DESIGN.md §4.2, "Local
-    // mutation and `pure`").
+    // function allocated itself it carries nothing, because `pure` permits
+    // mutating a value the function created.
     const escaping = (await callsOf("writesAnArgumentsHeaders")).filter(
       (call) => call.kind === "mutation",
     );

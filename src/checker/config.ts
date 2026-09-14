@@ -1,10 +1,10 @@
 /**
- * Finding, loading, validating and resolving `ambit.config.ts`
- * (DESIGN.md §4.1, "Out-of-code declarations").
+ * Finding, loading, validating and resolving `ambit.config.ts`, where contracts
+ * are declared for code that cannot be touched.
  *
  * Imports no compiler. A config file is plain data about symbols the backend
  * already produced ids for, so nothing here needs to know what a
- * `ts.Node` is (§3.4).
+ * `ts.Node` is.
  */
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -21,7 +21,7 @@ import type {
 import { isKnownEffect, isOnExceed, KNOWN_EFFECTS, parseCapability } from "../core/index.ts";
 
 /**
- * The file names looked for, in order. §4.1 (c): the first one found in a
+ * The file names looked for, in order. The first one found in a
  * directory is the one used — a second file in the same directory is never
  * read, so a stale `ambit.config.js` beside a `.ts` cannot silently win.
  */
@@ -32,7 +32,7 @@ const CONFIG_FILENAMES = [
   "ambit.config.mjs",
 ] as const;
 
-/** Thrown for every config problem. `main` turns it into exit 2 (§3.4). */
+/** Thrown for every config problem. `main` turns it into exit 2, never "no violations". */
 export class ConfigError extends Error {}
 
 export interface LoadedConfig {
@@ -45,7 +45,7 @@ export interface LoadedConfig {
 
 /**
  * Walk up from `startDir` looking for a config file, stopping after the first
- * directory that holds a `package.json` or `.git` (§4.1 (c)) — a config
+ * directory that holds a `package.json` or `.git` — a config
  * outside the project must never be picked up silently.
  */
 export function findConfigFile(startDir: string): string | undefined {
@@ -73,7 +73,7 @@ function isProjectBoundary(dir: string): boolean {
  * A config is a module, so its value is a function of its own text **and of
  * every module it imports**. Hashing the config file alone says an edit to a
  * helper it imports changed nothing, which is exactly the permissive direction
- * DESIGN.md §6.2's resident path must never fail in.
+ * the resident check path must never fail in.
  *
  * {@link files} is the config file followed by the transitive closure of its
  * *relative* imports that exist on disk, deduplicated and sorted — a stable
@@ -92,7 +92,7 @@ export interface ConfigDependencies {
    * Separate from `files.length > 1` because the two answer different
    * questions. {@link files} is what to *hash*, and a bare specifier is
    * deliberately not in it: it names a package, and a change there is a
-   * resolution change that DESIGN.md §6.2 already answers with a whole
+   * resolution change, which the resident path already answers with a whole
    * rebuild. This flag is what decides how to *load*, and there a bare
    * specifier matters exactly as much as a relative one — Node caches both by
    * URL, so a config that imports anything must be evaluated in a registry of
@@ -110,10 +110,10 @@ export interface ConfigDependencies {
  * Reading a config's imports without a parser.
  *
  * A text scan rather than a parse, because this runs on one small file and
- * §6.1 keeps this module compiler-free. A scan can be wrong in two directions
+ * this module stays compiler-free. A scan can be wrong in two directions
  * and only one of them is tolerable: seeing an import that is not there costs a
  * worker start, while missing one that is there means loading a config out of a
- * cached dependency and reporting the stale answer as current (§3.4). So the
+ * cached dependency and reporting the stale answer as current. So the
  * patterns below over-match by design, and {@link UNREAD_SPECIFIER_REASON}
  * covers what they still cannot read.
  */
@@ -144,9 +144,9 @@ const UNREAD_SPECIFIER_REASON = "has an import whose specifier could not be read
  *
  * Only *relative* specifiers are followed. A bare specifier names a package,
  * and a change to an installed package is a change to module resolution, which
- * §6.2's table already answers with a whole rebuild — following it here would
- * walk `node_modules` on every check to re-derive an answer the resolution
- * inputs already give.
+ * the resident path already answers with a whole rebuild — following it here
+ * would walk `node_modules` on every check to re-derive an answer the
+ * resolution inputs already give.
  *
  * @effects fs_read
  */
@@ -250,7 +250,7 @@ function resolveRelativeSpecifier(fromFile: string, specifier: string): string |
  * config always is, including when the CLI itself is running from `dist/`.
  * A file that throws on import (a syntax error, a bad import) becomes a
  * {@link ConfigError}: a config that could not be read must stop the run, not
- * be treated as "no config" (§3.4).
+ * be treated as "no config".
  *
  * **How it is imported depends on whether it imports anything itself**, and
  * that is the one subtle thing in this file — see the two branches below.
@@ -268,11 +268,10 @@ export async function loadConfig(startDir: string): Promise<LoadedConfig | undef
 
   // Node's ESM loader caches a module by URL for the life of the process, so a
   // second `loadConfig` on an edited config would return the *first* version's
-  // exports. One-shot `ambit check` never noticed; DESIGN.md §6.2's resident
-  // path is precisely a process that loads the config again after it changed,
-  // and §6.2's table requires that change to re-derive every contract. A cached
-  // module satisfies that by re-deriving from stale data, which is the failure
-  // §3.4 forbids wearing the shape of a success.
+  // exports. One-shot `ambit check` never noticed; the resident check path is
+  // precisely a process that loads the config again after it changed, and that
+  // change must re-derive every contract. A cached module satisfies that by
+  // re-deriving from stale data — a failure wearing the shape of a success.
   const dependencies = configDependencies(configPath);
   // `hasImports`, not `files.length > 1`. The closure holds only the relative
   // specifiers worth hashing, so a config importing `ambit-ts/config` — or one
@@ -402,7 +401,7 @@ function validateEffectAliases(
   for (const [name, members] of Object.entries(raw)) {
     if (name.trim().length === 0) throw new ConfigError(`${where}: effects has an empty name`);
     // A definition that shadows a standard effect would make `@effects env`
-    // mean something different in two files (§4.1 (d)).
+    // mean something different in two files.
     if (isKnownEffect(name)) {
       throw new ConfigError(
         `${where}: effects.${name} redefines the standard effect "${name}"; user-defined names must not collide with ${KNOWN_EFFECTS.join(", ")}`,
@@ -410,7 +409,7 @@ function validateEffectAliases(
     }
     const list = validateStringArray(members, where, `effects.${name}`);
     for (const member of list) {
-      // §4.1 (d): definitions do not expand into other definitions. Allowing
+      // Definitions do not expand into other definitions. Allowing
       // it would need a cycle check and would buy nothing a flat list cannot
       // express.
       if (!isKnownEffect(member)) {
@@ -445,7 +444,7 @@ function validateContracts(
       );
     }
     if (symbol.includes("*")) {
-      // §4.1 (b): the symbol half does not glob. A `#*` that quietly matched
+      // The symbol half does not glob. A `#*` that quietly matched
       // everything in a file would be a contract nobody wrote.
       throw new ConfigError(
         `${where}: contracts key ${JSON.stringify(key)} globs the symbol half; only the file half may use * or **`,
@@ -478,18 +477,20 @@ function validateContract(
     throw new ConfigError(`${where}: ${at}.entrypoint must be a boolean`);
   }
   if (raw.boundary !== undefined && typeof raw.boundary !== "string") {
-    throw new ConfigError(`${where}: ${at}.boundary must be a string (the reason §4.6 requires)`);
+    throw new ConfigError(
+      `${where}: ${at}.boundary must be a string: the reason the body is excluded from analysis`,
+    );
   }
   if (raw.boundary !== undefined && (raw.boundary as string).trim().length === 0) {
-    throw new ConfigError(`${where}: ${at}.boundary must give a non-empty reason (§4.6)`);
+    throw new ConfigError(`${where}: ${at}.boundary must give a non-empty reason`);
   }
   const budget = raw.budget === undefined ? undefined : validateBudget(raw.budget, where, at);
 
   // A misspelled effect or a malformed capability is rejected here rather
   // than turned into an "invalid" contract downstream: a JSDoc typo has a tag
   // location a diagnostic can point at, a config typo has a file the run has
-  // already decided to trust, and §3.4 says a declaration that does not mean
-  // what it says must stop the run rather than narrow silently.
+  // already decided to trust, and a declaration that does not mean what it
+  // says must stop the run rather than narrow silently.
   for (const effect of effects ?? []) {
     if (!isKnownEffect(effect) && !aliasNames.has(effect)) {
       throw new ConfigError(
@@ -610,7 +611,7 @@ interface ResolvedEntry {
   readonly key: string;
   readonly symbol: string;
   readonly matcher: RegExp;
-  /** True when the file half contains no `*` — an exact key, which outranks every glob (§4.1 (b)). */
+  /** True when the file half contains no `*` — an exact key, which outranks every glob. */
   readonly exact: boolean;
   /** The file half, root-relative, only meaningful when {@link exact}. */
   readonly file: string;
@@ -651,7 +652,7 @@ export interface ResolvedConfig {
    */
   readonly displayPath: string;
   readonly sourceText: string;
-  /** User-defined effect names → the standard effects they stand for (§4.1 (d)). */
+  /** User-defined effect names → the standard effects they stand for. */
   readonly effectAliases: ReadonlyMap<string, readonly KnownEffect[]>;
   /**
    * The contract declared for `id`, or `undefined`. Records the match for
@@ -661,7 +662,7 @@ export interface ResolvedConfig {
    * accumulated state.
    */
   contractFor(id: SymbolId): ConfigMatch | undefined;
-  /** Whether `relativeFile`'s diagnostics get `--strict`'s promotion (§4.3). */
+  /** Whether `relativeFile`'s diagnostics get `--strict`'s promotion. */
   isStrictFile(relativeFile: string): boolean;
   /**
    * Every exact key the config declares, in the order it declares them.
@@ -669,7 +670,7 @@ export interface ResolvedConfig {
    * The order is load-bearing: `AMB-W006` is emitted per key, and
    * {@link unmatchedExactKeys} preserves this order, so a caller subtracting a
    * matched set from this list produces the same diagnostics in the same order
-   * as a whole-project run (§6.2's byte equivalence).
+   * as a whole-project run, byte for byte.
    */
   exactKeys(): readonly string[];
   /**
@@ -687,7 +688,7 @@ export interface ResolvedConfig {
 /**
  * Bind a loaded config to the directory being analyzed.
  *
- * Keys are written relative to the config file (§4.1 (c)) and symbol ids are
+ * Keys are written relative to the config file and symbol ids are
  * relative to the analysis root, so every key is rebased once, here, and
  * nothing downstream has to remember which base it is holding.
  */
@@ -745,7 +746,7 @@ export function resolveConfig(loaded: LoadedConfig, rootDir: string): ResolvedCo
       if (candidates.length === 0) return undefined;
 
       const exact = candidates.filter((entry) => entry.exact);
-      // §4.1 (b): an exact key always wins, and two globs on one symbol is an
+      // An exact key always wins, and two globs on one symbol is an
       // ambiguity the config author has to resolve — never a silent pick.
       if (exact.length > 0) {
         for (const entry of exact) matchedKeys.add(entry.key);
@@ -795,7 +796,7 @@ function rebase(pattern: string, configDir: string, absoluteRoot: string): strin
 }
 
 /**
- * §4.1 (b)'s glob: `*` matches within one path segment, `**` crosses
+ * The key glob: `*` matches within one path segment, `**` crosses
  * directories. Hand-rolled rather than delegated to `path.matchesGlob`, whose
  * semantics are the shell's and are not the two lines the spec commits to.
  *

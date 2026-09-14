@@ -4,8 +4,7 @@
  * getFullyQualifiedName()`'s format (e.g. `"Array.push"`, `"Map.set"`) — and
  * kept in a separate table from it because the two answer different
  * questions: that one says "no `KnownEffect` at all", this one says "a
- * `state_write` if the receiver is reachable from outside the function"
- * (DESIGN.md §4.2, "Local mutation and `pure`").
+ * `state_write` if the receiver is reachable from outside the function".
  *
  * Whether a listed call actually produces `state_write` is decided per call
  * site by the receiver's locality, not by this table: mutating a value the
@@ -80,9 +79,9 @@ const MUTATING_BUILTINS: ReadonlySet<string> = new Set([
  * reads the receiver. Applied there, these would ask about the `Object` /
  * `Reflect` global and answer `state_write` every time — including for the
  * `Object.assign({}, …)` that appears in almost every codebase, where the
- * target is a value the function just allocated. DESIGN.md §4.2 states the
- * rule in terms that already cover this: "The decision looks at the **root**
- * of the mutation target". For these names that root is in the arguments.
+ * target is a value the function just allocated. The locality rule is
+ * stated in terms that already cover this: the decision looks at the **root**
+ * of the mutation target. For these names that root is in the arguments.
  *
  * Every entry mutates argument 0 and nothing else, which is why one set is
  * enough. `Reflect.apply` and `Object.groupBy` are not here: they call what

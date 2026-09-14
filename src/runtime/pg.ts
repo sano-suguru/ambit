@@ -2,7 +2,7 @@ import { sqlStatementDirection } from "../core/index.ts";
 import { checkCapabilities } from "./enforce.ts";
 
 /**
- * Runtime enforcement for the `pg` client (DESIGN.md §4.4 (a), (c)).
+ * Runtime enforcement for the `pg` client.
  *
  * Unlike the `node:` builtins this is a **client wrap**, not a global
  * monkeypatch: Ambit does not depend on `pg`, so the caller hands the module
@@ -12,9 +12,9 @@ import { checkCapabilities } from "./enforce.ts";
  * symmetry `installFetchHook` has, while Prisma's only stable extension point
  * (`$extends`) returns a *new* client and so cannot be undone (P5).
  *
- * What this does **not** do: derive a table from the statement. §4.4 is
- * explicit — "the mere existence of a hook into a DB client is not taken to
- * mean that table-level permissions can be decided for arbitrary SQL" — so the
+ * What this does **not** do: derive a table from the statement. Having a
+ * hook into a DB client is not taken to mean that table-level permissions can
+ * be decided for arbitrary SQL, so the
  * target is the database the
  * connection names, and the exception says so rather than leaving the reader
  * to assume table granularity.
@@ -40,7 +40,7 @@ const OPAQUE_STATEMENT_DETAIL =
  * the arguments it was called with.
  *
  * Direction comes from `sqlStatementDirection` in `src/core/`, the same rule
- * the static effect table uses — §4.4 (c) puts it in one place so the checker
+ * the static effect table uses — kept in one place so the checker
  * and the running process cannot answer differently about one statement.
  */
 export function pgCapabilities(
@@ -118,7 +118,7 @@ type AnyFunction = (...args: unknown[]) => unknown;
  *
  * `query` is promise-returning unless a callback is passed, so a denial
  * rejects, or reaches the callback through `process.nextTick` when there is
- * one — §4.4 (a)'s rule for each family.
+ * one — the delivery rule every hooked API family follows.
  */
 export function installPgHook(pg: PgModule): () => void {
   const restores: (() => void)[] = [];

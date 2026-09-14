@@ -10,10 +10,10 @@ import {
 } from "../src/runtime/index.ts";
 
 /**
- * In-process tests for the Hono adapter (DESIGN.md §4.4, "Mapping contracts
- * to handlers"). `app.fetch(new Request(...))` drives Hono without a socket;
- * `test/e2e.runtime.test.ts` does the same through a real server and the
- * installed package.
+ * In-process tests for the Hono adapter, which carries each route's contract
+ * as a value beside its handler. `app.fetch(new Request(...))` drives Hono
+ * without a socket; `test/e2e.runtime.test.ts` does the same through a real
+ * server and the installed package.
  */
 
 const restores: Array<() => void> = [];
@@ -96,7 +96,7 @@ describe("ambitHandler", () => {
     );
 
     const response = await app.request("/denied");
-    // Not 403: §4.4 — the client asked for nothing forbidden, this server's own
+    // Not 403: the client asked for nothing forbidden, this server's own
     // code exceeded its grant, and the message names the granted set.
     expect(response.status).toBe(500);
     expect(seen).toBeInstanceOf(AmbitCapabilityError);

@@ -2,7 +2,7 @@
  * A `TsBackend` on the native TypeScript 7 engine (Go), for **shadow analysis
  * only**.
  *
- * DESIGN.md §3.5 and `docs/adr/0001-analysis-backend.md` adopted the
+ * `docs/DESIGN.md` and `docs/adr/0001-analysis-backend.md` adopted the
  * JS-implemented Compiler API (`src/checker/backend/legacy-ts.ts`) and did not
  * adopt native TypeScript. Nothing here reopens that: this backend is never
  * loaded by `ambit check`, never decides a diagnostic, an exit code or a
@@ -229,7 +229,7 @@ export async function extractProjectTimed(
 /**
  * The API's accumulated totals, refused rather than defaulted when collection
  * is off: a profile whose zero requests mean "timing never ran" is the failure
- * mode DESIGN.md §3.4 names for a check that never started.
+ * mode of a check that never started being read as clean.
  */
 function totalsOf(api: Any): NativeTimingTotals {
   const info = api.getTimingInfo?.();
@@ -352,7 +352,7 @@ const STATIC_PATH_MARKER = "static ";
 
 /**
  * The declaration paths only `ambit.config.ts` can name — an accessor and an
- * anonymous default export (DESIGN.md §4.1 (a)). Derived from the path, as on
+ * anonymous default export. Derived from the path, as on
  * the legacy side, so the rule has one spelling.
  */
 function configOnlyPath(declPath: readonly string[]): boolean {
@@ -462,7 +462,7 @@ class Extractor {
     // Pass 1 — mint one id per declaration, so pass 2 can resolve calls
     // between files. The collision check is the legacy one and for the legacy
     // reason: two declarations under one id make `propagate` never converge
-    // (DESIGN.md §4.1), so it has to stop the run.
+    // at all, so it has to stop the run.
     const declarationsByFile = new Map<Node, ReadonlyArray<readonly [Node, readonly string[]]>>();
     for (const sourceFile of sourceFiles) {
       const declarations = this.collectFunctionLikeDeclarations(sourceFile);
@@ -485,7 +485,7 @@ class Extractor {
     // extracted.
     const files: ExtractedFile[] = [];
     // One per source file under the root, whether or not it declared anything
-    // — the port of the legacy backend's `modules` (DESIGN.md §6.2).
+    // — the port of the legacy backend's `modules`.
     const modules: ExtractedModule[] = [];
     const skippedFunctions = new Map<SkippedFunctionKind, number>();
     const uncarriedContracts: UncarriedContract[] = [];
@@ -1056,7 +1056,7 @@ class Extractor {
     let end = tag.getEnd();
     // The tag's span runs to where the next tag (or the closing `*` + `/`)
     // begins, so it swallows the whitespace after the text. A fix has to be a
-    // patch a person would have written (DESIGN.md §5.3).
+    // patch a person would have written.
     while (end > start && /\s/.test(text[end - 1] ?? "")) end--;
     const startPosition = sourceFile.getLineAndCharacterOfPosition(start);
     const endPosition = sourceFile.getLineAndCharacterOfPosition(end);
@@ -1561,7 +1561,7 @@ class Extractor {
    *
    * A line-for-line port of `legacy-ts.ts`'s `constructedInstanceMemberTarget`.
    * `const` is the premise and the whole of it — it fixes the binding, not the
-   * object, which is the width DESIGN.md §4.2 rule 7 already states — and the
+   * object, which is not a soundness claim — and the
    * `extends` chain is walked because an inherited method is the one that runs.
    *
    * Derived before base: a subclass overriding a method is the implementation
@@ -1733,8 +1733,8 @@ class Extractor {
    * `"pg"` — the class a `const` was constructed from.
    *
    * `const` is the premise and the whole of it: it fixes the binding, not the
-   * object's properties, which is the same width DESIGN.md §4.2 rule 7 already
-   * states. A `let` may hold something else by the time the call runs.
+   * object's properties — Ambit makes no soundness claim past that.
+   * A `let` may hold something else by the time the call runs.
    */
   private constructedClassQualifiedNameOf(receiver: Node): string | undefined {
     const declaration = this.constInitializedVariableOf(receiver);
@@ -1752,7 +1752,7 @@ class Extractor {
    * the source wrote followed through re-exports, and it has to be bare
    * because every bundled table is keyed on a package or a Node.js builtin;
    * the type name is read off the call expression's own type, never off the
-   * variable's annotation, which §4.2 rule 7 forbids letting decide.
+   * variable's annotation, which must never decide a property call's target.
    */
   private factoryResultQualifiedNameOf(receiver: Node): string | undefined {
     const is = this.is;
@@ -2080,8 +2080,8 @@ class Extractor {
       // declaration was found: a callback parameter (`xs.map(f)` inside a
       // higher-order function) has a declaration that is not function-valued,
       // and skipping it made the call read as fully analyzed. That is the
-      // direction DESIGN.md §4.2 rule 4 forbids — "if it cannot be inferred,
-      // `unknown`" — and it was measured as two `shadow-less-unknown`
+      // direction that must never pass — a callback that cannot be inferred is
+      // `unknown` — and it was measured as two `shadow-less-unknown`
       // divergences on `test/fixtures/backend-conformance/generics.ts`.
       if (!this.isCallableArgumentType(this.checker.getTypeAtLocation(argument))) continue;
       const target = this.extractedFunctionTarget(argument);
@@ -2162,7 +2162,7 @@ class Extractor {
 
   /**
    * An assignment, `++`/`--`, or `delete` that writes somewhere the enclosing
-   * function does not own (DESIGN.md §4.2, "Local mutation and `pure`"). One
+   * function does not own — only mutating a value it created is local. One
    * escaping leaf makes the whole statement a write.
    */
   private classifyAssignment(node: Node, sourceFile: Node, enclosing: Node): CallSite | undefined {
@@ -2268,7 +2268,7 @@ class Extractor {
   }
 
   /**
-   * The locality rule of DESIGN.md §4.2: local iff the root is a fresh
+   * The locality rule for mutation: local iff the root is a fresh
    * allocation, or an identifier bound by `const` inside `enclosing` to one.
    * A parameter, `this`, an outer or module-scope binding, a `let`, and an
    * unresolvable root are all escaping — over-approximated on purpose.
@@ -2407,13 +2407,13 @@ class Extractor {
    * The budget a runtime wrapper's spec fixes, or `undefined` when the spec is
    * not a literal this comparison can read.
    *
-   * The keys are DESIGN.md §4.5's four — `timeMs`, `costUsd`, `llmCalls`,
+   * The keys are the budget's four — `timeMs`, `costUsd`, `llmCalls`,
    * `onExceed` — and getting them wrong is not a cosmetic port slip: a wrapper
    * whose budget reads as absent produces no AMB-E011 where the wrapper and
    * the `@budget` tag drift apart, so the shadow side reported **four fewer
    * error diagnostics** on `test/fixtures/wrappers` than the adopted one. That
-   * is authority enforcement disappearing, which is the direction DESIGN.md
-   * §3.4 forbids, and it was invisible until the wrapper comparison was keyed
+   * is authority enforcement disappearing — the direction that must never
+   * pass silently, and it was invisible until the wrapper comparison was keyed
    * on identity instead of on its whole rendered line.
    */
   private literalBudgetOf(spec: Node): WrapperBudget | undefined {
@@ -2460,7 +2460,7 @@ class Extractor {
       if (member.name.text === "timeMs") timeMs = numeric;
       else if (member.name.text === "costUsd") costUsd = numeric;
       else if (member.name.text === "llmCalls") llmCalls = numeric;
-      // A key outside §4.5's four is not a budget this comparison understands.
+      // A key outside the budget's four is not a budget this comparison understands.
       else return undefined;
     }
 

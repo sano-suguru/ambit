@@ -1,7 +1,7 @@
-// Fixture for `AMB-I002` (DESIGN.md §4.1, §4.2 rule 6): one undeclared
+// Fixture for `AMB-I002`: one undeclared
 // function per reason a call can go unresolved, so `ambit init` can be
 // checked to report *why* no contract can be proposed — while proposing
-// nothing, for the same reason §4.1 gives.
+// nothing, so "could not tell" never becomes a declaration.
 
 import { resolve } from "node:path";
 import { readLegacy } from "legacy-store";
@@ -34,7 +34,7 @@ export function callsBuiltinMethod(when: Date): number {
 }
 
 export function callsCallbackParameter(next: () => void): void {
-  // §4.2 rule 4: what `next` does is decided by the actual argument.
+  // What `next` does is decided by the actual argument at the call site.
   next();
 }
 
@@ -43,7 +43,7 @@ export function sortsWithCallbackByReference(
   compare: (a: number, b: number) => number,
 ): number[] {
   // A mutator handed a callback by reference. The mutation is known; the
-  // callback's effects are not (§4.2 rule 4), so the caller is `unknown` with
+  // callback's effects are not, so the caller is `unknown` with
   // no `UnresolvedCall` anywhere in its body.
   values.sort(compare);
   return values;
@@ -51,7 +51,7 @@ export function sortsWithCallbackByReference(
 
 // biome-ignore lint/suspicious/noExplicitAny: `any` is what this case is about
 export function callsAnyTyped(client: any): unknown {
-  // §4.2 rule 6: nothing identifies the callee.
+  // A call through `any`: nothing identifies the callee.
   return client.send();
 }
 
@@ -72,12 +72,12 @@ export function callsNewFunction(body: string): unknown {
 export declare function bodyless(value: string): string;
 
 export function callsBodylessDeclaration(): string {
-  // §4.1 "Overloads and bodyless declarations": nothing to propagate from.
+  // A bodyless declaration is not code that runs: nothing to propagate from.
   return bodyless("a");
 }
 
 export function callsThroughUnknownReceiver(handlers: { run: () => void }): void {
-  // No single object literal is certainly behind `handlers` (§4.2 rule 7):
+  // No single object literal is certainly behind `handlers`:
   // `unresolved-symbol`.
   handlers.run();
 }
@@ -101,7 +101,7 @@ export function declaredDespiteUnknown(source: string): unknown {
 }
 
 /**
- * Explicitly isolated. §4.6 excludes the body from analysis, so there is no
+ * Explicitly isolated. A boundary excludes the body from analysis, so there is no
  * unresolved call to report and nothing to propose.
  * @effects fs_read
  * @boundary reason="legacy-store"

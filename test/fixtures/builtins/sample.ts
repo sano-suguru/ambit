@@ -35,7 +35,7 @@ export function assignsOntoAnArgument(target: Record<string, string>): Record<st
 
 export function assignsOntoAFreshObject(source: Record<string, string>): Record<string, string> {
   // The same call, on a value this function just allocated: a local mutation,
-  // which carries nothing (DESIGN.md §4.2, "Local mutation and `pure`").
+  // which carries nothing: `pure` permits mutating what it created.
   return Object.assign({}, source, { seen: "1" });
 }
 
@@ -68,13 +68,13 @@ export function logs(message: string): void {
 }
 
 export function compilesAString(source: string): unknown {
-  // DESIGN.md §4.2 rule 6.
+  // Compiling a string (`new Function`) is `unknown`.
   return Function(source);
 }
 
 export function mapsAReferencedProjectFunction(values: readonly string[]): readonly string[] {
   // The callback is passed by reference and names a function in this tree, so
-  // it is the answer to what the callback does (DESIGN.md §4.2 rule 4) — the
+  // it is the answer to what the callback does — the
   // call carries an edge to `upper` rather than falling to `unknown`.
   return values.map(upper);
 }

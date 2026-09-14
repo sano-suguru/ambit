@@ -4,11 +4,11 @@
  * Built from the file path (relative to the project root passed to
  * `ambit check`) and a "."-joined declaration path (e.g. `["Foo",
  * "bar"]` for method `bar` on class `Foo`), joined with `#`
- * (`src/tax.ts#calculateTax`, matching the form used in DESIGN.md §5.1's
- * `contract.via[].symbol`).
+ * (`src/tax.ts#calculateTax`, matching the form a diagnostic's
+ * `contract.via[].symbol` uses).
  *
- * Never derived from a compiler-internal id or snapshot offset (DESIGN.md
- * §5.3), so it stays valid across re-analysis and across backends.
+ * Never derived from a compiler-internal id or snapshot offset, so it stays
+ * valid across re-analysis and across backends.
  */
 export type SymbolId = string & { readonly __brand: "SymbolId" };
 
@@ -20,8 +20,8 @@ export function symbolId(relativeFilePath: string, declarationPath: readonly str
  * The short, human-facing name for a symbol id: the last segment of the
  * declaration path (`src/tax.ts#Foo.bar` → `bar`). Used by diagnostic
  * messages and by the CLI's human-readable rendering, which is why it lives
- * here rather than beside either one — DESIGN.md §5 makes the text output a
- * rendering of the structured diagnostic, so both sides must name a symbol
+ * here rather than beside either one — the text output is only a rendering
+ * of the structured diagnostic, so both sides must name a symbol
  * the same way.
  */
 export function displayName(id: SymbolId): string {
