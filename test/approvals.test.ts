@@ -111,6 +111,51 @@ describe("parseApprovals", () => {
     expect(malformed.map((entry) => entry.line)).toEqual([2, 3, 4, 5]);
   });
 
+  it("reports a line whose reason is empty, or nothing but separators, as not an approval", () => {
+    // The reason is required: an approval with no reason records only that a
+    // line was pasted, not why the increase was accepted.
+    const { approvals, malformed } = parseApprovals(
+      [
+        "## Approvals",
+        "- `a.ts#f` `effect:network` —",
+        "- `a.ts#f` `effect:network` —   ",
+        "- `a.ts#f` `effect:network` --",
+        "- `a.ts#f` `effect:network` :",
+        "- `a.ts#f` `effect:network` — —",
+        "- `a.ts#f` `effect:network` — :-",
+        "- `a.ts#f` `effect:network`  \t",
+        "- `a.ts#f` `effect:network` — ​",
+        "- `a.ts#f` `effect:network` ﻿⁠",
+      ].join("\n"),
+    );
+    expect(approvals).toHaveLength(0);
+    expect(malformed.map((entry) => entry.line)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it("keeps reading a reason after any of the separators, or after none", () => {
+    const { approvals, malformed } = parseApprovals(
+      [
+        "- `a.ts#f` `effect:network` — the rate table moved",
+        "- `a.ts#f` `effect:network` -- the rate table moved",
+        "- `a.ts#f` `effect:network` - the rate table moved",
+        "- `a.ts#f` `effect:network`: the rate table moved",
+        "- `a.ts#f` `effect:network` the rate table moved",
+        "- `a.ts#f` `effect:network` — -1 is the sentinel the API now returns",
+        "- `a.ts#f` `effect:network` — x",
+      ].join("\n"),
+    );
+    expect(malformed).toHaveLength(0);
+    expect(approvals.map((approval) => approval.reason)).toEqual([
+      "the rate table moved",
+      "the rate table moved",
+      "the rate table moved",
+      "the rate table moved",
+      "the rate table moved",
+      "-1 is the sentinel the API now returns",
+      "x",
+    ]);
+  });
+
   it("does not validate the effect name, because a config file can define one", () => {
     const { approvals } = parseApprovals("- `a.ts#f` `effect:telemetry` — a user-defined effect\n");
     expect(approvals[0]?.authority).toEqual({ kind: "effect", name: "telemetry" });
