@@ -18,16 +18,17 @@ Phase 1 validates this on real production-bound pull requests.
 
 ## Current bottleneck
 
-**`unknown` on real third-party code.** The corpus median is 52.9% — more than
-half of all functions on real code depend on a path the analysis did not reach.
-The rate alone does not decide whether the gate is usable — on three third-party
-backends that tracked standing noise and whether real increases were reported
-([`docs/status.md`](docs/status.md)) — but it bounds how much a report can say.
+**External pilot evidence.** `ambit-ts@0.2.0` installs from npm, and README's
+Quick start and pull-request gate run as written outside this repository
+([`docs/status.md`](docs/status.md)). The open question is whether authority
+diffs change reviewer decisions on real production-bound pull requests, and
+only a pilot can answer it.
 
-Second, and not far behind: **which half matters is answerable only from a
-pilot's own pull requests.**
-The corpus prints the whole unresolved-name histogram, so the next fix is always
-measurable; which of those names is worth fixing is not answerable from here.
+`unknown` is the main technical risk to observe during that pilot, not a gate in
+front of it. The corpus median is 52.9%, but on three third-party backends the
+gate's usefulness tracked standing noise and whether real increases were
+reported, not the rate ([`docs/status.md`](docs/status.md)). Which unresolved
+names are worth fixing is answerable only from a pilot's own pull requests.
 
 ## Next proof
 
@@ -58,10 +59,14 @@ requests, and its reports change what reviewers do.** Support for other
 languages is considered only after that. Speeding up analysis alone does not
 count.
 
-Each row is observable within one pilot — from its pull requests, its approval
-ledger, and its reviewers. These are **candidate metrics**: none has a numeric
-target, because there is no pilot baseline to set one against, and a number
-chosen before one exists would be a guess.
+Every item below is observable within one pilot — from its pull requests, its
+approval ledger, and its reviewers. These are **candidate metrics**: none has a
+numeric target, because there is no pilot baseline to set one against, and a
+number chosen before one exists would be a guess.
+
+### Evidence of product value
+
+What Phase 1 has to show.
 
 | Evidence | What would show it |
 |---|---|
@@ -69,6 +74,15 @@ chosen before one exists would be a guess.
 | Authority increases detected | `ambit diff` reports increases on the pilot's own pull requests |
 | Reviewer action | A report leads a reviewer to reject a change, narrow its scope, correct a contract, or write down why an increase is correct |
 | A catch reviewers credit | A reviewer judges a reported increase as one they might have missed without Ambit |
+
+### Adoption guardrails
+
+Not evidence of value on their own. They are the conditions under which the
+evidence above counts: value shown by a pilot that finds the gate too slow,
+too noisy, or impossible to remove is not Phase 1 met.
+
+| Guardrail | What would show it holds |
+|---|---|
 | Review cost stays acceptable | The pilot does not find the added review time unacceptable; lead time is compared with its pull requests before adoption |
 | `unknown` and noise do not stop use | No standing report on an unchanged tree, and no `unknown`, leads the pilot to stop gating |
 | Cost of backing out | The removal procedure is tested automatically |

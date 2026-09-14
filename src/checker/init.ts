@@ -181,8 +181,8 @@ export function proposeContracts(
  * There are no `fixes` because there is no patch. Every route here is either
  * a decision only a person can make (isolate this behind a boundary, annotate
  * this value) or work on Ambit itself (a missing stub). `fixes[].edits` are
- * concrete applicable patches, and a candidate that only
- * describes what to do is exactly what it forbids
+ * concrete applicable patches, so a candidate that only
+ * describes what to do cannot be one
  * ([ADR-0011](../../docs/adr/0011-reporting-why-a-contract-cannot-be-proposed.md)).
  */
 function unresolvedReport(

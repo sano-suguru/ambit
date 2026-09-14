@@ -134,8 +134,7 @@ async function main(): Promise<number> {
   const update = process.argv.includes("--update");
 
   // Refuses rather than falling back to the adopted backend on both sides: a
-  // clean gate that means "the shadow backend never ran" is the failure
-  // Ambit never allows.
+  // backend that did not run must never be reported as a clean comparison.
   if (!nativeTs7Backend.version) {
     process.stderr.write(
       "the native compiler reported no version.\nRun: node scripts/m05-native-install.ts\n",

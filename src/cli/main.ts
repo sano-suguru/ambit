@@ -319,8 +319,8 @@ function formatText(diagnostic: Diagnostic): string {
  *
  * Empty when the diagnostic has no hops: the effect is performed in the
  * reported function's own body, so there is no call path, and a path that does
- * not exist is not synthesized — the same rule that forbids fabricating a fix
- * candidate.
+ * not exist is not synthesized, just as a fix is only ever a concrete
+ * applicable patch, never a guessed one.
  */
 function viaPath(diagnostic: Diagnostic): readonly string[] {
   const contract = diagnostic.contract;
@@ -413,8 +413,8 @@ function errorMessage(error: unknown): string {
  * npm installs `bin` as a symlink (`node_modules/.bin/ambit ->
  * ../ambit-ts/dist/cli/main.js`), and `process.argv[1]` is then the *symlink*
  * path while `import.meta.url` is the resolved target — so comparing the two
- * directly makes the installed CLI silently do nothing and exit 0, which reads
- * exactly like "checked, no violations", which Ambit never allows. The
+ * directly makes the installed CLI silently do nothing and exit 0 — output
+ * indistinguishable from "checked, no violations" when nothing was checked. The
  * symlink is resolved before comparing. `pathToFileURL` (rather than a plain
  * `file://` template) also handles a path containing spaces.
  */

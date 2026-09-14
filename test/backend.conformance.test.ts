@@ -283,7 +283,7 @@ describe("backend conformance: optional callback slots", () => {
   });
 
   /**
-   * The direction Ambit never allows (unanalyzed read as clean), asserted
+   * A call the analysis could not walk must never read as clean. Asserted
    * where it would be lost: a site whose callbacks cannot be walked must not
    * summarize as a proven-pure builtin.
    */

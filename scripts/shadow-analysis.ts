@@ -29,8 +29,8 @@
  *
  * If it is missing the run stops. It does not fall back to comparing the
  * adopted backend against itself and reporting perfect parity — a report whose
- * zero divergences mean "the shadow backend never ran" is exactly the failure
- * Ambit never allows.
+ * zero divergences mean "the shadow backend never ran" would report a backend
+ * that did not run as a clean comparison.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";

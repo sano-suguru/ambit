@@ -2498,8 +2498,8 @@ function classifyCall(
   // summary either: `collectCalls` walked straight through it, so every call
   // it makes is already recorded here. The call site therefore adds nothing,
   // and reporting it `unknown` would claim the analysis lost a body it in fact
-  // read (the no-silence rule cuts the other way too — an *analyzed* path must
-  // not read as an unanalyzed one).
+  // read. An unanalyzed path must never read as analyzed, and the converse holds
+  // too: an *analyzed* path must not read as an unanalyzed one.
   //
   // Deliberately not the same thing as extracting the nested function: it
   // gets no id, no contract, and no summary of its own. Whether it should is

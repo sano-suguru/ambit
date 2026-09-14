@@ -42,8 +42,8 @@ export interface SpawnRequirement {
  *
  * `exec`, `execSync`, and any form with `shell: true` run a shell. Which
  * program the shell then runs is inside a shell command string, and naming it
- * would need a shell parser — the same claim Ambit refuses for table names
- * inside arbitrary SQL. So the capability names the shell, and the exception
+ * would need a shell parser — for the same reason table names are not read
+ * out of arbitrary SQL to derive a capability. So the capability names the shell, and the exception
  * says exactly that.
  */
 export function spawnCapability(

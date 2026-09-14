@@ -139,7 +139,7 @@ export interface AuthorityCapabilities {
  * `count` is part of the value rather than a display detail. A second call to
  * the same unresolvable operation is a second operation, and a comparison that
  * dropped the count would read a function's third opaque write as no change —
- * an unanalyzed addition reported as nothing, which Ambit never allows.
+ * an operation the analysis could not read, added without being reported.
  *
  * `operation` is the qualified name the stub tables would key on, omitted
  * where the call has none: a callback parameter, an `any` receiver, `eval`.

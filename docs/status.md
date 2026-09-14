@@ -214,9 +214,9 @@ Each of these was measured, and the run is archived.
 
 ## What is not proven
 
-- **That anyone wants this.** External pilot evidence has not yet been
-  collected. This is the single most important row above, and no amount of test
-  coverage substitutes for it.
+- **External pilot validation.** Evidence from production-bound pull requests
+  has not yet been collected. This is the most important row above, and no
+  amount of test coverage substitutes for it.
 - **That a file-level report on an inline handler is reviewable enough.** An
   increase inside a route registered as an argument-position arrow now fails
   the gate, but it names the file rather than the handler, and on a count
@@ -248,7 +248,7 @@ Each of these was measured, and the run is archived.
 
 ## Current bottleneck
 
-**There is no adopter to point the next fix at.**
+**External pilot evidence.**
 
 The blocker the third third-party run put first — `ambit diff` silent on
 authority added inside an inline route handler — is closed
@@ -258,17 +258,13 @@ file-level increase is reviewable, and whether `--strict` is still usable on a
 repository whose tests are written as inline callbacks. Both are listed under
 "What is not proven" above, and neither can be settled here.
 
-So the bottleneck is the one it was before:
-
-**`unknown` on real third-party code, and the absence of an adopter to point the
-next fix at.**
-
-52.9% median means that on real code, more than half of all functions still
+`unknown` on real third-party code is the main technical risk to watch during a
+pilot, not a gate in front of one. 52.9% median means that on real code, more than half of all functions still
 depend on a path the analysis did not reach. The largest remaining contributor
 is `external-module`: calls into packages whose types are not installed. What
 would move it next is measurable — the corpus prints the whole unresolved-name
-histogram — but which of those names *matters* is a question only an adopter can
-answer, and there is none.
+histogram — but which of those names *matters* is a question only a pilot can
+answer.
 
 On Ambit's own source the same figure is 39.4%, dominated by calls into the
 `typescript` compiler API from the connection layer: the one file §3.4 means to
@@ -569,7 +565,7 @@ The snapshot-bound-state rule (§6.2, §3.4) is asserted two ways:
 | M1 — effects, unknown, coverage, diagnostics, init | **partial** | A resident session exists (`src/checker/resident.ts`) and is **incremental in extraction, summarization and propagation**: an update re-extracts the reverse-import closure of what the caller reported, re-summarizes that closure (or every file, when the config's value moved), and scopes the fixed point to the functions whose summaries moved plus their callers — phases 0–4 of [`docs/resident-check-path.md`](resident-check-path.md). Every other row of §6.2's invalidation table falls back to a whole re-extraction. Phase 5's benchmark ([2026-09-13](measurements/2026-09-13-resident-benchmark.md)) puts a leaf or config edit at 1.3×–5.9× faster than `analyze()` and a JSDoc-only edit in a deliberately high-fan-out file on a large subject at the same cost — since narrowed to the edited file for contract tags, measured 5.8× and 4.9× faster than `analyze()` on drizzle-orm and immich (high-fan-out targets only) ([2026-09-13](measurements/2026-09-13-resident-jsdoc-narrowing.md)); phase 6 (CLI exposure) is not built. No versioned JSON Schema for the diagnostic format (§5.2). `@budget costUsd` parses and is never priced. Config has no `stubs` key |
 | M2 — capabilities, budget, hooks, adapters, 50 stubs | **partial** | Four hooks, not more: `node:http`/`https`/`net`, `mysql2`, Prisma, Drizzle, MongoDB and every LLM SDK have none, so calling them is neither blocked nor recorded. `costUsd` and `llmCalls` are not enforced. Two adapters (Hono, Next.js App Router); Express, BullMQ, `worker_threads`, Server Actions, `middleware.ts`, the Pages Router and Edge have none. No `@budget` loop-pattern warnings. **Stubs are 5 client packages and 9 builtin namespaces, not 50 packages** |
 | M3 — fix patches, agent protocol | **partial** | `fixes[].edits` exists for `AMB-E001` only. **`ambit agent` does not exist** — no protocol, no iteration limit, no approval gate for loosening fixes |
-| M4 — editor, SBOM, npm | **partial** | Published as [`ambit-ts`](https://www.npmjs.com/package/ambit-ts): 0.1.0 on 2026-09-10 by hand, **without provenance**; 0.2.0 (`latest`) on 2026-09-14 through `release.yml`, with provenance. No editor integration of any kind. **`ambit sbom` does not exist**, nor do stub trust levels in diagnostics (§8). No pilot team. The runtime ships with the CLI, so installing Ambit pulls in `typescript` ([ADR-0009](adr/0009-package-name-and-single-package.md)) |
+| M4 — editor, SBOM, npm | **partial** | Published as [`ambit-ts`](https://www.npmjs.com/package/ambit-ts): 0.1.0 on 2026-09-10 by hand, **without provenance**; 0.2.0 (`latest`) on 2026-09-14 through `release.yml`, with provenance. No editor integration of any kind. **`ambit sbom` does not exist**, nor do stub trust levels in diagnostics (§8). The runtime ships with the CLI, so installing Ambit pulls in `typescript` ([ADR-0009](adr/0009-package-name-and-single-package.md)) |
 | M5 — Phase 1 exit criteria | **untouched** | An external pilot producing the evidence `ROADMAP.md` lists: sustained use on production-bound pull requests, and reviewer actions its reports caused. No sample, self-test, or synthetic benchmark substitutes for it |
 
 What each milestone's acceptance criteria are is [`ROADMAP.md`](../ROADMAP.md).

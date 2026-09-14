@@ -437,7 +437,7 @@ export interface ExtractedModule {
    * rather than close over the edges already held.
    *
    * Type-only imports are included. Over-invalidating costs time; the
-   * invalidation table is a minimum, and under-invalidating is what it forbids.
+   * resident path may re-extract more than a change requires, never less.
    */
   readonly imports: readonly string[];
   /** This file's share of {@link ExtractedProject.skippedFunctions}. */

@@ -18,7 +18,8 @@ import type { ExtractedProject, SkippedFunctionKind } from "../src/core/index.ts
  * 2. **The per-file slices re-sum to the project aggregates.** The cold path
  *    reads the project-level fields and the resident store re-sums the
  *    slices; if the two disagree, `check --coverage` disagrees with itself
- *    across the two paths, which the resident-equals-cold law forbids.
+ *    across the two paths, and a resident re-check must produce the same
+ *    bytes as a cold one.
  */
 
 const FIXTURES = path.resolve(import.meta.dirname, "fixtures");
