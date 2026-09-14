@@ -18,8 +18,8 @@ Phase 1 validates this on real production-bound pull requests.
 
 ## Current bottleneck
 
-**External pilot evidence.** `ambit-ts@0.2.0` installs from npm, and README's
-Quick start and pull-request gate run as written outside this repository
+**External pilot evidence.** `ambit-ts@0.2.0` installs from npm and its
+pull-request gate runs outside this repository
 ([`docs/status.md`](docs/status.md)). The open question is whether authority
 diffs change reviewer decisions on real production-bound pull requests, and
 only a pilot can answer it.
@@ -32,8 +32,13 @@ names are worth fixing is answerable only from a pilot's own pull requests.
 
 ## Next proof
 
-**One external repository uses `ambit diff` as a real CI signal** — gating, not
-advisory, on a codebase nobody here wrote.
+**One external repository takes `ambit diff` from an advisory CI signal to a
+gating one**, on a codebase nobody here wrote.
+
+The pilot starts advisory: a `diff` step that fails nothing and needs no
+contract, which is enough to see whether its reports change what reviewers do.
+Gating is where the proof ends — a repository that found the reports worth acting
+on making them required, and keeping them so — not where a pilot has to begin.
 
 That is the first claim about Ambit that is not self-reported. Everything before
 it is preparation for it:
@@ -55,9 +60,21 @@ thing beside the numbers themselves.
 ## Phase 1 exit criterion
 
 **An external pilot team keeps `ambit diff` on its production-bound pull
-requests, and its reports change what reviewers do.** Support for other
-languages is considered only after that. Speeding up analysis alone does not
-count.
+requests, its reports change what reviewers do, and the team moves it to a
+gating check and keeps it there.** Support for other languages is considered
+only after that. Speeding up analysis alone does not count.
+
+The halves test different things. Reviewers acting on reports is the evidence
+of product value, and it can be collected while the step is still advisory.
+Moving to gating, and staying there, tests whether that value survives
+continuous operation — contracts, approval lines, a check that blocks — which an
+advisory step never pays for.
+
+The adoption path a pilot is expected to take today is README's Quick start:
+**See** (an advisory `diff`, no contracts), **Shape** (contracts where authority
+enters, with `check`), **Enforce** (blocking, the approval ledger, `CODEOWNERS`).
+It describes the current tooling, not a requirement on the pilot, and the stage
+a pilot stops at is itself evidence.
 
 Every item below is observable within one pilot — from its pull requests, its
 approval ledger, and its reviewers. These are **candidate metrics**: none has a
@@ -84,7 +101,7 @@ too noisy, or impossible to remove is not Phase 1 met.
 | Guardrail | What would show it holds |
 |---|---|
 | Review cost stays acceptable | The pilot does not find the added review time unacceptable; lead time is compared with its pull requests before adoption |
-| `unknown` and noise do not stop use | No standing report on an unchanged tree, and no `unknown`, leads the pilot to stop gating |
+| `unknown` and noise do not stop use | No standing report on an unchanged tree, and no `unknown`, leads the pilot to stop using `diff` or to back out of gating |
 | Cost of backing out | The removal procedure is tested automatically |
 | Initial-check and re-check latency | Measured separately on a representative project, against the allowances in [ADR-0001](docs/adr/0001-analysis-backend.md) |
 
