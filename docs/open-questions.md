@@ -102,6 +102,44 @@ here.
   absorb them. NestJS's decorator DI and class inheritance were measured and
   cost nothing (immich); what is left is the registration shape above.
   *Trigger:* an adopter's framework whose handlers do not resolve.
+- **How a §6.4 gain is connected to the caller it is reachable from.** Whether a
+  §6.4 entry should carry a *witness path* — one route from a changed caller
+  down to the function whose own body gained the unresolved operation — as
+  explanation beside the body-local fact.
+  *Current state:* the report names only that function, so a reviewer sees a
+  repository method rather than the endpoint behind it. Half of the question is
+  decided: propagating the gain is the wrong shape, because an unresolved
+  operation is not authority, and §5.1 and §6.4 specify it as body-local and not
+  propagated. Undecided is whether a witness path makes the report actionable
+  enough to be worth adding to the output, and how one route is chosen among
+  several.
+  *Missing:* a reviewer's judgement. The fired trigger — a third subject
+  reporting every uncovered dependency body-locally — showed that the endpoint
+  is missing, not that a reviewer cannot act without it.
+  *Trigger:* an adopter's reviewer who cannot act on a §6.4 report because it
+  does not name the entry point that reaches the operation.
+  *Evidence:* [immich](measurements/2026-09-11-second-third-party-validation-immich.md),
+  [outline](measurements/2026-09-11-third-third-party-validation-outline.md)
+  ("What information the reviewer was missing").
+- **Naming an operation whose receiver is a project class that inherits the
+  method from a package.** Whether a call's operation may be named from the
+  callee's *declaring* type — in general, or only where the receiver's own type
+  has no name the stub tables know.
+  *Current state:* `Template.destroy(…)`, where `Template extends … extends
+  sequelize.Model`, is reported as `? <unnamed> (external-module)`, while
+  `sequelize.query(…)` is named. An unnamed entry satisfies none of §4.3's three
+  closures, so `--strict` on an ActiveRecord codebase (Sequelize, TypeORM
+  `BaseEntity`, Mongoose) can only be turned off. The cost is established; the
+  fix was ranked second on outline and left unimplemented because a
+  non-terminating analysis outranked it.
+  *Missing:* the soundness answer. Naming from the declaring type could give a
+  receiver a stub row that its own type, or an override, does not justify; no
+  probe has checked where that happens.
+  *Trigger:* an adopter on an ActiveRecord ORM who wants `ambit diff --strict`.
+  The question is then decided by probing the compiler first, before a naming
+  rule is written.
+  *Evidence:* [outline](measurements/2026-09-11-third-third-party-validation-outline.md)
+  (E2 / E2b against E2c).
 - **What environment `ambit diff` reconstructs.** Both sides are analyzed
   against the *working tree's* `node_modules` (§6), so a change that upgrades a
   dependency analyzes the base commit's source against the new package's types.

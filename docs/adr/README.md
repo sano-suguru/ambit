@@ -41,8 +41,10 @@ alternative is enough.
 An ADR records a decision as it was made, and is not rewritten to say something
 else. Two rules follow, and they are the whole procedure:
 
-- **A later reconsideration never edits the original.** When a `Revisit when`
-  condition fires, the original is not amended to record the outcome. A
+- **A later reconsideration never rewrites the original's decision or
+  reasons.** When a `Revisit when` condition fires, the original is not amended
+  to record the outcome. The one edit it may receive is the `Superseded by:`
+  status line below. A
   reconsideration that changes the decision gets its own record, linking back as
   `Supersedes: ADR-XXXX`, and the superseded record gains a `Superseded by:`
   line. One that leaves the decision standing is recorded in

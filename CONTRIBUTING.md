@@ -77,11 +77,11 @@ holds it.
 
 ## Language
 
-Everything public is in English: every document in the repository, diagnostic
-message text, all comments and test names in `src/`, `test/`, `scripts/`, RFCs,
-commit messages, pull request descriptions, and issues. An external contributor
-has to be able to read and join any of them.
+Everything contributor-facing is in English: every document in the repository,
+diagnostic message text, all comments and test names in `src/`, `test/`,
+`scripts/`, RFCs, commit messages, pull request descriptions, and issues. An
+external contributor has to be able to read and join any of them.
 
-The one exception is `docs/goals/`, which is working notes and may be in
+`docs/goals/` is working notes rather than contributor-facing, and may be in
 Japanese. `effects`, `capabilities`, `budget`, `boundary`, and `unknown` stay in
 English there too.
