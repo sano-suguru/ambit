@@ -2,8 +2,8 @@
 
 Node.js v24.20.0, macOS (darwin arm64), Apple M1, 8 cores, 16 GiB. Every number
 here was run, not estimated — but not all on the same day. Re-run **2026-09-14**:
-`pnpm test`, `tsc --noEmit`, `biome ci`, `check src --coverage`, `check src
---strict`, `check test/fixtures/realistic-api --coverage`, `npm pack --dry-run`,
+`pnpm test`, `tsc --noEmit`, `biome ci`, `check src --coverage`, `check
+test/fixtures/realistic-api --coverage`, `npm pack --dry-run`,
 and the `check src` / `diff HEAD src` latency. Quoted from the runs archived in
 [`docs/measurements/`](measurements/), not re-taken: the corpus median and the
 npm install evidence.
@@ -33,7 +33,6 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | `unknown` rate, real third-party code (corpus median, 4,200 functions) | 52.9% | lower — no target (see below) |
 | `unknown` rate, adopting-team-equivalent fixture (`realistic-api`) | 7.1% (4/56) | no target (see below) |
 | `unknown` rate, Ambit's own source (`check src`) | 40.0% (169/422) | — |
-| `check src --strict` on Ambit's own source | exit 1: 23 unresolved-call warnings promoted to errors | — |
 | Authority Ambit sees in a third-party backend's data layer ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)) | 940 stubbed call sites, up from 120 | — |
 | Third-party backends `ambit diff` is silent on when nothing changed | **3** — Unleash ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)), immich ([2026-09-11](measurements/2026-09-11-second-third-party-validation-immich.md)), outline ([2026-09-11](measurements/2026-09-11-third-third-party-validation-outline.md)) | — |
 | `unknown` rate, second third-party backend (immich `server/src`, 3,191 functions) | 79.9% (2,550/3,191) | no target (see below) |
@@ -53,6 +52,13 @@ population: the corpus is five repositories measured with no dependencies
 installed, `realistic-api` is a fixture written in this repository, `src` is
 Ambit's own connection layer, and immich and outline are third-party backends
 nobody here has adopted. They are read as movement, not as Phase 1 evidence.
+
+`realistic-api` moved from 1.9% (1/53) to 7.1% (4/56) when argument-position
+route handlers began to be analyzed ([ADR-0013](adr/0013-the-inline-callback-owner.md)).
+The three new entries are its route files' `<inline callbacks>`, each `unknown`
+on `hono.Context.req.*`, which the fixture declares itself and no stub covers;
+before, those handler bodies were not analyzed at all. The one function that was
+already `unknown` is unchanged.
 
 On the three third-party backends, **the `unknown` rate and the usefulness of
 `diff` moved independently.** The subject with the lowest rate at the time,

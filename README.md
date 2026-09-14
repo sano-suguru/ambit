@@ -532,16 +532,10 @@ node src/cli/main.ts check src --coverage
 ```
 
 That last command needs nothing prepared — it checks Ambit's own source, and
-exit 0 is the fastest evidence a change did what it claimed:
-
-```console
-warning: extractProject declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:55)
-warning: loadProjectConfig declares fs_read but calls something that could not be resolved (checker/backend/legacy-ts.ts:195)
-...
-files=40 functions=347 declared=14
-declared-by: jsdoc=14 config=0
-unknown-rate=38.9% (135/347 functions) boundary-rate=0.0% (0/345 functions)
-```
+exit 0 is the fastest evidence a change did what it claimed. It prints the
+warnings, a `files= functions= declared=` summary, and with `--coverage` the
+unknown rate, the skipped nodes and the unresolved names; the current figures are
+in [docs/status.md](docs/status.md).
 
 `pnpm test`, `pnpm exec tsc --noEmit` and `biome ci .` are the rest of the
 gate; [AGENTS.md](AGENTS.md) is the working agreement, including what belongs
