@@ -198,7 +198,13 @@ exit: when it fires, the question is decided, the answer goes in the
   observed on this repository
   ([2026-09-13](measurements/2026-09-13-resident-workload.md)) fires none of
   these: on 49 files, whole rebuilds are call 62%, bash 75%, git proxy 93% of
-  the summed re-check of the batches it could classify and measure.
+  the summed re-check of the batches it could classify and measure. A synthetic
+  per-shape run on drizzle-orm, immich and outline
+  ([2026-09-14](measurements/2026-09-14-resident-large-workload.md)) does not fire
+  them either: it shows `createProgram` + `getTypeChecker` at 88–95% of a small
+  update (1.3–4.9 s) on the two dependency-heavy subjects, but measures no
+  frequencies, and TypeScript reports `structureIsReused: Not` on every leaf
+  edit there — why is the open part of the third condition.
 
 - **Whether a project file outside the checked root must rebuild everything.**
   §6.2 says it must: nothing under the root reaches it through a held edge, and

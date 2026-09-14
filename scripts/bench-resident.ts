@@ -3,7 +3,8 @@
  * against a cold `analyze()`, per subject and per mutation.
  *
  *     node scripts/bench-resident.ts [--subjects a,b] [--mutations x,y]
- *         [--iterations N] [--warmup W] [--immich <checkout>] [--out file.json]
+ *         [--scenarios s,t] [--iterations N] [--warmup W]
+ *         [--immich <checkout>] [--outline <checkout>] [--out file.json]
  *
  * **What it compares.** For one subject and one mutation, five scenarios, each
  * in a child process of its own so that `maxRSS` is that scenario's peak and
@@ -64,8 +65,22 @@ const scriptPath = fileURLToPath(import.meta.url);
 
 /** immich at the revision `docs/measurements/2026-09-11-second-third-party-validation-immich.md` used. */
 const IMMICH_COMMIT = "2a626220415ea4f22da6846e26d37852664254bf";
+/** outline at the revision `docs/measurements/2026-09-11-third-third-party-validation-outline.md` used. */
+const OUTLINE_COMMIT = "35dd15b9718bcb8e547b86c1428d55170b49250b";
 
-const MUTATIONS = ["leaf", "hub", "jsdoc", "config", "addition", "tsconfig"] as const;
+const MUTATIONS = [
+  "leaf",
+  "hub",
+  "jsdoc",
+  "config",
+  "addition",
+  "tsconfig",
+  // Added for the large-subject workload run; not part of phase 5's six.
+  "deletion",
+  "outside-root",
+  "leaf-rotate",
+  "alternate",
+] as const;
 type MutationKind = (typeof MUTATIONS)[number];
 const SCENARIOS = ["cold", "full", "partial", "full-noold", "partial-noold"] as const;
 type Scenario = (typeof SCENARIOS)[number];
@@ -77,6 +92,12 @@ interface SubjectSpec {
   readonly what: string;
   /** Build a fresh copy under `dir`; returns the analysis root inside it. */
   readonly prepare: (dir: string) => string;
+  /**
+   * Copy-relative directory holding tsconfig project files outside the
+   * analysis root, for the `outside-root` mutation. Absent when the root is the
+   * whole project.
+   */
+  readonly outsideRootDir?: string;
 }
 
 function copy(from: string, to: string): void {
@@ -90,7 +111,7 @@ function writePackageJsonIfAbsent(dir: string): void {
   }
 }
 
-function subjects(immich: string | undefined): readonly SubjectSpec[] {
+function subjects(immich: string | undefined, outline: string | undefined): readonly SubjectSpec[] {
   const corpus = new Map(ensureCorpus().map((target) => [target.name, target] as const));
   const corpusSubject = (name: string, what: string): SubjectSpec => {
     const target = corpus.get(name);
@@ -109,6 +130,7 @@ function subjects(immich: string | undefined): readonly SubjectSpec[] {
     {
       name: "ambit-src",
       what: "this repository's src/, with its own tsconfig (src + test) and node_modules",
+      outsideRootDir: "test",
       prepare(dir) {
         for (const entry of ["src", "test", "tsconfig.json", "package.json", "pnpm-lock.yaml"]) {
           copy(path.join(repoRoot, entry), path.join(dir, entry));
@@ -134,6 +156,7 @@ function subjects(immich: string | undefined): readonly SubjectSpec[] {
     list.push({
       name: "immich-server",
       what: `immich server/src @${IMMICH_COMMIT.slice(0, 8)}, dependencies installed`,
+      outsideRootDir: "test",
       prepare(dir) {
         const server = path.join(immich, "server");
         for (const entry of ["src", "test", "tsconfig.json", "package.json"]) {
@@ -141,6 +164,28 @@ function subjects(immich: string | undefined): readonly SubjectSpec[] {
         }
         fs.symlinkSync(path.join(server, "node_modules"), path.join(dir, "node_modules"), "dir");
         return path.join(dir, "src");
+      },
+    });
+  }
+  if (outline !== undefined) {
+    list.push({
+      name: "outline-server",
+      what: `outline server/ @${OUTLINE_COMMIT.slice(0, 8)} under the root tsconfig (app, shared, plugins), dependencies installed`,
+      outsideRootDir: "shared",
+      prepare(dir) {
+        for (const entry of [
+          "app",
+          "server",
+          "shared",
+          "plugins",
+          "tsconfig.json",
+          "package.json",
+          "vitest.d.ts",
+        ]) {
+          copy(path.join(outline, entry), path.join(dir, entry));
+        }
+        fs.symlinkSync(path.join(outline, "node_modules"), path.join(dir, "node_modules"), "dir");
+        return path.join(dir, "server");
       },
     });
   }
@@ -152,6 +197,10 @@ function subjects(immich: string | undefined): readonly SubjectSpec[] {
 /** What the selection child decided, in root-relative and copy-relative terms. */
 interface MutationPlan {
   readonly leaf: string;
+  /** Up to five leaves around the median, for `leaf-rotate`; `leaf` is among them. */
+  readonly leaves: readonly string[];
+  /** Copy-relative; verified to force a whole rebuild when edited. */
+  readonly outsideRoot: string | undefined;
   readonly hub: string;
   readonly hubClosure: number;
   readonly jsdoc: { readonly file: string; readonly line: number; readonly id: string };
@@ -171,6 +220,10 @@ interface Applied {
 
 const LEAF_MARK = "// ambit-bench";
 
+function deletionFile(variant: number): string {
+  return `__ambit_bench_deleted_${variant}.ts`;
+}
+
 /** @effects fs_read, fs_write */
 function applyMutation(
   kind: MutationKind,
@@ -187,7 +240,37 @@ function applyMutation(
     originals.set(file, text);
     return text;
   };
+  const appendFunction = (file: string): void => {
+    fs.writeFileSync(
+      file,
+      `${original(file)}\n${LEAF_MARK}\nexport function __ambitBench(): number { return ${variant}; }\n`,
+    );
+  };
   switch (kind) {
+    case "leaf-rotate": {
+      const rel = plan.leaves[variant % plan.leaves.length] ?? plan.leaf;
+      appendFunction(path.join(root, rel));
+      return { changes: [{ kind: "changed", path: rel }] };
+    }
+    case "alternate":
+      // Even variants: a code edit to the leaf; odd: the contract-only toggle.
+      // The toggle reads its own parity, so it is handed the odd variants'
+      // ordinal — passing `variant` itself would write `fs_write` every time.
+      return variant % 2 === 0
+        ? applyMutation("leaf", plan, copyDir, root, originals, variant)
+        : applyMutation("jsdoc", plan, copyDir, root, originals, (variant - 1) / 2);
+    case "deletion": {
+      // `scenarioChild` created one file per iteration before the session opened.
+      const rel = deletionFile(variant);
+      fs.rmSync(path.join(root, rel));
+      return { changes: [{ kind: "deleted", path: rel }] };
+    }
+    case "outside-root": {
+      if (plan.outsideRoot === undefined) throw new Error("no outside-root project file");
+      appendFunction(path.join(copyDir, plan.outsideRoot));
+      // A caller can only report in-root paths; the session must find this itself.
+      return { changes: [] };
+    }
     case "leaf":
     case "hub": {
       const rel = kind === "leaf" ? plan.leaf : plan.hub;
@@ -314,8 +397,40 @@ async function selectChild(subject: SubjectSpec, copyDir: string): Promise<Mutat
       .filter((file) => (store.reverseImports.get(file)?.size ?? 0) === 0)
       .map((file) => ({ file, functions: store.files.get(file)?.extracted?.functions.length ?? 0 }))
       .toSorted((a, b) => a.functions - b.functions || a.file.localeCompare(b.file));
-    const leaf = leaves[Math.floor((leaves.length - 1) / 2)]?.file;
+    const middle = Math.floor((leaves.length - 1) / 2);
+    const leaf = leaves[middle]?.file;
     if (leaf === undefined) throw new Error(`${subject.name}: no file without importers`);
+    const rotation = leaves.slice(Math.max(0, middle - 2), middle + 3).map((entry) => entry.file);
+
+    // An outside-root project file, verified by editing it and seeing the
+    // session refuse partial work — a file the program does not load would
+    // measure a no-op.
+    let outsideRoot: string | undefined;
+    if (subject.outsideRootDir !== undefined) {
+      const candidates = listTs(path.join(copyDir, subject.outsideRootDir))
+        .map((file) => path.relative(copyDir, file))
+        .filter((rel) => !/(^|\/)(fixtures|__mocks__)\//.test(rel))
+        .toSorted();
+      const ordered = [
+        ...candidates.slice(Math.floor(candidates.length / 2)),
+        ...candidates.slice(0, Math.floor(candidates.length / 2)),
+      ];
+      for (const rel of ordered.slice(0, 10)) {
+        const file = path.join(copyDir, rel);
+        const text = fs.readFileSync(file, "utf8");
+        fs.writeFileSync(
+          file,
+          `${text}\n${LEAF_MARK}\nexport function __ambitBench(): number { return 0; }\n`,
+        );
+        const result = await session.update([]);
+        fs.writeFileSync(file, text);
+        await session.update([]);
+        if (result.ok && result.full) {
+          outsideRoot = rel;
+          break;
+        }
+      }
+    }
 
     const hubs = [...store.files.keys()]
       .filter((file) => !file.endsWith(".d.ts"))
@@ -374,6 +489,8 @@ async function selectChild(subject: SubjectSpec, copyDir: string): Promise<Mutat
     if (tsconfig === undefined) throw new Error(`${subject.name}: no tsconfig.json`);
     return {
       leaf,
+      leaves: rotation,
+      outsideRoot,
       hub: hub.file,
       hubClosure: hub.closure,
       jsdoc,
@@ -403,6 +520,17 @@ function importerClosureSize(file: string, store: ResidentStore): number {
     }
   }
   return reached.size;
+}
+
+function listTs(dir: string): string[] {
+  const found: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === "node_modules") continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...listTs(full));
+    else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith(".d.ts")) found.push(full);
+  }
+  return found;
 }
 
 function findUp(start: string, name: string, stopAt: string): string | undefined {
@@ -544,6 +672,14 @@ async function scenarioChild(
   // The config mutation needs a config before the session opens: creating one
   // afterwards would be a file addition, not a config edit.
   if (kind === "config") applyMutation(kind, plan, copyDir, root, originals, 0);
+  if (kind === "deletion") {
+    for (let n = 1; n <= warmup + iterations; n += 1) {
+      fs.writeFileSync(
+        path.join(root, deletionFile(n)),
+        `export function __ambitBenchDeleted${n}(): number { return ${n}; }\n`,
+      );
+    }
+  }
   const runs: RunRecord[] = [];
 
   if (scenario === "cold") {
@@ -637,13 +773,23 @@ function median(runs: readonly RunRecord[], key: keyof RunRecord): number | unde
 /** @effects fs_read, fs_write, process */
 async function parent(): Promise<void> {
   const immich = argValue("--immich");
+  const outline = argValue("--outline");
+  if (outline !== undefined) {
+    const head = spawnSync("git", ["-C", outline, "rev-parse", "HEAD"], { encoding: "utf8" });
+    if (head.stdout.trim() !== OUTLINE_COMMIT) {
+      throw new Error(
+        `--outline ${outline} is at ${head.stdout.trim()}, expected ${OUTLINE_COMMIT}`,
+      );
+    }
+  }
   if (immich !== undefined) {
     const head = spawnSync("git", ["-C", immich, "rev-parse", "HEAD"], { encoding: "utf8" });
     if (head.stdout.trim() !== IMMICH_COMMIT) {
       throw new Error(`--immich ${immich} is at ${head.stdout.trim()}, expected ${IMMICH_COMMIT}`);
     }
   }
-  const all = subjects(immich);
+  const all = subjects(immich, outline);
+  const wantedScenarios = (argValue("--scenarios")?.split(",") ?? [...SCENARIOS]) as Scenario[];
   const wantedSubjects = argValue("--subjects")?.split(",");
   const wantedMutations = (argValue("--mutations")?.split(",") ?? [...MUTATIONS]) as MutationKind[];
   const warmup = Number(argValue("--warmup") ?? 2);
@@ -660,19 +806,25 @@ async function parent(): Promise<void> {
       mode: "select",
       subject: subject.name,
       immich,
+      outline,
       dir: selectDir,
     }) as MutationPlan;
     fs.rmSync(selectDir, { recursive: true, force: true });
     plans[subject.name] = plan;
     process.stderr.write(`[${subject.name}] ${JSON.stringify(plan)}\n`);
     for (const kind of wantedMutations) {
-      for (const scenario of SCENARIOS) {
+      if (kind === "outside-root" && plan.outsideRoot === undefined) {
+        process.stderr.write(`[${subject.name}] outside-root: no project file outside the root\n`);
+        continue;
+      }
+      for (const scenario of wantedScenarios) {
         const dir = tempDir(subject.name);
         const started = performance.now();
         const result = runChild({
           mode: "scenario",
           subject: subject.name,
           immich,
+          outline,
           dir,
           plan,
           kind,
@@ -752,6 +904,7 @@ if (childIndex === -1) {
     mode: "select" | "scenario";
     subject: string;
     immich?: string;
+    outline?: string;
     dir: string;
     plan?: MutationPlan;
     kind?: MutationKind;
@@ -759,7 +912,9 @@ if (childIndex === -1) {
     warmup?: number;
     iterations?: number;
   };
-  const subject = subjects(payload.immich).find((candidate) => candidate.name === payload.subject);
+  const subject = subjects(payload.immich, payload.outline).find(
+    (candidate) => candidate.name === payload.subject,
+  );
   if (subject === undefined) throw new Error(`unknown subject ${payload.subject}`);
   const output =
     payload.mode === "select"
