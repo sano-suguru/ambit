@@ -70,7 +70,9 @@ describe("AMB-I002: why ambit init cannot propose a contract", () => {
     expect(route("callsExternalModule")).toContain("tallies separately");
 
     expect(route("callsMissingImport")).toContain("import-binding");
-    expect(route("callsMissingImport")).toContain("doesNotExist (app.ts:");
+    // No operation name: the local spelling is all an unfollowable binding
+    // has, and it is not the export's identity. The location still points at it.
+    expect(route("callsMissingImport")).toMatch(/^\(app\.ts:\d+\) import-binding/);
     expect(route("callsProjectAmbient")).toContain("ambient-declaration");
     expect(route("callsProjectAmbient")).toContain(".d.ts belonging to this project");
 

@@ -428,7 +428,7 @@ after it is one call — its qualified name where one could be built, its
 | Reason | What it implies |
 |---|---|
 | `external-module` | Declared in a package under `node_modules`. A stub for that package resolves it; `@boundary reason="<package>"` isolates it instead, which `--coverage` tallies separately from analysis (§4.3) |
-| `import-binding` | An import binding that follows to no declaration — check the module specifier or the named export first, then the two routes above |
+| `import-binding` | An import binding that follows to no declaration — check the module specifier or the named export first. No stub is matched against it, not even one keyed on the same spelling; once the import resolves, the reason it then reports decides the route |
 | `ambient-declaration` | Declared in a `.d.ts` belonging to this project: a contract written on that declaration resolves it |
 | `builtin-method` | A TypeScript default-lib method Ambit's own tables do not name. **A gap in Ambit**, not in the code being checked |
 | `callback-parameter` | A callback parameter called directly. §4.2 rule 4 infers its effects from the actual argument at each call site, so the callers decide it |

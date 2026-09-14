@@ -822,6 +822,7 @@ describe("resident session: a failed update is a failure, not an answer", () => 
       "direct-import.ts",
       "index.ts",
       "missing-module-import.ts",
+      "missing-module-shadowed-names.ts",
     ];
     const contents = sources.map((file) => [file, readText(path.join(dir, file))] as const);
 

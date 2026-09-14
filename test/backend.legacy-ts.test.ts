@@ -508,11 +508,30 @@ describe("legacyTsBackend.extractProject (cross-module alias resolution)", () =>
     expect(call?.unresolvedReason).toBe("import-binding");
   });
 
-  it("still names a call through an unresolvable import binding for stub matching (import-binding is a fallback reason, not an early return)", async () => {
+  it("gives a call through an unresolvable import binding no name, so the local spelling cannot match a stub", async () => {
     const { files } = await extractFixture(CROSS_MODULE_ROOT);
     const fn = findFn(files, "missing-module-import.ts#callsMissingModuleImport");
     const call = fn?.calls.find((c) => !c.resolvedCallee);
-    expect(call?.calleeQualifiedName).toBe("doesNotExist");
+    expect(call?.calleeQualifiedName).toBeUndefined();
+  });
+
+  it("does not name an unresolvable named import `fetch` as the global `fetch`", async () => {
+    // The binding's spelling matches the bundled table's bare `fetch` row, but
+    // nothing ties this binding to the global: its module never resolved.
+    const { files } = await extractFixture(CROSS_MODULE_ROOT);
+    const fn = findFn(files, "missing-module-shadowed-names.ts#pureCallsUnresolvedFetch");
+    expect(fn?.calls).toHaveLength(1);
+    expect(fn?.calls[0]?.calleeQualifiedName).toBeUndefined();
+    // Not `any-typed`, which the unresolved binding's error type would also satisfy.
+    expect(fn?.calls[0]?.unresolvedReason).toBe("import-binding");
+  });
+
+  it("does not name a construction through an unresolvable named import as the global constructor", async () => {
+    const { files } = await extractFixture(CROSS_MODULE_ROOT);
+    const fn = findFn(files, "missing-module-shadowed-names.ts#pureConstructsUnresolvedUrl");
+    expect(fn?.calls).toHaveLength(1);
+    expect(fn?.calls[0]?.calleeQualifiedName).toBeUndefined();
+    expect(fn?.calls[0]?.unresolvedReason).toBe("import-binding");
   });
 });
 
