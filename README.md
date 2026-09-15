@@ -488,7 +488,7 @@ you commit it.
      kind: import_statement
      has:
        field: source
-       regex: ^.ambit-ts/runtime/hono.$
+       regex: ^["\x27]ambit-ts/runtime/hono["\x27]$
    fix: ""
    ' .
    ```
@@ -518,7 +518,7 @@ you commit it.
      kind: import_statement
      has:
        field: source
-       regex: ^.ambit-ts/runtime/next.$
+       regex: ^["\x27]ambit-ts/runtime/next["\x27]$
    fix: import type { NextRequest } from "next/server"
    ' .
    ```
@@ -551,7 +551,7 @@ you commit it.
      kind: import_statement
      has:
        field: source
-       regex: ^.ambit-ts/runtime.$
+       regex: ^["\x27]ambit-ts/runtime["\x27]$
    fix: ""
    ' .
    ```
@@ -566,7 +566,7 @@ you commit it.
      kind: import_statement
      has:
        field: source
-       regex: ^.ambit-ts.$
+       regex: ^["\x27]ambit-ts["\x27]$
    fix: ""
    ' .
    ```
