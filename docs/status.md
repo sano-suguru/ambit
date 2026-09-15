@@ -34,6 +34,7 @@ announced in `CHANGELOG.md`. That is not the stability a 1.0 would claim.
 | `unknown` rate, Ambit's own source (`check src`) | 40.0% (169/422) | — |
 | Authority Ambit sees in a third-party backend's data layer ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)) | 940 stubbed call sites, up from 120 | — |
 | Third-party backends `ambit diff` is silent on when nothing changed | **3** — Unleash ([2026-09-11](measurements/2026-09-11-third-party-diff-validation.md)), immich ([2026-09-11](measurements/2026-09-11-second-third-party-validation-immich.md)), outline ([2026-09-11](measurements/2026-09-11-third-third-party-validation-outline.md)) | — |
+| Review value of `ambit diff` on real merged commits (Unleash, 9 commits, [2026-09-15](measurements/2026-09-15-diff-review-value-unleash.md)) | 17 reported increases: 0 useful, 16 noise, 1 wrong; 0/9 review decisions changed; 5/9 commits exit 1. The sample held no real effect-authority increase, so detection was not exercised | — |
 | `unknown` rate, second third-party backend (immich `server/src`, 3,191 functions) | 79.9% (2,550/3,191) | no target (see below) |
 | `unknown` rate, third third-party backend (outline `server`, 2,245 functions) | 72.8% (1,635/2,245) | no target (see below) |
 | Tests | 829 passing, 40 files | green |
