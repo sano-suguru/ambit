@@ -234,8 +234,9 @@ The line names the symbol from the repository root. Ambit cannot tell who wrote
 it, so name the file in `CODEOWNERS`. `--strict` and `@boundary` come last, if at
 all; [CLI and CI](#cli-and-ci) says when.
 
-Contracts are JSDoc, so `npm remove ambit-ts` leaves ordinary TypeScript that
-still type-checks and runs.
+Contracts are JSDoc, so once the imports are gone `npm remove ambit-ts` leaves
+ordinary TypeScript that still type-checks and runs —
+[Removing Ambit](#removing-ambit) has the steps.
 
 ## Where this sits
 
@@ -449,6 +450,148 @@ carries the callers it would affect, so the reader can tell "the contract was
 wrong" from "the code was wrong". Ambit does not invent the other patch, the one
 that keeps the contract and rewrites the code; `ambit diff` is what keeps the
 widening one from being applied in silence.
+
+## Removing Ambit
+
+The JSDoc contracts can stay. Without Ambit they are ordinary comments.
+
+What has to go is every import from the package, the files Ambit's setup
+created, and the package itself. Run the blocks below from the project root, in
+order. `test/e2e.removal.test.ts` runs them as written against an installed
+application.
+
+The rewrites use [ast-grep](https://ast-grep.github.io/). They handle the forms
+this README shows: `.ts` files, hook installs written as their own statements,
+and handlers that return data rather than a `Response`. Review the diff before
+you commit it.
+
+1. Remove the Hono adapter. Each `ambitHandler(spec, handler, decode)` is
+   replaced with the plain Hono handler it stands for.
+
+   ```sh
+   npx --yes --package @ast-grep/cli@0.45.3 ast-grep scan --update-all --globs '!**/node_modules/**' --inline-rules '
+   id: unwrap-ambit-handler
+   language: TypeScript
+   rule:
+     pattern: ambitHandler($SPEC, $HANDLER, $DECODE)
+   fix: |-
+     async (c) => {
+       const decode: (
+         context: typeof c,
+       ) => Readonly<Parameters<typeof $HANDLER>> | Promise<Readonly<Parameters<typeof $HANDLER>>> = $DECODE;
+       return Response.json(await $HANDLER(...(await decode(c))));
+     }
+   ---
+   id: drop-ambit-hono-import
+   language: TypeScript
+   rule:
+     kind: import_statement
+     has:
+       field: source
+       regex: ^["\x27]ambit-ts/runtime/hono["\x27]$
+   fix: ""
+   ' .
+   ```
+
+2. Remove the Next.js adapter. Each `ambitRoute(spec, handler, decode)` is
+   replaced with the plain Route Handler it stands for, typed with Next.js's
+   `NextRequest`.
+
+   ```sh
+   npx --yes --package @ast-grep/cli@0.45.3 ast-grep scan --update-all --globs '!**/node_modules/**' --inline-rules '
+   id: unwrap-ambit-route
+   language: TypeScript
+   rule:
+     pattern: ambitRoute($SPEC, $HANDLER, $DECODE)
+   fix: |-
+     async (request: NextRequest, context: { params: Promise<Record<string, string | string[]>> }) => {
+       const decode: (
+         request: NextRequest,
+         context: { params: Promise<Record<string, string | string[]>> },
+       ) => Readonly<Parameters<typeof $HANDLER>> | Promise<Readonly<Parameters<typeof $HANDLER>>> = $DECODE;
+       return Response.json(await $HANDLER(...(await decode(request, context))));
+     }
+   ---
+   id: replace-ambit-next-import
+   language: TypeScript
+   rule:
+     kind: import_statement
+     has:
+       field: source
+       regex: ^["\x27]ambit-ts/runtime/next["\x27]$
+   fix: import type { NextRequest } from "next/server"
+   ' .
+   ```
+
+3. Remove `ambit-ts/runtime`. Each `withAmbit(spec, handler)` becomes
+   `handler`. The hook installs and `setUnscopedPolicy` calls are deleted.
+
+   ```sh
+   npx --yes --package @ast-grep/cli@0.45.3 ast-grep scan --update-all --globs '!**/node_modules/**' --inline-rules '
+   id: unwrap-with-ambit
+   language: TypeScript
+   rule:
+     pattern: withAmbit($SPEC, $HANDLER)
+   fix: $HANDLER
+   ---
+   id: drop-ambit-hooks
+   language: TypeScript
+   rule:
+     kind: expression_statement
+     has:
+       kind: call_expression
+       has:
+         field: function
+         regex: ^(installFetchHook|installFsHook|installChildProcessHook|installPgHook|setUnscopedPolicy)$
+   fix: ""
+   ---
+   id: drop-ambit-runtime-import
+   language: TypeScript
+   rule:
+     kind: import_statement
+     has:
+       field: source
+       regex: ^["\x27]ambit-ts/runtime["\x27]$
+   fix: ""
+   ' .
+   ```
+
+4. Remove the `ambit-ts` import. This deletes only the import statements.
+
+   ```sh
+   npx --yes --package @ast-grep/cli@0.45.3 ast-grep scan --update-all --globs '!**/node_modules/**' --inline-rules '
+   id: drop-ambit-types-import
+   language: TypeScript
+   rule:
+     kind: import_statement
+     has:
+       field: source
+       regex: ^["\x27]ambit-ts["\x27]$
+   fix: ""
+   ' .
+   ```
+
+   Code that used the diagnostic types now fails to type-check. Fix it by hand.
+   Delete the code if it only read Ambit's output.
+
+5. Delete the config file. Only the Ambit CLI reads it, through
+   `ambit-ts/config`.
+
+   ```sh
+   rm -f ambit.config.ts
+   ```
+
+6. Delete the CI workflow and the approval ledger. Both were created for Ambit.
+
+   ```sh
+   rm -f .github/workflows/ambit.yml ambit.approvals.md
+   ```
+
+7. Remove the package.
+
+   ```sh
+   npm remove ambit-ts
+   ```
 
 ## What Ambit does not guarantee
 
