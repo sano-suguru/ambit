@@ -453,19 +453,20 @@ widening one from being applied in silence.
 
 ## Removing Ambit
 
-The JSDoc contracts can stay: without Ambit they are comments. What has to go
-is every import from the package — one step per entry point it exports — then
-the files that exist only for Ambit, then the package. Run the blocks from the
-project root, in order. `test/e2e.removal.test.ts` runs them as written against
-an installed application, and fails if any one of them is left out.
+The JSDoc contracts can stay. Without Ambit they are ordinary comments.
 
-The rewrites use [ast-grep](https://ast-grep.github.io/) and cover the
-registrations as this README writes them: `.ts` files, hooks installed as
-statements of their own, and handlers that return data rather than a
-`Response`. Review the diff before committing it.
+What has to go is every import from the package, the files Ambit's setup
+created, and the package itself. Run the blocks below from the project root, in
+order. `test/e2e.removal.test.ts` runs them as written against an installed
+application.
 
-1. `ambit-ts/runtime/hono`: each `ambitHandler(spec, handler, decode)` becomes
-   the Hono handler it builds.
+The rewrites use [ast-grep](https://ast-grep.github.io/). They handle the forms
+this README shows: `.ts` files, hook installs written as their own statements,
+and handlers that return data rather than a `Response`. Review the diff before
+you commit it.
+
+1. Remove the Hono adapter. Each `ambitHandler(spec, handler, decode)` is
+   replaced with the plain Hono handler it stands for.
 
    ```sh
    npx --yes --package @ast-grep/cli@0.45.3 ast-grep scan --update-all --globs '!**/node_modules/**' --inline-rules '
@@ -484,13 +485,17 @@ statements of their own, and handlers that return data rather than a
    id: drop-ambit-hono-import
    language: TypeScript
    rule:
-     pattern: import { $$$NAMES } from "ambit-ts/runtime/hono"
+     kind: import_statement
+     has:
+       field: source
+       regex: ^.ambit-ts/runtime/hono.$
    fix: ""
    ' .
    ```
 
-2. `ambit-ts/runtime/next`: each `ambitRoute(spec, handler, decode)` becomes the
-   Route Handler it builds, typed with Next.js's own `NextRequest`.
+2. Remove the Next.js adapter. Each `ambitRoute(spec, handler, decode)` is
+   replaced with the plain Route Handler it stands for, typed with Next.js's
+   `NextRequest`.
 
    ```sh
    npx --yes --package @ast-grep/cli@0.45.3 ast-grep scan --update-all --globs '!**/node_modules/**' --inline-rules '
@@ -510,13 +515,16 @@ statements of their own, and handlers that return data rather than a
    id: replace-ambit-next-import
    language: TypeScript
    rule:
-     pattern: import { $$$NAMES } from "ambit-ts/runtime/next"
+     kind: import_statement
+     has:
+       field: source
+       regex: ^.ambit-ts/runtime/next.$
    fix: import type { NextRequest } from "next/server"
    ' .
    ```
 
-3. `ambit-ts/runtime`: `withAmbit(spec, handler)` becomes `handler`, and the
-   hook installs and `setUnscopedPolicy` calls are deleted.
+3. Remove `ambit-ts/runtime`. Each `withAmbit(spec, handler)` becomes
+   `handler`. The hook installs and `setUnscopedPolicy` calls are deleted.
 
    ```sh
    npx --yes --package @ast-grep/cli@0.45.3 ast-grep scan --update-all --globs '!**/node_modules/**' --inline-rules '
@@ -540,27 +548,46 @@ statements of their own, and handlers that return data rather than a
    id: drop-ambit-runtime-import
    language: TypeScript
    rule:
-     pattern: import { $$$NAMES } from "ambit-ts/runtime"
+     kind: import_statement
+     has:
+       field: source
+       regex: ^.ambit-ts/runtime.$
    fix: ""
    ' .
    ```
 
-4. `ambit-ts/config`: the config file is read only by the CLI.
+4. Remove the `ambit-ts` import. This deletes only the import statements.
+
+   ```sh
+   npx --yes --package @ast-grep/cli@0.45.3 ast-grep scan --update-all --globs '!**/node_modules/**' --inline-rules '
+   id: drop-ambit-types-import
+   language: TypeScript
+   rule:
+     kind: import_statement
+     has:
+       field: source
+       regex: ^.ambit-ts.$
+   fix: ""
+   ' .
+   ```
+
+   Code that used the diagnostic types now fails to type-check. Fix it by hand.
+   Delete the code if it only read Ambit's output.
+
+5. Delete the config file. Only the Ambit CLI reads it, through
+   `ambit-ts/config`.
 
    ```sh
    rm -f ambit.config.ts
    ```
 
-5. `ambit-ts`: the diagnostic types serve only code that reads Ambit's own
-   output, so the files importing them go, and with them the CI workflow and the
-   approval ledger.
+6. Delete the CI workflow and the approval ledger. Both were created for Ambit.
 
    ```sh
-   grep -rlE --include='*.ts' --exclude-dir=node_modules "from ['\"]ambit-ts['\"]" . | xargs -r rm -f
    rm -f .github/workflows/ambit.yml ambit.approvals.md
    ```
 
-6. The package itself.
+7. Remove the package.
 
    ```sh
    npm remove ambit-ts

@@ -37,7 +37,7 @@ async function run(
   command: string,
   args: readonly string[],
   cwd: string,
-  timeout = 240_000,
+  timeout = 120_000,
 ): Promise<RunResult> {
   try {
     const { stdout, stderr } = await execFileAsync(command, [...args], {
@@ -91,6 +91,23 @@ async function exportedSpecifiers(): Promise<readonly string[]> {
     key === "." ? manifest.name : `${manifest.name}/${key.slice(2)}`,
   );
 }
+
+/**
+ * The part of `scripts/report.ts` that uses Ambit's diagnostic types. README
+ * removes only the import and leaves this code to the reader, because a file
+ * importing the types can hold code of the application's own — here
+ * `formatDuration`, which the application's tests use. Deleting this block is
+ * the one edit the test makes by hand, standing in for that reader.
+ */
+const REPORT_DIAGNOSTIC_CODE = `
+export function errorCount(ndjson: string): number {
+  return ndjson
+    .split("\\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Diagnostic)
+    .filter((record) => record.severity === "error").length;
+}
+`;
 
 const RATES = `{ "base": "USD", "rates": { "EUR": 0.92, "JPY": 151.3 } }\n`;
 
@@ -202,14 +219,10 @@ export const GET = ambitRoute(
 );
 `,
 
-  "scripts/ambit-report.ts": `import type { Diagnostic } from "ambit-ts";
-
-export function errorCount(ndjson: string): number {
-  return ndjson
-    .split("\\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as Diagnostic)
-    .filter((record) => record.severity === "error").length;
+  "scripts/report.ts": `import type { Diagnostic } from "ambit-ts";
+${REPORT_DIAGNOSTIC_CODE}
+export function formatDuration(ms: number): string {
+  return ms < 1000 ? \`\${ms}ms\` : \`\${(ms / 1000).toFixed(1)}s\`;
 }
 `,
 
@@ -237,7 +250,12 @@ jobs:
 import { test } from "node:test";
 import type { NextRequest } from "next/server";
 import { GET } from "../app/rates/route.ts";
+import { formatDuration } from "../scripts/report.ts";
 import { app } from "../src/app.ts";
+
+test("formats a duration", () => {
+  assert.equal(formatDuration(1500), "1.5s");
+});
 
 test("serves the rate table", async () => {
   const response = await app.request("/rates");
@@ -415,6 +433,12 @@ async function runSteps(appDir: string, steps: readonly RemovalStep[]): Promise<
   }
 }
 
+/** The reader's hand edit README asks for after the import is gone. */
+async function removeDiagnosticCode(appDir: string): Promise<void> {
+  const file = path.join(appDir, "scripts", "report.ts");
+  await fs.writeFile(file, (await fs.readFile(file, "utf8")).replace(REPORT_DIAGNOSTIC_CODE, ""));
+}
+
 describe("removal: README's procedure takes Ambit out of an application", () => {
   let workspace: string;
   let appDir: string;
@@ -483,7 +507,7 @@ describe("removal: README's procedure takes Ambit out of an application", () => 
         ),
       ),
     );
-  }, 600_000);
+  }, 300_000);
 
   afterAll(async () => {
     if (workspace) await fs.rm(workspace, { recursive: true, force: true });
@@ -500,15 +524,16 @@ describe("removal: README's procedure takes Ambit out of an application", () => 
     ]);
     expect(steps.length).toBeGreaterThan(0);
 
-    // A step handles a subpath when its prose names it as the entry point it
-    // removes. The root specifier is a prefix of every other one, so the match
-    // is on the whole backticked name.
-    const handled = new Set(
-      steps.flatMap((step) =>
-        [...step.prose.matchAll(/`(ambit-ts(?:\/[\w/]+)?)`/g)].map((m) => m[1]),
-      ),
-    );
-    for (const specifier of specifiers) expect(handled, specifier).toContain(specifier);
+    // A step handles a subpath when its prose or its command names it. The
+    // root specifier is a prefix of every other one, so a name only counts
+    // where no further path segment follows it.
+    for (const specifier of specifiers) {
+      const named = new RegExp(`(?<![\\w/-])${specifier}(?![\\w/-])`);
+      expect(
+        steps.some((step) => named.test(step.prose) || named.test(step.command)),
+        specifier,
+      ).toBe(true);
+    }
 
     // Without this, "zero imports afterwards" could hold for a subpath the
     // application never imported in the first place.
@@ -534,16 +559,29 @@ describe("removal: README's procedure takes Ambit out of an application", () => 
     expect(typecheck.exitCode, typecheck.stdout).toBe(0);
     const ownTests = await run("npm", ["test"], appDir);
     expect(ownTests.exitCode, ownTests.stdout + ownTests.stderr).toBe(0);
-  }, 240_000);
+  }, 120_000);
 
   it("removes every import, and leaves an application that type-checks, passes its tests, and answers as before", async () => {
     await writeFiles(appDir, installed);
     await runSteps(appDir, steps);
-
     expect(await ambitImports(appDir)).toEqual([]);
+
+    // README removed the import and left the code that used it. The file is
+    // still there with the application's own function in it, and the type
+    // errors README tells the reader to expect are confined to that file.
+    const report = await fs.readFile(path.join(appDir, "scripts", "report.ts"), "utf8");
+    expect(report).toContain("export function formatDuration");
+    const typecheck = await run(path.join("node_modules", ".bin", "tsc"), ["--noEmit"], appDir);
+    expect(typecheck.exitCode).not.toBe(0);
+    const erroredFiles = new Set(
+      [...typecheck.stdout.matchAll(/^(\S+)\(\d+,\d+\): error/gm)].map((m) => m[1]),
+    );
+    expect([...erroredFiles]).toEqual(["scripts/report.ts"]);
+
+    await removeDiagnosticCode(appDir);
     expect(await removalFailures(appDir, baseline)).toEqual([]);
     fullProcedurePassed = true;
-  }, 600_000);
+  }, 120_000);
 
   it("fails removal when any one step is left out", async () => {
     // Every check below must be one the whole procedure passes; otherwise a
@@ -555,11 +593,12 @@ describe("removal: README's procedure takes Ambit out of an application", () => 
         appDir,
         steps.filter((_, i) => i !== index),
       );
+      await removeDiagnosticCode(appDir);
       const failures = await removalFailures(appDir, baseline);
       expect(failures, `step ${index + 1} left out:\n${step.command}`).not.toEqual([]);
       console.log(
         `step ${index + 1} left out -> ${failures.map((f) => f.split("\n")[0]).join(" | ")}`,
       );
     }
-  }, 1_200_000);
+  }, 120_000);
 });
